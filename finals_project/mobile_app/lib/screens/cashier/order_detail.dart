@@ -1,0 +1,799 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../components/components.dart';
+import '../../design/tokens.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/mock_data.dart';
+import '../../utils/animations.dart';
+import '../../app_router.dart';
+import '../../models/order.dart';
+
+/// The Order Detail screen — shared between Cashier and Production.
+///
+/// Shows full order info, status timeline, customer info,
+/// production details, payment, and contextual actions.
+class OrderDetailScreen extends StatelessWidget {
+  const OrderDetailScreen({super.key, required this.orderId});
+
+  final String orderId;
+
+  Order? get _order {
+    try {
+      return mockOrders.firstWhere((o) => o.orderId == orderId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = _order;
+
+    if (order == null) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Order Not Found'),
+          backgroundColor: AppTheme.surface,
+          foregroundColor: AppTheme.onSurface,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        body: const Center(
+          child: Text('Order not found'),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              pinned: true,
+              backgroundColor: AppTheme.surface,
+              foregroundColor: AppTheme.onSurface,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Text('Order ${order.orderId}'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.share_outlined),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Share order - coming soon'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  tooltip: 'Share',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onPressed: () => _showMoreMenu(context),
+                  tooltip: 'More',
+                ),
+              ],
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              sliver: SliverList.list(
+                children: [
+                  StaggeredFadeIn(
+                    stagger: const Duration(milliseconds: 80),
+                    duration: const Duration(milliseconds: 350),
+                    children: [
+                      // Hero job ticket card
+                      PfJobTicket(order: order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Status timeline
+                      _buildStatusTimeline(context, order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Customer info
+                      _buildCustomerInfo(context, order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Order specifications
+                      _buildOrderSpecs(context, order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Payment summary
+                      _buildPaymentSummary(context, order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Actions
+                      _buildActions(context, order),
+                      const SizedBox(height: AppSpacing.xl),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusTimeline(BuildContext context, Order order) {
+    return PfCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const PfSectionHeader(
+            title: 'Order Status',
+            subtitle: 'Production progress',
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _StatusTimeline(currentStatus: order.status),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomerInfo(BuildContext context, Order order) {
+    final canViewCustomer = order.customerName.isNotEmpty;
+
+    return PfCard(
+      onTap: canViewCustomer ? () => _viewCustomerDetails(context, order) : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const PfSectionHeader(
+                title: 'Customer',
+                subtitle: 'Contact information',
+              ),
+              const Spacer(),
+              if (canViewCustomer)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: AppRadius.rPill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_forward_rounded, size: 14, color: AppTheme.primary),
+                      const SizedBox(width: 2),
+                      Text('View profile', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              PfAvatar(
+                name: order.customerName,
+                size: 48,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      order.customerName,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    if (order.customerEmail != null) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        order.customerEmail!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+                      ),
+                    ],
+                    if (order.customerPhone != null) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        order.customerPhone!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.phone_rounded),
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Call ${order.customerName}'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                tooltip: 'Call',
+              ),
+              IconButton(
+                icon: const Icon(Icons.message_rounded),
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Message ${order.customerName}'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                tooltip: 'Message',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _viewCustomerDetails(BuildContext context, Order order) {
+    HapticFeedback.selectionClick();
+    // Show customer profile with their orders
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  PfAvatar(name: order.customerName, size: 60),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          order.customerName,
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        if (order.customerEmail != null)
+                          Text(
+                            order.customerEmail!,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+                          ),
+                        if (order.customerPhone != null)
+                          Text(
+                            order.customerPhone!,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              const PfSectionHeader(title: 'Customer Orders', subtitle: 'Previous and current orders'),
+              const SizedBox(height: AppSpacing.md),
+              // Show mock orders for this customer
+              ...mockOrders
+                  .where((o) => o.customerName == order.customerName)
+                  .map((o) => Column(
+                    children: [
+                      PfCard(
+                        onTap: () => Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(o.orderId)),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    o.orderId,
+                                    style: AppTheme.monoStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    o.itemType,
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PfStatusBadge.orderStatus(o.status, size: PfBadgeSize.small),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                  )),
+              const SizedBox(height: AppSpacing.lg),
+              PfButton.filled(
+                label: 'Close',
+                fullWidth: true,
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderSpecs(BuildContext context, Order order) {
+    return PfCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const PfSectionHeader(
+            title: 'Order Details',
+            subtitle: 'Specifications',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _SpecRow(label: 'Item Type', value: order.itemType),
+          _SpecRow(label: 'Quantity', value: '${order.quantity}'),
+          _SpecRow(
+            label: 'Layout File',
+            value: order.layoutFile,
+          ),
+          if (order.createdAt != null)
+            _SpecRow(
+              label: 'Order Date',
+              value: '${order.createdAt!.day}/${order.createdAt!.month}/${order.createdAt!.year}',
+            ),
+          _SpecRow(
+            label: 'Target Date',
+            value: '${order.targetDate.day}/${order.targetDate.month}/${order.targetDate.year}',
+          ),
+          _SpecRow(
+            label: 'Estimated Completion',
+            value: '${order.estimatedCompletion.day}/${order.estimatedCompletion.month}/${order.estimatedCompletion.year}',
+          ),
+          if (order.basedOn != null && order.basedOn!.isNotEmpty)
+            _SpecRow(
+              label: 'Based On',
+              value: order.basedOn!.map((e) => e.replaceAll('_', ' ')).join(', '),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentSummary(BuildContext context, Order order) {
+    final isPaid = order.paymentStatus == 'Paid';
+    final isPartial = order.paymentStatus == 'Partial';
+    final color = isPaid
+        ? AppTheme.statusCompleted
+        : isPartial
+            ? AppTheme.statusReadyForPickup
+            : AppTheme.statusUrgent;
+
+    return PfCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const PfSectionHeader(
+            title: 'Payment',
+            subtitle: 'Financial summary',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Total Amount', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                '₱${_formatAmount(order.paymentAmount)}',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: AppRadius.rMd,
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isPaid
+                      ? Icons.check_circle_rounded
+                      : isPartial
+                          ? Icons.hourglass_top_rounded
+                          : Icons.error_outline_rounded,
+                  size: AppIconSize.sm,
+                  color: color,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  'Payment: ${order.paymentStatus ?? 'Unknown'}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActions(BuildContext context, Order order) {
+    final canCancel = order.status == 'Pending' || order.status == 'Overdue' || order.status == 'Urgent';
+
+    return Column(
+      children: [
+        if (order.status == 'Ready for Pickup' || order.status == 'In Production')
+          PfButton.filled(
+            label: 'Mark as Completed',
+            icon: Icons.check_circle_rounded,
+            fullWidth: true,
+            size: PfButtonSize.large,
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Order marked as completed'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          ),
+        if (order.status == 'Pending') ...[
+          PfButton.filled(
+            label: 'Send to Production',
+            icon: Icons.send_rounded,
+            fullWidth: true,
+            size: PfButtonSize.large,
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Order sent to production'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        // Cancel Order button — only before production
+        if (canCancel) ...[
+          PfButton.outlined(
+            label: 'Cancel Order',
+            icon: Icons.cancel_outlined,
+            fullWidth: true,
+            size: PfButtonSize.large,
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              showDialog(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Cancel Order?'),
+                  content: Text('Order ${order.orderId} will be cancelled. This cannot be undone once sent to production.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Keep'),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Order cancelled'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: [
+            Expanded(
+              child: PfButton.outlined(
+                label: 'Edit Order',
+                icon: Icons.edit_rounded,
+                fullWidth: true,
+                size: PfButtonSize.large,
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Edit order - coming soon'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showMoreMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) => Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cancel_outlined),
+              title: const Text('Cancel Order'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                HapticFeedback.mediumImpact();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Cancel order - coming soon'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.content_copy_rounded),
+              title: const Text('Duplicate Order'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                HapticFeedback.selectionClick();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.report_outlined),
+              title: const Text('Report Issue'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                HapticFeedback.selectionClick();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatAmount(double amount) {
+    final parts = amount.toStringAsFixed(2).split('.');
+    final intPart = parts[0];
+    final decPart = parts[1];
+
+    final buffer = StringBuffer();
+    for (var i = 0; i < intPart.length; i++) {
+      if (i > 0 && (intPart.length - i) % 3 == 0) {
+        buffer.write(',');
+      }
+      buffer.write(intPart[i]);
+    }
+
+    return '${buffer.toString()}.$decPart';
+  }
+}
+
+class _StatusTimeline extends StatelessWidget {
+  const _StatusTimeline({required this.currentStatus});
+
+  final String currentStatus;
+
+  static const List<_TimelineStage> _stages = [
+    _TimelineStage('Pending', Icons.schedule_rounded, AppTheme.statusUrgent),
+    _TimelineStage('In Production', Icons.construction_rounded, AppTheme.statusInProduction),
+    _TimelineStage('Ready for Pickup', Icons.check_circle_outline_rounded, AppTheme.statusReadyForPickup),
+    _TimelineStage('Completed', Icons.task_alt_rounded, AppTheme.statusCompleted),
+  ];
+
+  int get _currentIndex {
+    switch (currentStatus) {
+      case 'Pending':
+        return 0;
+      case 'In Production':
+        return 1;
+      case 'Ready for Pickup':
+        return 2;
+      case 'Completed':
+        return 3;
+      default:
+        return 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (currentStatus == 'Cancelled') {
+      return Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppTheme.statusCancelled.withValues(alpha: 0.1),
+          borderRadius: AppRadius.rMd,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.cancel_rounded, color: AppTheme.statusCancelled),
+            const SizedBox(width: AppSpacing.md),
+            Text(
+              'This order has been cancelled',
+              style: TextStyle(color: AppTheme.statusCancelled, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (int i = 0; i < _stages.length; i++) ...[
+          _TimelineRow(
+            stage: _stages[i],
+            isActive: i <= _currentIndex,
+            isLast: i == _stages.length - 1,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _TimelineStage {
+  const _TimelineStage(this.label, this.icon, this.color);
+  final String label;
+  final IconData icon;
+  final Color color;
+}
+
+class _TimelineRow extends StatelessWidget {
+  const _TimelineRow({
+    required this.stage,
+    required this.isActive,
+    required this.isLast,
+  });
+
+  final _TimelineStage stage;
+  final bool isActive;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isActive ? stage.color : AppTheme.surfaceContainer;
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Vertical line + icon
+          Column(
+            children: [
+              AnimatedContainer(
+                duration: AppMotion.base,
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isActive ? color : Colors.transparent,
+                  border: Border.all(color: color, width: 2),
+                ),
+                child: Center(
+                  child: Icon(
+                    stage.icon,
+                    size: AppIconSize.sm,
+                    color: isActive ? Colors.white : color,
+                  ),
+                ),
+              ),
+              if (!isLast)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    color: AppTheme.surfaceContainer,
+                    margin: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: AppSpacing.md),
+          // Label
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm, bottom: AppSpacing.md),
+              child: Text(
+                stage.label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                  color: isActive ? AppTheme.onSurface : AppTheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpecRow extends StatelessWidget {
+  const _SpecRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

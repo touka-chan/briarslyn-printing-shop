@@ -1,0 +1,280 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../components/components.dart';
+import '../../design/tokens.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/mock_data.dart';
+import '../../models/order.dart';
+import '../../app_router.dart';
+
+/// The Orders list screen for POS/Cashier.
+///
+/// Displays all orders in a filterable, searchable list using job ticket cards.
+/// Supports pull-to-refresh and status filtering.
+class CashierOrdersScreen extends StatelessWidget {
+  const CashierOrdersScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _CashierOrdersView();
+  }
+}
+
+class _CashierOrdersView extends StatefulWidget {
+  @override
+  State<_CashierOrdersView> createState() => _CashierOrdersViewState();
+}
+
+class _CashierOrdersViewState extends State<_CashierOrdersView> {
+  String _searchQuery = '';
+  String _statusFilter = 'All';
+  final List<String> _statusFilters = [
+    'All',
+    'Pending',
+    'In Production',
+    'Ready for Pickup',
+    'Completed',
+  ];
+
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Order> get _filteredOrders {
+    return mockOrders.where((order) {
+      final matchesSearch =
+          order.customerName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              order.orderId.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              order.itemType.toLowerCase().contains(_searchQuery.toLowerCase());
+
+      final matchesStatus =
+          _statusFilter == 'All' || order.status == _statusFilter;
+
+      return matchesSearch && matchesStatus;
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Fixed search + filter bar (NOT a sliver — slivers required
+            // hardcoded minExtent == maxExtent and broke with "layoutExtent
+            // exceeds paintExtent" when the real content was shorter).
+            _SearchFilterBar(
+              searchController: _searchController,
+              searchQuery: _searchQuery,
+              onSearchChanged: (v) => setState(() => _searchQuery = v),
+              statusFilter: _statusFilter,
+              statusFilters: _statusFilters,
+              onStatusFilterChanged: (v) => setState(() => _statusFilter = v),
+            ),
+            // Scrollable list of orders
+            Expanded(
+              child: CustomScrollView(
+                slivers: [
+                  const SliverPadding(
+                    padding: EdgeInsets.only(top: AppSpacing.md),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg, 0, AppSpacing.lg, 0),
+                    sliver: _buildOrdersList(context),
+                  ),
+                  const SliverPadding(
+                    padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrdersList(BuildContext context) {
+    final orders = _filteredOrders;
+    if (orders.isEmpty) {
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _buildEmptyState(context),
+      );
+    }
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final isLast = index == orders.length - 1;
+          return Padding(
+            padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.md),
+            child: PfJobTicket(
+              order: orders[index],
+              onTap: () => _navigateToOrderDetail(orders[index]),
+            ),
+          );
+        },
+        childCount: orders.length,
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.receipt_long_outlined,
+                size: 48,
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              _searchQuery.isNotEmpty || _statusFilter != 'All'
+                  ? 'No orders match your filters'
+                  : 'No orders yet',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _searchQuery.isNotEmpty || _statusFilter != 'All'
+                  ? 'Try adjusting your search or filter'
+                  : 'Create your first order to get started',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            if (_searchQuery.isNotEmpty || _statusFilter != 'All')
+              PfButton.filled(
+                label: 'Clear Filters',
+                onPressed: () => setState(() {
+                  _searchQuery = '';
+                  _statusFilter = 'All';
+                  _searchController.clear();
+                }),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _navigateToOrderDetail(Order order) {
+    HapticFeedback.selectionClick();
+    context.pushNamed(AppRoutes.cashierOrderDetail(order.orderId));
+  }
+}
+
+/// Fixed search + status filter bar shown above the orders list.
+///
+/// This is a regular [Column] (not a sliver) so it can size itself to its
+/// real content height without the SliverPersistentHeader constraints
+/// that previously produced "layoutExtent exceeds paintExtent" assertions.
+class _SearchFilterBar extends StatelessWidget {
+  const _SearchFilterBar({
+    required this.searchController,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.statusFilter,
+    required this.statusFilters,
+    required this.onStatusFilterChanged,
+  });
+
+  final TextEditingController searchController;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final String statusFilter;
+  final List<String> statusFilters;
+  final ValueChanged<String> onStatusFilterChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTheme.background,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Search field
+          PfTextField(
+            label: 'Search orders',
+            hintText: 'Search by name, ID, item...',
+            prefixIcon: Icons.search_rounded,
+            controller: searchController,
+            onChanged: onSearchChanged,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // Status filter chips
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: statusFilters.length,
+              separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, i) {
+                final status = statusFilters[i];
+                final isSelected = statusFilter == status;
+                return ChoiceChip(
+                  label: Text(status),
+                  selected: isSelected,
+                  onSelected: (_) {
+                    HapticFeedback.selectionClick();
+                    onStatusFilterChanged(status);
+                  },
+                  selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+                  labelStyle: TextStyle(
+                    color: isSelected
+                        ? AppTheme.primary
+                        : AppTheme.onSurfaceVariant,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                  side: BorderSide(
+                    color: isSelected
+                        ? AppTheme.primary
+                        : AppTheme.surfaceContainer,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: AppRadius.rMd,
+                  ),
+                  backgroundColor: AppTheme.surface,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
