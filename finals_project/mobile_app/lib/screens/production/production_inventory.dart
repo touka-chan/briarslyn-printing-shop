@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../services/inventory_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/mock_data.dart';
 import '../../utils/animations.dart';
@@ -156,11 +158,12 @@ class _InventoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PfCard(
+    return PressScale(
       onTap: () {
         HapticFeedback.lightImpact();
         context.showModalSheet(builder: (context) => _ItemDetailSheet(item: item));
       },
+      child: PfCard(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,6 +286,7 @@ class _InventoryCard extends StatelessWidget {
           ],
         ],
       ),
+      ),
     );
   }
 
@@ -370,13 +374,432 @@ class _ItemDetailSheet extends StatelessWidget {
             onPressed: () {
               HapticFeedback.mediumImpact();
               context.pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Reorder request sent'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              _showReorderSheet(context, item);
             },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          PfButton.outlined(
+            label: 'Adjust Stock',
+            icon: Icons.tune_rounded,
+            fullWidth: true,
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              context.pop();
+              _showAdjustStockSheet(context, item);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet for placing a reorder request on a low/insufficient
+/// inventory variant. Suggests a quantity that lifts the variant above its
+/// reorder point, then on confirm delegates to [InventoryService] (production
+/// role) and shows a success snackbar.
+Future<void> _showReorderSheet(
+  BuildContext context,
+  InventoryItem item,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => _ReorderSheet(item: item),
+  );
+}
+
+class _ReorderSheet extends StatefulWidget {
+  const _ReorderSheet({required this.item});
+  final InventoryItem item;
+
+  @override
+  State<_ReorderSheet> createState() => _ReorderSheetState();
+}
+
+class _ReorderSheetState extends State<_ReorderSheet> {
+  late int _qty;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // Suggest enough units to bring the variant 25% above its reorder point.
+    final gap = (widget.item.reorderPoint * 1.25).ceil() - widget.item.currentStock;
+    _qty = gap < 10 ? 10 : gap;
+  }
+
+  Future<void> _submit() async {
+    if (_qty <= 0) {
+      setState(() => _error = 'Quantity must be greater than zero');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final auth = AuthProvider.of(context);
+    try {
+      await InventoryService.updateStock(
+        materialVariantId: widget.item.materialVariantId,
+        newStock: widget.item.currentStock + _qty,
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Reorder placed: +$_qty units of ${widget.item.materialVariantId}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Failed to place reorder';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final projectStock = widget.item.currentStock + _qty;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Place reorder',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '${widget.item.materialVariantId} • ${widget.item.itemType}',
+            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: _Stat(
+                  label: 'Current',
+                  value: '${widget.item.currentStock}',
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Stat(
+                  label: 'Reorder',
+                  value: '${widget.item.reorderPoint}',
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Stat(
+                  label: 'After',
+                  value: '$projectStock',
+                  highlight: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PfTextField(
+            label: 'Quantity to reorder',
+            hintText: 'Suggested amount',
+            helper:
+                'Suggested to bring stock 25% above the reorder point.',
+            controller: TextEditingController(text: '$_qty')
+              ..selection = TextSelection.collapsed(offset: '$_qty'.length),
+            prefixIcon: Icons.add_shopping_cart_rounded,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (v) => setState(() => _qty = int.tryParse(v) ?? 0),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Cancel',
+                  fullWidth: true,
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.filled(
+                  label: _submitting ? 'Placing…' : 'Confirm Reorder',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  loading: _submitting,
+                  onPressed: _submitting ? null : _submit,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet for adjusting the stock of an inventory variant.
+/// Wraps the existing [InventoryService] so the action is permission-checked
+/// (production role only) and the new stock value recomputes the status.
+Future<void> _showAdjustStockSheet(
+  BuildContext context,
+  InventoryItem item,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => _AdjustStockSheet(item: item),
+  );
+}
+
+class _AdjustStockSheet extends StatefulWidget {
+  const _AdjustStockSheet({required this.item});
+
+  final InventoryItem item;
+
+  @override
+  State<_AdjustStockSheet> createState() => _AdjustStockSheetState();
+}
+
+class _AdjustStockSheetState extends State<_AdjustStockSheet> {
+  late final TextEditingController _ctrl;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.item.currentStock.toString());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final raw = _ctrl.text.trim();
+    final value = int.tryParse(raw);
+    if (value == null || value < 0) {
+      setState(() => _error = 'Enter a non-negative whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    final auth = AuthProvider.of(context);
+    try {
+      await InventoryService.updateStock(
+        materialVariantId: widget.item.materialVariantId,
+        newStock: value,
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Stock updated to $value for ${widget.item.materialVariantId}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Failed to update stock';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Adjust Stock',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '${widget.item.materialVariantId} • ${widget.item.itemType}',
+            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: _Stat(
+                  label: 'Current',
+                  value: '${widget.item.currentStock}',
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Stat(
+                  label: 'Reorder',
+                  value: '${widget.item.reorderPoint}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PfTextField(
+            label: 'New stock count',
+            hintText: 'Enter new quantity',
+            controller: _ctrl,
+            prefixIcon: Icons.inventory_2_rounded,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Cancel',
+                  fullWidth: true,
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.filled(
+                  label: _submitting ? 'Saving…' : 'Save',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  loading: _submitting,
+                  onPressed: _submitting ? null : _submit,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({required this.label, required this.value, this.highlight = false});
+  final String label;
+  final String value;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: highlight
+            ? AppTheme.success.withValues(alpha: 0.10)
+            : AppTheme.surfaceContainer,
+        borderRadius: AppRadius.rMd,
+        border: highlight
+            ? Border.all(color: AppTheme.success.withValues(alpha: 0.30))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  letterSpacing: 0.6,
+                  color: highlight ? AppTheme.success : AppTheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: AppTheme.monoStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: highlight ? AppTheme.success : AppTheme.onSurface,
+            ),
           ),
         ],
       ),

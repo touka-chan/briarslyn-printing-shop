@@ -13,10 +13,18 @@ import '../../theme/app_theme.dart';
 /// Pushed via `Navigator.pushReplacement` so the user can't navigate back
 /// into the now-stale New Order form.
 class CashierOrderConfirmedScreen extends StatefulWidget {
-  const CashierOrderConfirmedScreen({super.key, required this.orderId});
+  const CashierOrderConfirmedScreen({
+    super.key,
+    required this.orderId,
+    this.insufficientStock = false,
+  });
 
   /// The newly-created order ID to display (e.g. "ORD-1023").
   final String orderId;
+
+  /// When true, shows a low-stock warning above the "what happens next"
+  /// card so the cashier remembers to flag it for the owner.
+  final bool insufficientStock;
 
   @override
   State<CashierOrderConfirmedScreen> createState() =>
@@ -155,6 +163,54 @@ class _CashierOrderConfirmedScreenState
                             ),
                       ),
                       const SizedBox(height: AppSpacing.xl),
+                      // Inventory warning — proposal §VII "insufficient stock indicator"
+                      // continues here so the cashier cannot forget to flag the order.
+                      if (widget.insufficientStock) ...[
+                        Container(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          decoration: BoxDecoration(
+                            color: AppTheme.stockInsufficient.withValues(alpha: 0.10),
+                            borderRadius: AppRadius.rMd,
+                            border: Border.all(
+                              color: AppTheme.stockInsufficient.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.error_outline_rounded,
+                                color: AppTheme.stockInsufficient,
+                                size: AppIconSize.md,
+                              ),
+                              const SizedBox(width: AppSpacing.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Insufficient stock',
+                                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.onSurface,
+                                          ),
+                                    ),
+                                    const SizedBox(height: AppSpacing.xxs),
+                                    Text(
+                                      'This order exceeds current inventory. Please notify the owner before production starts.',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: AppTheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
                       // Subtle status row, animates in alongside the card.
                       SlideTransition(
                         position: Tween<Offset>(

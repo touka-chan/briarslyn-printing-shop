@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app_router.dart';
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/mock_data.dart';
 import '../../utils/animations.dart';
-import '../../app_router.dart';
+import '../../utils/mock_data.dart';
 import '../../models/order.dart';
+import '../../services/services.dart';
 
 /// The Order Detail screen — shared between Cashier and Production.
 ///
@@ -91,7 +93,7 @@ class OrderDetailScreen extends StatelessWidget {
                   StaggeredFadeIn(
                     stagger: const Duration(milliseconds: 80),
                     duration: const Duration(milliseconds: 350),
-                    children: [
+                    children: <Widget>[
                       // Hero job ticket card
                       PfJobTicket(order: order),
                       const SizedBox(height: AppSpacing.lg),
@@ -145,8 +147,7 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildCustomerInfo(BuildContext context, Order order) {
     final canViewCustomer = order.customerName.isNotEmpty;
 
-    return PfCard(
-      onTap: canViewCustomer ? () => _viewCustomerDetails(context, order) : null,
+    final card = PfCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -239,6 +240,11 @@ class OrderDetailScreen extends StatelessWidget {
         ],
       ),
     );
+    if (!canViewCustomer) return card;
+    return PressScale(
+      onTap: () => _viewCustomerDetails(context, order),
+      child: card,
+    );
   }
 
   void _viewCustomerDetails(BuildContext context, Order order) {
@@ -305,8 +311,9 @@ class OrderDetailScreen extends StatelessWidget {
                   .where((o) => o.customerName == order.customerName)
                   .map((o) => Column(
                     children: [
-                      PfCard(
+                      PressScale(
                         onTap: () => Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(o.orderId)),
+                        child: PfCard(
                         child: Row(
                           children: [
                             Expanded(
@@ -327,6 +334,7 @@ class OrderDetailScreen extends StatelessWidget {
                             ),
                             PfStatusBadge.orderStatus(o.status, size: PfBadgeSize.small),
                           ],
+                        ),
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
@@ -449,106 +457,240 @@ class OrderDetailScreen extends StatelessWidget {
   }
 
   Widget _buildActions(BuildContext context, Order order) {
+    final auth = AuthProvider.of(context);
+    final isCashier = auth.isCashier;
+    final isProduction = auth.isProduction;
     final canCancel = order.status == 'Pending' || order.status == 'Overdue' || order.status == 'Urgent';
 
     return Column(
       children: [
-        if (order.status == 'Ready for Pickup' || order.status == 'In Production')
-          PfButton.filled(
-            label: 'Mark as Completed',
-            icon: Icons.check_circle_rounded,
-            fullWidth: true,
-            size: PfButtonSize.large,
-            onPressed: () {
-              HapticFeedback.mediumImpact();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Order marked as completed'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-        if (order.status == 'Pending') ...[
-          PfButton.filled(
-            label: 'Send to Production',
-            icon: Icons.send_rounded,
-            fullWidth: true,
-            size: PfButtonSize.large,
-            onPressed: () {
-              HapticFeedback.mediumImpact();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Order sent to production'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: AppSpacing.sm),
-        ],
-        // Cancel Order button — only before production
-        if (canCancel) ...[
-          PfButton.outlined(
-            label: 'Cancel Order',
-            icon: Icons.cancel_outlined,
-            fullWidth: true,
-            size: PfButtonSize.large,
-            onPressed: () {
-              HapticFeedback.mediumImpact();
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text('Cancel Order?'),
-                  content: Text('Order ${order.orderId} will be cancelled. This cannot be undone once sent to production.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Keep'),
-                    ),
-                    TextButton(
-                      style: TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Order cancelled'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      },
-                      child: const Text('Cancel'),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: AppSpacing.sm),
-        ],
-        const SizedBox(height: AppSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: PfButton.outlined(
-                label: 'Edit Order',
-                icon: Icons.edit_rounded,
-                fullWidth: true,
-                size: PfButtonSize.large,
-                onPressed: () {
-                  HapticFeedback.selectionClick();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Edit order - coming soon'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-              ),
+        // Cashier actions: Payment status update
+        if (isCashier && order.paymentStatus != 'Paid')
+          PermissionGate(
+            permission: Permission.orderUpdatePayment,
+            child: PfButton.filled(
+              label: 'Mark as Paid',
+              icon: Icons.payment_rounded,
+              fullWidth: true,
+              size: PfButtonSize.large,
+              onPressed: () => _updatePaymentStatus(context, order, 'Paid'),
             ),
-          ],
-        ),
+          ),
+        if (isCashier && order.paymentStatus == 'Paid')
+          PermissionGate(
+            permission: Permission.orderUpdatePayment,
+            child: PfButton.outlined(
+              label: 'Payment Status: Paid',
+              icon: Icons.check_circle_rounded,
+              fullWidth: true,
+              size: PfButtonSize.large,
+              onPressed: () {},
+            ),
+          ),
+
+        // Production actions: Advance production status
+        if (isProduction && order.status != 'Completed' && order.status != 'Cancelled')
+          PermissionGate(
+            permission: Permission.orderUpdateStatus,
+            child: PfButton.filled(
+              label: _nextActionLabel(order.status),
+              icon: _nextActionIcon(order.status),
+              fullWidth: true,
+              size: PfButtonSize.large,
+              onPressed: () => _advanceProductionStatus(context, order),
+            ),
+          ),
+
+        // Both roles can cancel before production
+        if (canCancel && (isCashier || isProduction))
+          PermissionGate(
+            permission: Permission.orderCancel,
+            child: PfButton.outlined(
+              label: 'Cancel Order',
+              icon: Icons.cancel_outlined,
+              fullWidth: true,
+              size: PfButtonSize.large,
+              onPressed: () => _confirmCancelOrder(context, order),
+            ),
+          ),
+
+        const SizedBox(height: AppSpacing.md),
+        if (order.status == 'Pending' && isCashier)
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Edit Order',
+                  icon: Icons.edit_rounded,
+                  fullWidth: true,
+                  size: PfButtonSize.large,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Editing of orders is coming soon. Cancel and re-create for now.',
+                        ),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
       ],
+    );
+  }
+
+  String _nextActionLabel(String status) {
+    switch (status) {
+      case 'Pending':
+        return 'Send to Production';
+      case 'In Production':
+        return 'Mark Ready for Pickup';
+      case 'Ready for Pickup':
+        return 'Mark as Completed';
+      default:
+        return 'Advance Status';
+    }
+  }
+
+  IconData _nextActionIcon(String status) {
+    switch (status) {
+      case 'Pending':
+        return Icons.send_rounded;
+      case 'In Production':
+        return Icons.check_circle_outline_rounded;
+      case 'Ready for Pickup':
+        return Icons.task_alt_rounded;
+      default:
+        return Icons.arrow_forward_rounded;
+    }
+  }
+
+  Future<void> _updatePaymentStatus(BuildContext context, Order order, String newStatus) async {
+    final auth = AuthProvider.of(context);
+    try {
+      await OrderService.updatePaymentStatus(
+        orderId: order.orderId,
+        newPaymentStatus: newStatus,
+        auth: auth,
+      );
+      if (!context.mounted) return;
+      HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Payment status updated to $newStatus'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      // Force rebuild by popping and pushing again
+      Navigator.pop(context);
+      Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(order.orderId));
+    } on PermissionDeniedException catch (e) {
+      if (!context.mounted) return;
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _advanceProductionStatus(BuildContext context, Order order) async {
+    final auth = AuthProvider.of(context);
+    try {
+      await OrderService.advanceStatus(
+        orderId: order.orderId,
+        auth: auth,
+      );
+      if (!context.mounted) return;
+      HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Production status advanced'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context);
+      Navigator.pushNamed(context, AppRoutes.productionOrderDetail(order.orderId));
+    } on PermissionDeniedException catch (e) {
+      if (!context.mounted) return;
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on StateError catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _confirmCancelOrder(BuildContext context, Order order) {
+    HapticFeedback.mediumImpact();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel Order?'),
+        content: Text('Order ${order.orderId} will be cancelled. This cannot be undone once sent to production.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
+            onPressed: () async {
+              Navigator.pop(context);
+              final auth = AuthProvider.of(context);
+              try {
+                await OrderService.cancelOrder(
+                  orderId: order.orderId,
+                  auth: auth,
+                );
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Order cancelled'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                Navigator.pop(context);
+                // Navigate back to appropriate list
+                if (auth.isCashier) {
+                  Navigator.pushNamed(context, AppRoutes.cashierOrders);
+                } else {
+                  Navigator.pushNamed(context, AppRoutes.productionQueue);
+                }
+              } on PermissionDeniedException catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(e.message),
+                    backgroundColor: AppTheme.statusUrgent,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
     );
   }
 

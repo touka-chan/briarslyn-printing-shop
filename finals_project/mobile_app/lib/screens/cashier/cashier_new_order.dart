@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../models/inventory_item.dart';
+import '../../models/order.dart';
+import '../../services/order_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
+import '../../utils/mock_data.dart';
 import 'cashier_order_confirmed.dart';
 
 /// The New Order screen — Cashier's second tab.
@@ -78,37 +83,127 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     setState(() => _isSubmitting = true);
     HapticFeedback.mediumImpact();
 
-    // Simulate a brief processing window so the button's loading state
-    // is visible — replace with a real API call when the backend is wired.
-    await Future.delayed(const Duration(milliseconds: 600));
+    // Get auth service
+    final auth = AuthProvider.of(context);
 
-    if (!mounted) return;
+    try {
+      // Create order via service layer (enforces permissions)
+      final order = Order(
+        orderId: 'ORD-${DateTime.now().millisecondsSinceEpoch.remainder(10000).toString().padLeft(4, '0')}',
+        customerName: _customerNameCtrl.text.trim(),
+        customerEmail: _customerEmailCtrl.text.trim().isEmpty ? null : _customerEmailCtrl.text.trim(),
+        customerPhone: _customerPhoneCtrl.text.trim().isEmpty ? null : _customerPhoneCtrl.text.trim(),
+        itemType: _selectedItemType,
+        quantity: int.parse(_quantityCtrl.text),
+        layoutFile: _layoutFileCtrl.text.isEmpty ? '' : _layoutFileCtrl.text,
+        targetDate: _selectedTargetDate!,
+        paymentAmount: double.parse(_paymentAmountCtrl.text),
+        paymentStatus: _paymentStatus,
+        status: 'Pending',
+        priority: _computePriority(_selectedTargetDate!),
+        estimatedCompletion: _selectedTargetDate!.add(const Duration(days: 2)),
+        basedOn: ['Manual entry'],
+        createdAt: DateTime.now(),
+      );
 
-    // Generate a mock order ID in the same shape the backend uses
-    // (ORD-####), so the success screen feels real.
-    final orderId =
-        'ORD-${DateTime.now().millisecondsSinceEpoch.remainder(10000).toString().padLeft(4, '0')}';
+      await OrderService.createOrder(order: order, auth: auth);
 
-    // Push the success screen on top of the form. When it auto-pops
-    // (or the user taps "Back to Home"), we pop the form. The shell's
-    // IndexedStack then returns to the Home tab (index 0) so the user
-    // doesn't see a stale New Order screen after confirmation.
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CashierOrderConfirmedScreen(orderId: orderId),
-      ),
-    );
+      if (!mounted) return;
 
-    // If the success screen returned true (either via the auto-pop
-    // timer or the manual "Back to Home" button), reset the form and
-    // pop back. The parent shell will show the Home tab because the
-    // New Order form is the only screen above the IndexedStack.
-    if (!mounted) return;
-    if (result == true) {
-      _resetForm();
-      Navigator.pop(context);
+      // Push the success screen, carrying the inventory check result so the
+      // cashier sees an explicit warning when stock is insufficient.
+      final availability = _computeAvailability(order.quantity);
+      final insufficientStock =
+          availability != null && !availability.available;
+      final result = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CashierOrderConfirmedScreen(
+            orderId: order.orderId,
+            insufficientStock: insufficientStock,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+      if (result == true) {
+        _resetForm();
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create order: $e'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppTheme.statusOverdue,
+        ),
+      );
     }
+  }
+
+  /// Computes order priority based on target date.
+  static String _computePriority(DateTime targetDate) {
+    final daysUntil = targetDate.difference(DateTime.now()).inDays;
+    if (daysUntil <= 0) return 'Overdue';
+    if (daysUntil <= 2) return 'Urgent';
+    return 'Upcoming';
+  }
+
+  /// Finds the best matching inventory variant for the chosen item type.
+  ///
+  /// Mirrors the proposal §VII rule: a variant matches if the item_type is
+  /// contained in the inventory item_type (case-insensitive). Returns null
+  /// when the chosen item type has no corresponding inventory variant (the
+  /// cashier can still create the order — it simply has no inventory check).
+  InventoryItem? _findInventoryVariant(String itemType) {
+    final needle = itemType.toLowerCase().trim();
+    for (final item in mockInventory) {
+      final haystack = item.itemType.toLowerCase();
+      if (haystack.contains(needle) || needle.contains(haystack)) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /// Returns the live availability status of the currently selected
+  /// item type at the requested quantity. Returns null when no matching
+  /// inventory variant exists (no check possible).
+  _AvailabilityCheck? _computeAvailability(int quantity) {
+    final variant = _findInventoryVariant(_selectedItemType);
+    if (variant == null) return null;
+
+    final available = variant.currentStock >= quantity;
+    String status;
+    Color color;
+    String message;
+    if (available) {
+      if (variant.status == 'Low Stock') {
+        status = 'Low Stock';
+        color = AppTheme.stockLow;
+        message =
+            'Stock is low (${variant.currentStock} left). Order will proceed but consider restocking.';
+      } else {
+        status = 'In Stock';
+        color = AppTheme.stockInStock;
+        message =
+            'Sufficient stock — ${variant.currentStock} units available for ${variant.materialVariantId}.';
+      }
+    } else {
+      status = 'Insufficient Stock';
+      color = AppTheme.stockInsufficient;
+      message =
+          'Only ${variant.currentStock} unit${variant.currentStock == 1 ? '' : 's'} available — short by ${quantity - variant.currentStock}. Notify the owner before proceeding.';
+    }
+    return _AvailabilityCheck(
+      variant: variant,
+      available: available,
+      status: status,
+      color: color,
+      message: message,
+    );
   }
 
   /// Resets all form state so the next time the user opens the New
@@ -172,6 +267,26 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     if (date != null && mounted) {
       setState(() => _selectedTargetDate = date);
     }
+  }
+
+  void _showCustomerPicker() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CustomerPickerSheet(
+        customers: mockCustomers,
+        onSelect: (customer) {
+          setState(() {
+            _customerNameCtrl.text = customer['name'] as String;
+            _customerEmailCtrl.text = customer['email'] as String;
+            _customerPhoneCtrl.text = customer['phone'] as String;
+          });
+          Navigator.pop(context);
+        },
+      ),
+    );
   }
 
   @override
@@ -306,15 +421,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
             label: 'Select Existing Customer',
             icon: Icons.search_rounded,
             fullWidth: true,
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Customer picker - coming soon'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
+            onPressed: _showCustomerPicker,
           ),
         ],
       ),
@@ -373,6 +480,20 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
               return null;
             },
             textInputAction: TextInputAction.next,
+          ),
+          // Live inventory availability indicator — proposal §VII.
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _quantityCtrl,
+            builder: (context, value, _) {
+              final qty = int.tryParse(value.text) ?? 0;
+              if (qty <= 0) return const SizedBox.shrink();
+              final check = _computeAvailability(qty);
+              if (check == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.md),
+                child: _AvailabilityBanner(check: check),
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.md),
           // Layout upload
@@ -575,6 +696,20 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                       ? 'Not set'
                       : '${_selectedTargetDate!.day}/${_selectedTargetDate!.month}/${_selectedTargetDate!.year}',
                 ),
+                if (_selectedItemType.isNotEmpty)
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _quantityCtrl,
+                    builder: (context, value, _) {
+                      final qty = int.tryParse(value.text) ?? 0;
+                      if (qty <= 0) return const SizedBox.shrink();
+                      final check = _computeAvailability(qty);
+                      if (check == null || check.available) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.md),
+                        child: _AvailabilityBanner(check: check),
+                      );
+                    },
+                  ),
               ],
             ),
           ),
@@ -935,5 +1070,254 @@ class _LayoutUploadAreaState extends State<_LayoutUploadArea> {
     if (fileName != null && mounted) {
       widget.onFileSelected(fileName);
     }
+  }
+}
+
+/// Internal model describing the live availability state for the currently
+/// selected item type + quantity.
+class _AvailabilityCheck {
+  const _AvailabilityCheck({
+    required this.variant,
+    required this.available,
+    required this.status,
+    required this.color,
+    required this.message,
+  });
+
+  final InventoryItem variant;
+  final bool available;
+  final String status;
+  final Color color;
+  final String message;
+}
+
+/// Inline availability indicator shown in the Details step of the New Order
+/// form. Reuses [PfStatusBadge.stock] for the status pill and the design
+/// system colors so the visual language matches the rest of the app.
+class _AvailabilityBanner extends StatelessWidget {
+  const _AvailabilityBanner({required this.check});
+
+  final _AvailabilityCheck check;
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = check.color.withValues(alpha: 0.10);
+    final border = check.color.withValues(alpha: 0.30);
+    final iconData = check.available
+        ? (check.status == 'Low Stock'
+            ? Icons.warning_amber_rounded
+            : Icons.check_circle_rounded)
+        : Icons.error_outline_rounded;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: tint,
+        borderRadius: AppRadius.rMd,
+        border: Border.all(color: border, width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(iconData, color: check.color, size: AppIconSize.md),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Inventory check',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.onSurface,
+                            ),
+                      ),
+                    ),
+                    PfStatusBadge.stock(check.status, size: PfBadgeSize.small),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  check.variant.itemType,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.onSurface,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  check.message,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  children: [
+                    _miniStat(
+                      context,
+                      label: 'Stock',
+                      value: '${check.variant.currentStock}',
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    _miniStat(
+                      context,
+                      label: 'Reorder',
+                      value: '${check.variant.reorderPoint}',
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    _miniStat(
+                      context,
+                      label: 'Forecast 7d',
+                      value: '${check.variant.forecastedDemandNext7Days}',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStat(BuildContext context,
+      {required String label, required String value}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                letterSpacing: 0.6,
+                color: AppTheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: AppTheme.monoStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.onSurface,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bottom sheet for picking an existing customer.
+class _CustomerPickerSheet extends StatelessWidget {
+  const _CustomerPickerSheet({
+    required this.customers,
+    required this.onSelect,
+  });
+
+  final List<Map<String, dynamic>> customers;
+  final void Function(Map<String, dynamic>) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      child: Column(
+        children: [
+          // Drag handle
+          Container(
+            margin: const EdgeInsets.only(top: AppSpacing.md),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppTheme.onSurfaceVariant.withValues(alpha: 0.3),
+              borderRadius: AppRadius.rPill,
+            ),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Row(
+              children: [
+                Text(
+                  'Select Customer',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          // Customer list
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              itemCount: customers.length,
+              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                final customer = customers[index];
+                return PressScale(
+                  onTap: () => onSelect(customer),
+                  child: PfCard(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Row(
+                      children: [
+                        PfAvatar(name: customer['name'] as String),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                customer['name'] as String,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.xxs),
+                              Text(
+                                customer['email'] as String,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                customer['phone'] as String,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

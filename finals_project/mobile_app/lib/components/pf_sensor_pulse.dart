@@ -53,6 +53,11 @@ class _PfSensorPulseState extends State<PfSensorPulse>
   @override
   void initState() {
     super.initState();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _updateAnimation();
   }
 

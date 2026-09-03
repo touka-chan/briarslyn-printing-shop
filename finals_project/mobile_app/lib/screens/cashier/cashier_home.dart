@@ -31,6 +31,8 @@ class CashierHomeScreen extends StatelessWidget {
           _buildQuickActions(context),
           const SizedBox(height: AppSpacing.xl),
           _buildRecentOrders(context),
+          const SizedBox(height: AppSpacing.xl),
+          _buildTopCustomers(context),
         ],
       ),
     );
@@ -247,6 +249,43 @@ class CashierHomeScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildTopCustomers(BuildContext context) {
+    // Build a top-3 customer list derived from mock data — single source
+    // of truth, no hardcoded values.
+    final byName = <String, _CustomerStats>{};
+    for (final order in mockOrders) {
+      final stats = byName.putIfAbsent(
+        order.customerName,
+        () => _CustomerStats(name: order.customerName),
+      );
+      stats.orderCount += 1;
+      stats.totalSpent += order.paymentAmount;
+      if (stats.lastOrderDate == null || order.createdAt!.isAfter(stats.lastOrderDate!)) {
+        stats.lastOrderDate = order.createdAt;
+      }
+    }
+    final top = byName.values.toList()
+      ..sort((a, b) => b.totalSpent.compareTo(a.totalSpent));
+    final top3 = top.take(3).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const PfSectionHeader(
+          title: 'Top Customers',
+          subtitle: 'Highest spenders this period',
+        ),
+        const SizedBox(height: AppSpacing.md),
+        ...top3.map((c) => Column(
+          children: [
+            _CustomerTile(stats: c),
+            const SizedBox(height: AppSpacing.md),
+          ],
+        )),
+      ],
+    );
+  }
+
   void _navigateToNewOrder(BuildContext context) {
     HapticFeedback.selectionClick();
     context.pushNamed(AppRoutes.cashierNewOrder);
@@ -260,5 +299,98 @@ class CashierHomeScreen extends StatelessWidget {
   void _navigateToOrderDetail(BuildContext context, Order order) {
     HapticFeedback.selectionClick();
     context.pushNamed(AppRoutes.cashierOrderDetail(order.orderId));
+  }
+}
+
+/// Aggregated per-customer statistics used by the "Top Customers" section.
+class _CustomerStats {
+  _CustomerStats({required this.name});
+  final String name;
+  int orderCount = 0;
+  double totalSpent = 0;
+  DateTime? lastOrderDate;
+}
+
+/// Compact customer row used in the cashier home's "Top Customers" list.
+class _CustomerTile extends StatelessWidget {
+  const _CustomerTile({required this.stats});
+  final _CustomerStats stats;
+
+  String _fmt(DateTime d) =>
+      '${d.month.toString().padLeft(2, "0")}/${d.day.toString().padLeft(2, "0")}';
+
+  String _amount(double v) {
+    final p = v.toStringAsFixed(2).split('.');
+    final intPart = p[0];
+    final dec = p[1];
+    final b = StringBuffer();
+    for (var i = 0; i < intPart.length; i++) {
+      if (i > 0 && (intPart.length - i) % 3 == 0) b.write(',');
+      b.write(intPart[i]);
+    }
+    return '${b.toString()}.$dec';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: AppRadius.rMd,
+        border: Border.all(color: AppTheme.surfaceContainer),
+      ),
+      child: Row(
+        children: [
+          PfAvatar(name: stats.name, size: 40),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  stats.name,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${stats.orderCount} order${stats.orderCount == 1 ? '' : 's'}'
+                  '${stats.lastOrderDate != null ? ' • last ${_fmt(stats.lastOrderDate!)}' : ''}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.xs,
+            ),
+            decoration: BoxDecoration(
+              color: AppTheme.success.withValues(alpha: 0.12),
+              borderRadius: AppRadius.rPill,
+              border: Border.all(
+                color: AppTheme.success.withValues(alpha: 0.30),
+              ),
+            ),
+            child: Text(
+              '₱${_amount(stats.totalSpent)}',
+              style: AppTheme.monoStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.success,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

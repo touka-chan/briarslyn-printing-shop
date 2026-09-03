@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../services/inventory_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/mock_data.dart';
 import '../../utils/animations.dart';
@@ -22,7 +27,15 @@ class ProductionSensorScreen extends StatefulWidget {
 class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
   // Simulated sensor state
   bool _sensorOnline = true;
-  final int _eventsToday = mockActivity.length;
+  late int _eventsToday = mockActivity.length;
+
+  // Local copy of the activity feed so the simulated "live" inserts do not
+  // mutate the global mock list when we navigate away from this screen.
+  late List<RfidCheckoutEvent> _activityFeed = List.of(mockActivity);
+  Timer? _simulator;
+  final _rng = math.Random(42);
+  DateTime? _lastEventAt;
+  static const _sensorId = 'ESP32-01';
 
   Map<String, List<InventoryItem>> get _tagsBySensor {
     final grouped = <String, List<InventoryItem>>{};
@@ -31,6 +44,69 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
       grouped.putIfAbsent(item.sensorId!, () => []).add(item);
     }
     return grouped;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startSimulator();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProductionSensorScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget != widget) {
+      _startSimulator();
+    }
+  }
+
+  void _startSimulator() {
+    _simulator?.cancel();
+    if (!_sensorOnline) return;
+    // Fires every 6 seconds, mimicking the real ESP32 cadence from §X.
+    _simulator = Timer.periodic(const Duration(seconds: 6), (_) => _emitEvent());
+  }
+
+  Future<void> _emitEvent() async {
+    if (!mounted || !_sensorOnline) return;
+    // Pick a random inventory variant that has an RFID tag and stock > 0.
+    final candidates =
+        mockInventory.where((i) => i.tagUid != null && i.currentStock > 0).toList();
+    if (candidates.isEmpty) return;
+    final variant = candidates[_rng.nextInt(candidates.length)];
+    final event = RfidCheckoutEvent(
+      materialVariantId: variant.materialVariantId,
+      tagUid: variant.tagUid!,
+      sensorId: _sensorId,
+      timestamp: DateTime.now(),
+    );
+    setState(() {
+      _activityFeed.insert(0, event);
+      _eventsToday += 1;
+      _lastEventAt = event.timestamp;
+      if (_activityFeed.length > 50) {
+        _activityFeed = _activityFeed.sublist(0, 50);
+      }
+    });
+    HapticFeedback.selectionClick();
+    // Decrement stock via the service so the rest of the app sees the change.
+    try {
+      final auth = AuthProvider.of(context);
+      await InventoryService.recordRfidEvent(
+        materialVariantId: event.materialVariantId,
+        tagUid: event.tagUid,
+        quantityChange: -1,
+        auth: auth,
+      );
+    } catch (_) {
+      // Service not permitted (e.g. wrong role). The visual feed still updates.
+    }
+  }
+
+  @override
+  void dispose() {
+    _simulator?.cancel();
+    super.dispose();
   }
 
   @override
@@ -44,9 +120,15 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
           // Sensor pulse header
           _SensorHeaderCard(
             isOnline: _sensorOnline,
+            lastEventAt: _lastEventAt,
             onToggle: () {
               HapticFeedback.mediumImpact();
               setState(() => _sensorOnline = !_sensorOnline);
+              if (_sensorOnline) {
+                _startSimulator();
+              } else {
+                _simulator?.cancel();
+              }
             },
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -103,9 +185,13 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
           const SizedBox(height: AppSpacing.md),
 
           // Activity list
-          ...mockActivity.take(8).map((event) => Column(
+          ..._activityFeed.take(8).map((event) => Column(
             children: [
-              _ActivityRow(event: event),
+              _ActivityRow(
+                event: event,
+                isFresh: _lastEventAt != null &&
+                    event.timestamp == _lastEventAt,
+              ),
               const SizedBox(height: AppSpacing.sm),
             ],
           )),
@@ -116,9 +202,14 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
 }
 
 class _SensorHeaderCard extends StatelessWidget {
-  const _SensorHeaderCard({required this.isOnline, required this.onToggle});
+  const _SensorHeaderCard({
+    required this.isOnline,
+    required this.onToggle,
+    this.lastEventAt,
+  });
 
   final bool isOnline;
+  final DateTime? lastEventAt;
   final VoidCallback onToggle;
 
   @override
@@ -126,6 +217,8 @@ class _SensorHeaderCard extends StatelessWidget {
     final color = isOnline ? AppTheme.statusCompleted : AppTheme.statusUrgent;
 
     return PfCard(
+      variant: PfCardVariant.tinted,
+      accent: color,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Row(
         children: [
@@ -180,16 +273,32 @@ class _SensorHeaderCard extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
                   isOnline
-                      ? 'All RFID sensors are reporting normally'
-                      : 'Sensors stopped — last seen 2h ago',
+                      ? (lastEventAt == null
+                          ? 'Listening for RFID check-outs…'
+                          : 'Last check-out ${_formatRelative(lastEventAt!)}')
+                      : 'Sensors stopped — toggle to resume',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
                 ),
               ],
             ),
           ),
+          IconButton(
+            tooltip: isOnline ? 'Pause sensor' : 'Resume sensor',
+            icon: Icon(isOnline ? Icons.pause_rounded : Icons.play_arrow_rounded),
+            color: color,
+            onPressed: onToggle,
+          ),
         ],
       ),
     );
+  }
+
+  String _formatRelative(DateTime ts) {
+    final diff = DateTime.now().difference(ts);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }
 
@@ -209,19 +318,26 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PfCard(
+      variant: PfCardVariant.tinted,
+      accent: color,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: AppRadius.rSm,
-            ),
-            child: Icon(icon, color: color, size: AppIconSize.sm),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.18),
+                  borderRadius: AppRadius.rSm,
+                ),
+                child: Icon(icon, color: color, size: AppIconSize.sm),
+              ),
+            ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           Text(
             value,
             style: AppTheme.monoStyle(
@@ -230,6 +346,7 @@ class _StatTile extends StatelessWidget {
               color: AppTheme.onSurface,
             ),
           ),
+          const SizedBox(height: 2),
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
@@ -255,7 +372,11 @@ class _SensorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = isOnline ? AppTheme.statusCompleted : AppTheme.statusUrgent;
+
     return PfCard(
+      variant: PfCardVariant.surface,
+      accent: accent,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,11 +388,11 @@ class _SensorCard extends StatelessWidget {
                 height: 12,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isOnline ? AppTheme.statusCompleted : AppTheme.statusUrgent,
+                  color: accent,
                   boxShadow: [
                     if (isOnline)
                       BoxShadow(
-                        color: AppTheme.statusCompleted.withValues(alpha: 0.4),
+                        color: accent.withValues(alpha: 0.4),
                         blurRadius: 8,
                         spreadRadius: 1,
                       ),
@@ -284,9 +405,22 @@ class _SensorCard extends StatelessWidget {
                 style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
-              Text(
-                '${tags.length} tags',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.xxs,
+                ),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: AppRadius.rPill,
+                ),
+                child: Text(
+                  '${tags.length} tags',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
               ),
             ],
           ),
@@ -342,13 +476,17 @@ class _SensorCard extends StatelessWidget {
 }
 
 class _ActivityRow extends StatelessWidget {
-  const _ActivityRow({required this.event});
+  const _ActivityRow({required this.event, this.isFresh = false});
 
   final RfidCheckoutEvent event;
+  final bool isFresh;
 
   @override
   Widget build(BuildContext context) {
+    final accent = isFresh ? AppTheme.sensorActive : AppTheme.primary;
     return PfCard(
+      variant: PfCardVariant.tinted,
+      accent: accent,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
@@ -356,13 +494,15 @@ class _ActivityRow extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
+              color: accent.withValues(alpha: 0.18),
               shape: BoxShape.circle,
             ),
             child: Icon(
-              Icons.qr_code_scanner_rounded,
-              color: AppTheme.primary,
-              size: 18,
+              isFresh
+                  ? Icons.fiber_manual_record_rounded
+                  : Icons.qr_code_scanner_rounded,
+              color: accent,
+              size: isFresh ? 14 : 18,
             ),
           ),
           const SizedBox(width: AppSpacing.md),
@@ -370,18 +510,49 @@ class _ActivityRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  event.materialVariantId,
-                  style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        event.materialVariantId,
+                        style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isFresh) ...[
+                      const SizedBox(width: AppSpacing.xs),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.xs,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.sensorActive.withValues(alpha: 0.22),
+                          borderRadius: AppRadius.rPill,
+                        ),
+                        child: Text(
+                          'LIVE',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                            color: AppTheme.sensorActive,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '${event.tagUid} • ${event.sensorId}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
+          const SizedBox(width: AppSpacing.sm),
           Text(
             _formatRelativeTime(event.timestamp),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
@@ -394,6 +565,7 @@ class _ActivityRow extends StatelessWidget {
   String _formatRelativeTime(DateTime timestamp) {
     final now = DateTime.now();
     final diff = now.difference(timestamp);
+    if (diff.inSeconds < 60) return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';

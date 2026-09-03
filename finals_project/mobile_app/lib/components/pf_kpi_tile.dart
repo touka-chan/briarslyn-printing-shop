@@ -40,7 +40,6 @@ class PfKpiTile extends StatelessWidget {
     this.changePositive = true,
     this.duration = AppMotion.countUp,
     this.onTap,
-    this.onLongPress,
   });
 
   /// The numeric value to animate to. Can be int, double, or String.
@@ -58,17 +57,14 @@ class PfKpiTile extends StatelessWidget {
   /// Optional change indicator (e.g. "+12%", "−3%").
   final String? change;
 
-  /// Whether [change] is positive (green) or negative (red).
+  /// Whether the change is positive (green) or negative (red).
   final bool changePositive;
 
-  /// Animation duration for the count-up. Defaults to [AppMotion.countUp].
+  /// Duration of the count-up animation.
   final Duration duration;
 
   /// Optional tap handler.
   final VoidCallback? onTap;
-
-  /// Optional long-press handler.
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +75,6 @@ class PfKpiTile extends StatelessWidget {
     return PfCard(
       variant: PfCardVariant.elevated,
       onTap: onTap,
-      onLongPress: onLongPress,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,72 +111,38 @@ class PfKpiTile extends StatelessWidget {
                   style: Theme.of(context).textTheme.displayMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: effectiveAccent,
-                    fontSize: 32,
                   ),
                 ),
+                if (change != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xxs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (changePositive
+                              ? AppTheme.statusCompleted
+                              : AppTheme.statusUrgent)
+                          .withValues(alpha: 0.12),
+                      borderRadius: AppRadius.rPill,
+                    ),
+                    child: Text(
+                      change!,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: changePositive
+                            ? AppTheme.statusCompleted
+                            : AppTheme.statusUrgent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
-          _buildTrailing(effectiveAccent, reducedMotion),
         ],
       ),
-    );
-  }
-
-  Widget _buildTrailing(Color accent, bool reducedMotion) {
-    final children = <Widget>[];
-
-    if (change != null) {
-      children.add(
-        AnimatedContainer(
-          duration: Duration(milliseconds: reducedMotion ? 0 : 220),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: AppSpacing.xxs,
-          ),
-          decoration: BoxDecoration(
-            color: (changePositive ? AppTheme.statusCompleted : AppTheme.statusOverdue)
-                .withValues(alpha: 0.12),
-            borderRadius: AppRadius.rPill,
-            // Subtle gradient overlay for premium feel
-            gradient: changePositive
-                ? null
-                : LinearGradient(
-                    colors: [
-                      (AppTheme.statusOverdue).withValues(alpha: 0.15),
-                      (AppTheme.statusOverdue).withValues(alpha: 0.08),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-          ),
-          child: Text(
-            change!,
-            style: TextStyle(
-              fontSize: AppTypography.caption,
-              fontWeight: FontWeight.w600,
-              color: changePositive ? AppTheme.statusCompleted : AppTheme.statusOverdue,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (icon != null && change == null) {
-      if (children.isNotEmpty) {
-        children.add(const SizedBox(height: AppSpacing.xs));
-      }
-      children.add(
-        Icon(icon, size: AppIconSize.lg, color: accent),
-      );
-    }
-
-    if (children.isEmpty) return const SizedBox.shrink();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: children,
     );
   }
 }

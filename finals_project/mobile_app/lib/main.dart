@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_router.dart';
+import 'auth/auth.dart';
 import 'screens/auth/login_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -13,14 +14,17 @@ class PrintFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'PrintFlow Mobile',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      initialRoute: AppRoutes.login,
-      onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
-        settings,
-        fallback: (_) => const LoginScreen(),
+    return AuthProvider(
+      authService: AuthService(),
+      child: MaterialApp(
+        title: 'PrintFlow Mobile',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        initialRoute: AppRoutes.login,
+        onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
+          settings,
+          fallback: (_) => const LoginScreen(),
+        ),
       ),
     );
   }

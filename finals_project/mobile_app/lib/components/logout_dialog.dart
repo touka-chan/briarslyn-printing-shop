@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_router.dart';
+import '../auth/auth.dart';
 import '../design/tokens.dart';
 import '../theme/app_theme.dart';
 
 /// Shows a SweetAlert-style logout confirmation dialog.
 ///
 /// Returns `true` when the user confirms, `false` (or `null`) when they cancel.
-/// On confirm, it pushes a replacement route back to the login screen so the
-/// current role's state is cleared from the navigation stack.
+/// On confirm, it calls AuthService.logout() and pushes a replacement route
+/// back to the login screen so the current role's state is cleared from the
+/// navigation stack.
 Future<bool> showLogoutConfirmation(BuildContext context) async {
+  final auth = AuthProvider.of(context);
   final result = await showGeneralDialog<bool>(
     context: context,
     barrierLabel: 'logout-confirm',
@@ -32,6 +35,7 @@ Future<bool> showLogoutConfirmation(BuildContext context) async {
 
   if (result == true && context.mounted) {
     HapticFeedback.mediumImpact();
+    auth.logout();
     Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
   }
   return result ?? false;

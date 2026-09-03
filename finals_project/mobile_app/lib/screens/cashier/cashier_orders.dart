@@ -29,6 +29,8 @@ class _CashierOrdersView extends StatefulWidget {
 class _CashierOrdersViewState extends State<_CashierOrdersView> {
   String _searchQuery = '';
   String _statusFilter = 'All';
+  DateTime? _fromDate;
+  DateTime? _toDate;
   final List<String> _statusFilters = [
     'All',
     'Pending',
@@ -55,9 +57,36 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
       final matchesStatus =
           _statusFilter == 'All' || order.status == _statusFilter;
 
-      return matchesSearch && matchesStatus;
+      final matchesFrom = _fromDate == null ||
+          !order.targetDate.isBefore(DateTime(_fromDate!.year, _fromDate!.month, _fromDate!.day));
+      final matchesTo = _toDate == null ||
+          !order.targetDate.isAfter(DateTime(_toDate!.year, _toDate!.month, _toDate!.day));
+
+      return matchesSearch && matchesStatus && matchesFrom && matchesTo;
     }).toList();
   }
+
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final initial = DateTimeRange(
+      start: _fromDate ?? now.subtract(const Duration(days: 7)),
+      end: _toDate ?? now.add(const Duration(days: 14)),
+    );
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: initial,
+    );
+    if (range != null) {
+      setState(() {
+        _fromDate = range.start;
+        _toDate = range.end;
+      });
+    }
+  }
+
+  bool get _hasDateFilter => _fromDate != null && _toDate != null;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +105,14 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
               statusFilter: _statusFilter,
               statusFilters: _statusFilters,
               onStatusFilterChanged: (v) => setState(() => _statusFilter = v),
+              hasDateFilter: _hasDateFilter,
+              fromDate: _fromDate,
+              toDate: _toDate,
+              onPickDateRange: _pickDateRange,
+              onClearDateRange: () => setState(() {
+                _fromDate = null;
+                _toDate = null;
+              }),
             ),
             // Scrollable list of orders
             Expanded(
@@ -148,7 +185,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
-              _searchQuery.isNotEmpty || _statusFilter != 'All'
+              _searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter
                   ? 'No orders match your filters'
                   : 'No orders yet',
               style: Theme.of(context)
@@ -159,7 +196,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              _searchQuery.isNotEmpty || _statusFilter != 'All'
+              _searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter
                   ? 'Try adjusting your search or filter'
                   : 'Create your first order to get started',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -168,12 +205,14 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.lg),
-            if (_searchQuery.isNotEmpty || _statusFilter != 'All')
+            if (_searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter)
               PfButton.filled(
                 label: 'Clear Filters',
                 onPressed: () => setState(() {
                   _searchQuery = '';
                   _statusFilter = 'All';
+                  _fromDate = null;
+                  _toDate = null;
                   _searchController.clear();
                 }),
               ),
@@ -202,6 +241,11 @@ class _SearchFilterBar extends StatelessWidget {
     required this.statusFilter,
     required this.statusFilters,
     required this.onStatusFilterChanged,
+    required this.hasDateFilter,
+    required this.fromDate,
+    required this.toDate,
+    required this.onPickDateRange,
+    required this.onClearDateRange,
   });
 
   final TextEditingController searchController;
@@ -210,6 +254,11 @@ class _SearchFilterBar extends StatelessWidget {
   final String statusFilter;
   final List<String> statusFilters;
   final ValueChanged<String> onStatusFilterChanged;
+  final bool hasDateFilter;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+  final VoidCallback onPickDateRange;
+  final VoidCallback onClearDateRange;
 
   @override
   Widget build(BuildContext context) {
@@ -225,14 +274,81 @@ class _SearchFilterBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Search field
-          PfTextField(
-            label: 'Search orders',
-            hintText: 'Search by name, ID, item...',
-            prefixIcon: Icons.search_rounded,
-            controller: searchController,
-            onChanged: onSearchChanged,
+          // Search field + date filter button row.
+          Row(
+            children: [
+              Expanded(
+                child: PfTextField(
+                  label: 'Search orders',
+                  hintText: 'Search by name, ID, item...',
+                  prefixIcon: Icons.search_rounded,
+                  controller: searchController,
+                  onChanged: onSearchChanged,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.lg),
+                child: Material(
+                  color: hasDateFilter
+                      ? AppTheme.primary
+                      : AppTheme.surfaceContainer,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: AppRadius.rMd,
+                  ),
+                  child: InkWell(
+                    borderRadius: AppRadius.rMd,
+                    onTap: onPickDateRange,
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Icon(
+                        Icons.date_range_rounded,
+                        color: hasDateFilter
+                            ? AppTheme.onPrimary
+                            : AppTheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
+          if (hasDateFilter && fromDate != null && toDate != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.xs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.12),
+                    borderRadius: AppRadius.rPill,
+                  ),
+                  child: Text(
+                    '${_fmt(fromDate!)} → ${_fmt(toDate!)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primary,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: onClearDateRange,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                    ),
+                  ),
+                  child: const Text('Clear'),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           // Status filter chips
           SizedBox(
@@ -277,4 +393,7 @@ class _SearchFilterBar extends StatelessWidget {
       ),
     );
   }
+
+  String _fmt(DateTime d) =>
+      '${d.month.toString().padLeft(2, "0")}/${d.day.toString().padLeft(2, "0")}';
 }

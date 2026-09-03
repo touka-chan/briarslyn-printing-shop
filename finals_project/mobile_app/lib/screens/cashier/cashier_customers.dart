@@ -51,6 +51,13 @@ class _CashierCustomersViewState extends State<_CashierCustomersView> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddCustomerSheet,
+        backgroundColor: AppTheme.primary,
+        foregroundColor: AppTheme.onPrimary,
+        icon: const Icon(Icons.person_add_rounded),
+        label: const Text('Add Customer', style: TextStyle(fontWeight: FontWeight.w600)),
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -75,12 +82,40 @@ class _CashierCustomersViewState extends State<_CashierCustomersView> {
                     sliver: _buildCustomersList(context),
                   ),
                   const SliverPadding(
-                    padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                    padding: EdgeInsets.only(bottom: AppSpacing.xxl + 60),
                   ),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddCustomerSheet() {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+        ),
+        child: _AddCustomerSheet(
+          onAdd: (customer) {
+            setState(() {
+              mockCustomers.insert(0, customer);
+            });
+            Navigator.pop(sheetContext);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Customer ${customer['name']} added'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
         ),
       ),
     );
@@ -202,7 +237,7 @@ class _CustomerListTile extends StatelessWidget {
     final phone = customer['phone'] as String;
     final totalSpent = (customer['totalSpent'] as num).toDouble();
 
-    return PfCard(
+    return PressScale(
       onTap: () {
         HapticFeedback.selectionClick();
         // Show customer profile bottom sheet with their orders
@@ -288,8 +323,9 @@ class _CustomerListTile extends StatelessWidget {
                       .where((o) => o.customerName == name)
                       .map((o) => Column(
                             children: [
-                              PfCard(
+                              PressScale(
                                 onTap: () => context.pushNamed(AppRoutes.cashierOrderDetail(o.orderId)),
+                                child: PfCard(
                                 child: Row(
                                   children: [
                                     Expanded(
@@ -308,6 +344,7 @@ class _CustomerListTile extends StatelessWidget {
                                     PfStatusBadge.orderStatus(o.status, size: PfBadgeSize.small),
                                   ],
                                 ),
+                                ),
                               ),
                               const SizedBox(height: AppSpacing.sm),
                             ],
@@ -325,6 +362,7 @@ class _CustomerListTile extends StatelessWidget {
           ),
         );
       },
+      child: PfCard(
       child: Row(
         children: [
           // Avatar
@@ -405,6 +443,7 @@ class _CustomerListTile extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -422,5 +461,167 @@ class _CustomerListTile extends StatelessWidget {
     }
 
     return '${buffer.toString()}.$decPart';
+  }
+}
+
+/// Modal bottom sheet for adding a new customer.
+class _AddCustomerSheet extends StatefulWidget {
+  const _AddCustomerSheet({required this.onAdd});
+
+  final void Function(Map<String, dynamic> customer) onAdd;
+
+  @override
+  State<_AddCustomerSheet> createState() => _AddCustomerSheetState();
+}
+
+class _AddCustomerSheetState extends State<_AddCustomerSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  void _handleSubmit() {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+
+    // Simulate network delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      final customer = {
+        'id': 'CUST-${DateTime.now().millisecondsSinceEpoch}',
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'totalSpent': 0.0,
+      };
+
+      setState(() => _isSubmitting = false);
+      widget.onAdd(customer);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
+        top: AppSpacing.lg,
+        bottom: AppSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              'Add Customer',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Enter the customer details below',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  PfTextField(
+                    label: 'Full Name',
+                    hintText: 'Juan Dela Cruz',
+                    controller: _nameController,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter a name';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  PfTextField(
+                    label: 'Email',
+                    hintText: 'juan@example.com',
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter an email';
+                      }
+                      if (!value.contains('@')) {
+                        return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  PfTextField(
+                    label: 'Phone',
+                    hintText: '+63 9XX XXX XXXX',
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter a phone number';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: PfButton.outlined(
+                          label: 'Cancel',
+                          fullWidth: true,
+                          onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: PfButton.filled(
+                          label: _isSubmitting ? 'Adding...' : 'Add Customer',
+                          fullWidth: true,
+                          onPressed: _isSubmitting ? null : _handleSubmit,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
