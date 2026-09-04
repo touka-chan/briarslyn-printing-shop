@@ -1,11 +1,21 @@
 /// Mirrors the web `Order` interface in `web/src/types/index.ts`.
 /// Aligned to Title 1 IX. API Contract: /api/orders, /api/orders/queue,
 /// /api/orders/{id}/status, /api/orders/{id}/eta.
+///
+/// `customerRegion` / `customerProvince` / `customerCity` / `customerBarangay`
+/// / `customerZip` carry the PSGC cascade output captured at order entry on
+/// the POS Cashier's New Order screen. All five are optional so legacy mock
+/// orders and orders entered without an address still round-trip cleanly.
 class Order {
   final String orderId;
   final String customerName;
   final String? customerEmail;
   final String? customerPhone;
+  final String? customerRegion;
+  final String? customerProvince;
+  final String? customerCity;
+  final String? customerBarangay;
+  final String? customerZip;
   final String itemType;
   final int quantity;
   final String layoutFile;
@@ -23,6 +33,11 @@ class Order {
     required this.customerName,
     this.customerEmail,
     this.customerPhone,
+    this.customerRegion,
+    this.customerProvince,
+    this.customerCity,
+    this.customerBarangay,
+    this.customerZip,
     required this.itemType,
     required this.quantity,
     required this.layoutFile,
@@ -42,6 +57,11 @@ class Order {
         customerName: json['customer_name'] as String,
         customerEmail: json['customer_email'] as String?,
         customerPhone: json['customer_phone'] as String?,
+        customerRegion: json['customer_region'] as String?,
+        customerProvince: json['customer_province'] as String?,
+        customerCity: json['customer_city'] as String?,
+        customerBarangay: json['customer_barangay'] as String?,
+        customerZip: json['customer_zip'] as String?,
         itemType: json['item_type'] as String,
         quantity: json['quantity'] as int,
         layoutFile: json['layout_file'] as String,
@@ -62,6 +82,11 @@ class Order {
         'customer_name': customerName,
         'customer_email': customerEmail,
         'customer_phone': customerPhone,
+        'customer_region': customerRegion,
+        'customer_province': customerProvince,
+        'customer_city': customerCity,
+        'customer_barangay': customerBarangay,
+        'customer_zip': customerZip,
         'item_type': itemType,
         'quantity': quantity,
         'layout_file': layoutFile,

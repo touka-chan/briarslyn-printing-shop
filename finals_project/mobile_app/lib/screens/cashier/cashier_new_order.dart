@@ -6,10 +6,12 @@ import '../../components/components.dart';
 import '../../design/tokens.dart';
 import '../../models/inventory_item.dart';
 import '../../models/order.dart';
+import '../../models/user_address.dart';
 import '../../services/order_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
 import '../../utils/mock_data.dart';
+import '../../widgets/address_cascade.dart';
 import 'cashier_order_confirmed.dart';
 
 /// The New Order screen — Cashier's second tab.
@@ -39,6 +41,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
   final _customerNameCtrl = TextEditingController();
   final _customerEmailCtrl = TextEditingController();
   final _customerPhoneCtrl = TextEditingController();
+  UserAddress _addressValue = const UserAddress();
 
   // Order details
   String _selectedItemType = 'T-Shirt';
@@ -93,6 +96,11 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         customerName: _customerNameCtrl.text.trim(),
         customerEmail: _customerEmailCtrl.text.trim().isEmpty ? null : _customerEmailCtrl.text.trim(),
         customerPhone: _customerPhoneCtrl.text.trim().isEmpty ? null : _customerPhoneCtrl.text.trim(),
+        customerRegion: _addressValue.region,
+        customerProvince: _addressValue.province,
+        customerCity: _addressValue.city,
+        customerBarangay: _addressValue.barangay,
+        customerZip: _addressValue.zip,
         itemType: _selectedItemType,
         quantity: int.parse(_quantityCtrl.text),
         layoutFile: _layoutFileCtrl.text.isEmpty ? '' : _layoutFileCtrl.text,
@@ -149,6 +157,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     return _customerNameCtrl.text.trim().isNotEmpty ||
         _customerEmailCtrl.text.trim().isNotEmpty ||
         _customerPhoneCtrl.text.trim().isNotEmpty ||
+        _addressValue.isNotEmpty ||
         _layoutFileCtrl.text.isNotEmpty ||
         _selectedTargetDate != null ||
         _paymentAmountCtrl.text != '0.00' ||
@@ -260,6 +269,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     _customerNameCtrl.clear();
     _customerEmailCtrl.clear();
     _customerPhoneCtrl.clear();
+    _addressValue = const UserAddress();
     _quantityCtrl.text = '1';
     _layoutFileCtrl.clear();
     _paymentAmountCtrl.text = '0.00';
@@ -329,6 +339,21 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
             _customerNameCtrl.text = customer['name'] as String;
             _customerEmailCtrl.text = customer['email'] as String;
             _customerPhoneCtrl.text = customer['phone'] as String;
+            // Hydrate the address cascade if the customer has a stored one.
+            // Falls back to an empty UserAddress (cascade clears) when none
+            // is set, so the cashier can still re-pick.
+            final region = customer['region'] as String?;
+            if (region == null) {
+              _addressValue = const UserAddress();
+            } else {
+              _addressValue = UserAddress(
+                region: region,
+                province: customer['province'] as String?,
+                city: customer['city'] as String?,
+                barangay: customer['barangay'] as String?,
+                zip: customer['zip'] as String?,
+              );
+            }
           });
           Navigator.pop(context);
         },
@@ -462,6 +487,16 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
             prefixIcon: Icons.phone_outlined,
             keyboardType: TextInputType.phone,
             textInputAction: TextInputAction.done,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const PfSectionHeader(
+            title: 'Address',
+            subtitle: 'Region, province, city, barangay (optional)',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          AddressCascade(
+            value: _addressValue,
+            onChange: (next) => setState(() => _addressValue = next),
           ),
           const SizedBox(height: AppSpacing.xl),
           PfButton.outlined(
@@ -704,6 +739,13 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                   label: 'Customer',
                   controller: _customerNameCtrl,
                   placeholder: '—',
+                ),
+                _SummaryField(
+                  label: 'Address',
+                  controller: null,
+                  value: _addressValue.summary().isEmpty
+                      ? '—'
+                      : _addressValue.summary(),
                 ),
                 _SummaryField(
                   label: 'Item',

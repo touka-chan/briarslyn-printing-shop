@@ -17,6 +17,11 @@ final List<Order> mockOrders = [
     customerName: 'Maria Santos',
     customerEmail: 'maria.santos@example.com',
     customerPhone: '+63 917 123 4567',
+    customerRegion: 'Region IV-A (CALABARZON)',
+    customerProvince: 'Laguna',
+    customerCity: 'Sta. Cruz',
+    customerBarangay: 'Pagsawitan',
+    customerZip: '4009',
     itemType: 'Tarpaulin - Medium',
     quantity: 2,
     layoutFile: 'layout_uploaded.png',
@@ -51,6 +56,11 @@ final List<Order> mockOrders = [
     customerName: 'Ana Reyes',
     customerEmail: 'ana.reyes@example.com',
     customerPhone: '+63 919 345 6789',
+    customerRegion: 'National Capital Region (NCR)',
+    customerProvince: 'Metro Manila',
+    customerCity: 'Quezon City',
+    customerBarangay: 'Diliman',
+    customerZip: '1101',
     itemType: 'Invitation - Matte',
     quantity: 100,
     layoutFile: 'artwork.pdf',
@@ -508,6 +518,11 @@ Map<String, dynamic> mockKpis(String role) {
 }
 
 /// Mock Customers - 8 frequent customers
+///
+/// Some entries carry a seeded PSGC address so the cashier's address
+/// cascade can pre-fill when the user picks them. Others have no
+/// address — matches real-world behavior and exercises the
+/// "no address" empty state in the order detail card.
 final List<Map<String, dynamic>> mockCustomers = [
   {
     'name': 'Maria Santos',
@@ -515,6 +530,11 @@ final List<Map<String, dynamic>> mockCustomers = [
     'phone': '+63 917 123 4567',
     'lastOrder': '2026-08-18',
     'totalSpent': 12500.0,
+    'region': 'Region IV-A (CALABARZON)',
+    'province': 'Laguna',
+    'city': 'Sta. Cruz',
+    'barangay': 'Pagsawitan',
+    'zip': '4009',
   },
   {
     'name': 'Juan Dela Cruz',
@@ -529,6 +549,11 @@ final List<Map<String, dynamic>> mockCustomers = [
     'phone': '+63 919 345 6789',
     'lastOrder': '2026-08-23',
     'totalSpent': 5600.0,
+    'region': 'National Capital Region (NCR)',
+    'province': 'Metro Manila',
+    'city': 'Quezon City',
+    'barangay': 'Diliman',
+    'zip': '1101',
   },
   {
     'name': 'Pedro Garcia',
@@ -536,6 +561,10 @@ final List<Map<String, dynamic>> mockCustomers = [
     'phone': '+63 920 456 7890',
     'lastOrder': '2026-08-25',
     'totalSpent': 15000.0,
+    'region': 'Region IV-A (CALABARZON)',
+    'province': 'Laguna',
+    'city': 'Calamba',
+    'zip': '4027',
   },
   {
     'name': 'Rosa Mendoza',

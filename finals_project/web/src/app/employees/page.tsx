@@ -5,7 +5,8 @@ import { Plus, Shield, User, UserCheck, Eye, EyeOff, Mail, Lock, ChevronDown, Us
 import { AdminLayout } from "@/components/layout";
 import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, useToast } from "@/components/ui";
 import { mockUsers, mockSales, mockOrders, mockProductionAll, sparklineData, kpiUpdatedLabel } from "@/lib/mockData";
-import { User as UserType } from "@/types";
+import { User as UserType, UserAddress } from "@/types";
+import { AddressCascade } from "@/components/forms";
 
 // Excludes the Owner — the Employees page is the team view.
 const employees: UserType[] = mockUsers.filter((u) => u.role !== "Owner");
@@ -52,15 +53,18 @@ export default function EmployeesPage() {
  const [showPw, setShowPw] = useState(false);
  const [showConfirm, setShowConfirm] = useState(false);
  const [roleVal, setRoleVal] = useState<UserType["role"]>("POS_Cashier");
+ const [addrVal, setAddrVal] = useState<UserAddress>({});
  const [kpiModal, setKpiModal] = useState<
   null | "all" | "Admin" | "POS_Cashier" | "Production Staff" | "active"
  >(null);
  const toast = useToast();
 
  const handleSubmit = () => {
-  toast.success(`Invitation sent to new ${roleVal} account`);
+  const where = addrVal?.city ? ` in ${addrVal.city}` : "";
+  toast.success(`Invitation sent to new ${roleVal} account${where}`);
   setOpen(false);
   setSel(null);
+  setAddrVal({});
  };
 
  const tabs = [
@@ -160,6 +164,7 @@ export default function EmployeesPage() {
  const openCreate = () => {
   setSel(null);
   setRoleVal("POS_Cashier");
+  setAddrVal({});
   setShowPw(false);
   setShowConfirm(false);
   setOpen(true);
@@ -167,6 +172,7 @@ export default function EmployeesPage() {
  const openView = (r: UserType) => {
   setSel(r);
   setRoleVal(r.role);
+  setAddrVal(r.address ?? {});
   setOpen(true);
  };
 
@@ -304,6 +310,7 @@ export default function EmployeesPage() {
     onClose={() => {
      setOpen(false);
      setSel(null);
+     setAddrVal({});
     }}
     title={modalTitle}
     description={modalDesc}
@@ -348,6 +355,10 @@ export default function EmployeesPage() {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+        <p className={labelCls}>EMAIL</p>
+        <p className="text-sm font-medium text-printflow-on-surface mt-1 truncate">{sel.email}</p>
+       </div>
+       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>ROLE</p>
         <p className="text-sm font-medium text-printflow-on-surface mt-1">{sel.role}</p>
        </div>
@@ -364,6 +375,21 @@ export default function EmployeesPage() {
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>USER ID</p>
         <p className="font-mono text-xs text-printflow-on-surface mt-1 truncate">{sel.id}</p>
+       </div>
+       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+        <p className={labelCls}>ADDRESS</p>
+        {sel.address?.region ? (
+         <p className="text-sm font-medium text-printflow-on-surface mt-1 leading-snug">
+          {[sel.address.barangay, sel.address.city, sel.address.province, sel.address.zip]
+           .filter(Boolean)
+           .join(", ")}
+         </p>
+        ) : (
+         <p className="text-sm text-printflow-on-surface-variant/60 mt-1">—</p>
+        )}
+        {sel.address?.region && (
+         <p className="text-xs text-printflow-on-surface-variant/70 mt-0.5">{sel.address.region}</p>
+        )}
        </div>
       </div>
 
@@ -490,6 +516,14 @@ export default function EmployeesPage() {
          </div>
         </div>
        </div>
+      </div>
+
+      {/* Group: Address — PSGC cascade dropdown */}
+      <div>
+       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">
+        ADDRESS
+       </p>
+       <AddressCascade value={addrVal} onChange={setAddrVal} />
       </div>
 
       {/* Group: Security */}

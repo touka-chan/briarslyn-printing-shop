@@ -122,6 +122,20 @@ export interface ProductionJob {
   based_on?: ("backlog" | "job_complexity" | "capacity")[];
 }
 
+// Address — sourced from the PSGC cascade dropdown in the Add/Edit form on
+// /users and /employees. All fields are optional so legacy mock data (and the
+// Owner row) stay valid without an address. The values are display names
+// (e.g., "Region IV-A (CALABARZON)", "Laguna", "Sta. Cruz", "Pagsawitan"),
+// resolved by name from web/public/Address/*.json at runtime by
+// components/forms/AddressCascade.
+export interface UserAddress {
+  region?: string;
+  province?: string;
+  city?: string;
+  barangay?: string;
+  zip?: string;
+}
+
 // Proposal VI: 3 roles only - Admin/Owner, POS/Cashier, Production Staff (Firebase Auth)
 export interface User {
   id: string;
@@ -130,4 +144,5 @@ export interface User {
   role: "Owner" | "Admin" | "POS_Cashier" | "Production Staff";
   status: "active" | "inactive";
   lastLogin: string;
+  address?: UserAddress;
 }

@@ -206,6 +206,26 @@ class OrderDetailScreen extends StatelessWidget {
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
                       ),
                     ],
+                    if (_hasAddress(order)) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: AppIconSize.sm,
+                            color: AppTheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: AppSpacing.xxs),
+                          Expanded(
+                            child: Text(
+                              _addressSummary(order),
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -725,6 +745,39 @@ class OrderDetailScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Returns true if the order has at least one address component set.
+  /// Used to decide whether to render the address line under the contact
+  /// info — orders captured before the address cascade was added will
+  /// skip this block entirely.
+  bool _hasAddress(Order order) {
+    return (order.customerRegion != null && order.customerRegion!.isNotEmpty) ||
+        (order.customerProvince != null && order.customerProvince!.isNotEmpty) ||
+        (order.customerCity != null && order.customerCity!.isNotEmpty) ||
+        (order.customerBarangay != null && order.customerBarangay!.isNotEmpty) ||
+        (order.customerZip != null && order.customerZip!.isNotEmpty);
+  }
+
+  /// Composes a one-line summary of the customer's address, omitting any
+  /// missing parts. Mirrors `UserAddress.summary()` on the web, with the
+  /// region prepended so the cashier can tell at a glance which
+  /// province / region the order ships to.
+  String _addressSummary(Order order) {
+    final parts = <String>[
+      if (order.customerBarangay != null && order.customerBarangay!.isNotEmpty)
+        order.customerBarangay!,
+      if (order.customerCity != null && order.customerCity!.isNotEmpty)
+        order.customerCity!,
+      if (order.customerProvince != null && order.customerProvince!.isNotEmpty)
+        order.customerProvince!,
+      if (order.customerZip != null && order.customerZip!.isNotEmpty)
+        order.customerZip!,
+    ];
+    if (order.customerRegion != null && order.customerRegion!.isNotEmpty) {
+      parts.add(order.customerRegion!);
+    }
+    return parts.join(', ');
   }
 
   String _formatAmount(double amount) {

@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useMemo, type ReactNode } from "react";
-import { Plus, Shield, User, UserCheck, Eye, EyeOff, Mail, Lock, ChevronDown, Pencil, UserPlus } from "lucide-react";
+import { Plus, Shield, User, UserCheck, Eye, EyeOff, Mail, Lock, ChevronDown, Pencil, UserPlus, MapPin } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, useToast } from "@/components/ui";
+import { AddressCascade } from "@/components/forms";
 import { mockUsers, sparklineData, kpiUpdatedLabel } from "@/lib/mockData";
-import { User as UserType } from "@/types";
+import { User as UserType, UserAddress } from "@/types";
 
 export default function UsersPage() {
  const [active, setActive] = useState("All");
@@ -16,17 +17,20 @@ export default function UsersPage() {
  const [showPw, setShowPw] = useState(false);
  const [showConfirm, setShowConfirm] = useState(false);
  const [roleVal, setRoleVal] = useState<UserType["role"]>("POS_Cashier");
+ const [addrVal, setAddrVal] = useState<UserAddress>({});
  const [kpiModal, setKpiModal] = useState<null | "all" | "Admin" | "POS_Cashier" | "Production Staff">(null);
  const toast = useToast();
 
  const handleSubmit = () => {
   if (mode === "create") {
-   toast.success(`Invitation sent to new ${roleVal} account`);
+   const where = addrVal?.city ? ` in ${addrVal.city}` : "";
+   toast.success(`Invitation sent to new ${roleVal} account${where}`);
   } else if (sel) {
    toast.success(`Updated ${sel.name}'s account`);
   }
   setOpen(false);
   setSel(null);
+  setAddrVal({});
  };
 
  const tabs = [
@@ -113,8 +117,9 @@ export default function UsersPage() {
   },
  ];
 
- const openCreate = () => { setSel(null); setMode("create"); setRoleVal("POS_Cashier"); setShowPw(false); setShowConfirm(false); setOpen(true); };
- const openView = (r: UserType) => { setSel(r); setRoleVal(r.role); setMode("view"); setOpen(true); };
+ const openCreate = () => { setSel(null); setMode("create"); setRoleVal("POS_Cashier"); setAddrVal({}); setShowPw(false); setShowConfirm(false); setOpen(true); };
+ const openView = (r: UserType) => { setSel(r); setRoleVal(r.role); setAddrVal(r.address ?? {}); setMode("view"); setOpen(true); };
+ const openEdit = (r: UserType) => { setSel(r); setRoleVal(r.role); setAddrVal(r.address ?? {}); setMode("edit"); };
 
  const modalIcon = mode==="create" ? <UserPlus className="w-5 h-5" /> : mode==="edit" ? <Pencil className="w-5 h-5" /> : sel ? <User className="w-5 h-5" /> : <User className="w-5 h-5" />;
  const modalTitle = mode==="create" ? "Add User" : mode==="edit" ? `Edit ${sel?.name}` : sel ? sel.name : "User";
@@ -139,7 +144,7 @@ export default function UsersPage() {
 
    <Modal
     isOpen={open}
-    onClose={()=>{setOpen(false); setSel(null);}}
+    onClose={()=>{setOpen(false); setSel(null); setAddrVal({});}}
     title={modalTitle}
     description={modalDesc}
     icon={modalIcon}
@@ -148,7 +153,7 @@ export default function UsersPage() {
      sel && mode==="view" ? (
       <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
        <Button variant="secondary" onClick={()=>setOpen(false)} className="flex-1 sm:flex-none">Close</Button>
-       <Button variant="primary" onClick={()=>setMode("edit")}><Pencil className="w-4 h-4" />Edit</Button>
+       <Button variant="primary" onClick={()=>openEdit(sel)}><Pencil className="w-4 h-4" />Edit</Button>
       </div>
      ) : (mode==="edit"||mode==="create") ? (
       <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
@@ -171,6 +176,9 @@ export default function UsersPage() {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+        <p className={labelCls}>EMAIL</p><p className="text-sm font-medium text-printflow-on-surface mt-1 truncate">{sel.email}</p>
+       </div>
+       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>ROLE</p><p className="text-sm font-medium text-printflow-on-surface mt-1">{sel.role}</p>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
@@ -181,6 +189,21 @@ export default function UsersPage() {
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>USER ID</p><p className="font-mono text-xs text-printflow-on-surface mt-1 truncate">{sel.id}</p>
+       </div>
+       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+        <p className={labelCls}>ADDRESS</p>
+        {sel.address?.region ? (
+         <p className="text-sm font-medium text-printflow-on-surface mt-1 leading-snug">
+          {[sel.address.barangay, sel.address.city, sel.address.province, sel.address.zip]
+           .filter(Boolean)
+           .join(", ")}
+         </p>
+        ) : (
+         <p className="text-sm text-printflow-on-surface-variant/60 mt-1">—</p>
+        )}
+        {sel.address?.region && (
+         <p className="text-xs text-printflow-on-surface-variant/70 mt-0.5">{sel.address.region}</p>
+        )}
        </div>
       </div>
      </div>
@@ -248,6 +271,12 @@ export default function UsersPage() {
          </div>
         </div>
        </div>
+      </div>
+
+      {/* Group: Address — PSGC cascade dropdown */}
+      <div>
+       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">ADDRESS</p>
+       <AddressCascade value={addrVal} onChange={setAddrVal} />
       </div>
 
       {/* Group: Security */}

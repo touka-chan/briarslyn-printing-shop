@@ -1,4 +1,4 @@
-import { Order, InventoryItem, ProductionJob, User, KpiData, DashboardSummary, RfidCheckoutEvent, Sale, PaymentMethod } from "@/types";
+import { Order, InventoryItem, ProductionJob, User, UserAddress, KpiData, DashboardSummary, RfidCheckoutEvent, Sale, PaymentMethod } from "@/types";
 
 // Fixed TODAY for deterministic priority (match proposal FR3)
 const TODAY = new Date("2026-08-20T00:00:00Z");
@@ -95,6 +95,18 @@ export const mockRfidHistory: RfidCheckoutEvent[] = [
 // "completed revenue" by filtering completed jobs by `assignedTo === u.id`.
 const PRODUCTION_USER_CYCLE: string[] = ["USR-003", "USR-004"];
 
+// Office address — used to seed a few mock users with the same PSGC address
+// so the AddressCascade has real values to pre-select. Display names match
+// the values in web/public/Address/*.json so AddressCascade.find*ByName
+// resolves the codes at runtime.
+const OFFICE_ADDRESS: UserAddress = {
+  region: "Region IV-A (CALABARZON)",
+  province: "Laguna",
+  city: "Sta. Cruz",
+  barangay: "Pagsawitan",
+  zip: "4009",
+};
+
 // Full history of every production job (including Completed). The
 // production queue page uses `mockProduction` (active only) below; the
 // Employees page uses `mockProductionAll` to derive per-staff completed
@@ -122,10 +134,10 @@ export const mockProduction: ProductionJob[] = mockProductionAll.filter(
 // Owner is the single business owner (Jena). The /employees page filters the Owner out;
 // the /users page is the system-of-record and lists all 4 roles.
 export const mockUsers: User[] = [
-  { id: "USR-001", name: "Jena Bersamina", email: "jena@brialyns.com", role: "Owner", status: "active", lastLogin: "2026-08-20 08:30" },
-  { id: "USR-002", name: "Admin 01", email: "cashier01@brialyns.com", role: "Admin", status: "active", lastLogin: "2026-08-20 07:45" },
-  { id: "USR-003", name: "Production 01", email: "prod01@brialyns.com", role: "Production Staff", status: "active", lastLogin: "2026-08-20 08:00" },
-  { id: "USR-004", name: "Production 02", email: "prod02@brialyns.com", role: "Production Staff", status: "active", lastLogin: "2026-08-20 07:55" },
+  { id: "USR-001", name: "Jena Bersamina", email: "jena@brialyns.com", role: "Owner", status: "active", lastLogin: "2026-08-20 08:30", address: OFFICE_ADDRESS },
+  { id: "USR-002", name: "Admin 01", email: "cashier01@brialyns.com", role: "Admin", status: "active", lastLogin: "2026-08-20 07:45", address: OFFICE_ADDRESS },
+  { id: "USR-003", name: "Production 01", email: "prod01@brialyns.com", role: "Production Staff", status: "active", lastLogin: "2026-08-20 08:00", address: OFFICE_ADDRESS },
+  { id: "USR-004", name: "Production 02", email: "prod02@brialyns.com", role: "Production Staff", status: "active", lastLogin: "2026-08-20 07:55", address: OFFICE_ADDRESS },
   { id: "USR-005", name: "Cashier 02", email: "cashier02@brialyns.com", role: "POS_Cashier", status: "active", lastLogin: "2026-08-20 08:05" },
   { id: "USR-006", name: "Cashier 03", email: "cashier03@brialyns.com", role: "POS_Cashier", status: "active", lastLogin: "2026-08-20 08:15" },
 ];
