@@ -103,8 +103,8 @@ class _PfSensorPulseState extends State<PfSensorPulse>
       children: [
         // Pulse dot
         SizedBox(
-          width: 12,
-          height: 12,
+          width: AppIconSize.xs - 2,
+          height: AppIconSize.xs - 2,
           child: widget.online && !reducedMotion
               ? AnimatedBuilder(
                   animation: _scaleAnimation,
@@ -143,11 +143,11 @@ class _PfSensorPulseState extends State<PfSensorPulse>
               ),
             ),
             if (widget.lastSync != null) ...[
-              const SizedBox(height: 2),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
                 widget.lastSync!,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontSize: 10,
+                  fontSize: AppTypography.caption,
                   color: AppTheme.onSurfaceVariant.withValues(alpha: 0.7),
                 ),
               ),

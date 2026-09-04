@@ -264,7 +264,7 @@ class _NotificationCard extends StatelessWidget {
                                             ? 'Low Stock'
                                             : 'Sensor',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: AppTypography.caption,
                           letterSpacing: 0.6,
                           fontWeight: FontWeight.w700,
                           color: notification.color,
@@ -272,7 +272,7 @@ class _NotificationCard extends StatelessWidget {
                       ),
                       Icon(
                         Icons.arrow_forward_rounded,
-                        size: 14,
+                        size: AppIconSize.xs,
                         color: notification.color,
                       ),
                     ],

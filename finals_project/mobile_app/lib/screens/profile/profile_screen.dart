@@ -223,7 +223,7 @@ class _ProfileHeader extends StatelessWidget {
                   child: Text(
                     roleLabel,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: AppTypography.caption,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.onPrimary,
                     ),
@@ -233,7 +233,7 @@ class _ProfileHeader extends StatelessWidget {
                 Text(
                   'Last login: $lastLogin',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: AppTypography.caption,
                     color: AppTheme.onPrimary.withValues(alpha: 0.7),
                   ),
                 ),
@@ -257,7 +257,7 @@ class _SectionTitle extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontSize: 11,
+              fontSize: AppTypography.caption,
               letterSpacing: 1.0,
               fontWeight: FontWeight.w700,
               color: AppTheme.onSurfaceVariant,

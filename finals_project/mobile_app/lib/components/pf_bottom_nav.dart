@@ -68,7 +68,7 @@ class PfBottomNav extends StatelessWidget {
         color: bgColor,
         border: Border(
           top: BorderSide(
-            color: AppTheme.surfaceContainer,
+            color: Theme.of(context).colorScheme.outlineVariant,
             width: 1,
           ),
         ),
@@ -211,7 +211,7 @@ class _NavItemButton extends StatelessWidget {
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: isSelected ? selectedColor : unselectedColor,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    fontSize: 10,
+                    fontSize: AppTypography.caption,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -319,7 +319,6 @@ class _PfRoleShellState extends State<PfRoleShell> with TickerProviderStateMixin
         const VerticalDivider(
           width: 1,
           thickness: 1,
-          color: AppTheme.surfaceContainer,
         ),
         Expanded(
           child: Column(

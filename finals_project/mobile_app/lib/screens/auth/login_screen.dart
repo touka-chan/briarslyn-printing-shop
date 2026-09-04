@@ -127,8 +127,8 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           child: const Icon(
                             Icons.print_rounded,
-                            color: Colors.white,
-                            size: 36,
+                            color: AppTheme.onPrimary,
+                            size: AppIconSize.xl,
                           ),
                         ),
                       ),
@@ -346,7 +346,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       padding: EdgeInsets.fromLTRB(
         AppSpacing.lg,

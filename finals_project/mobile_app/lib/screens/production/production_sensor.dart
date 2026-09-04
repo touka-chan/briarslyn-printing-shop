@@ -245,8 +245,8 @@ class _SensorHeaderCard extends StatelessWidget {
                   ),
                 ),
               Container(
-                width: 36,
-                height: 36,
+                width: AppIconSize.xl,
+                height: AppIconSize.xl,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: color,
@@ -254,8 +254,8 @@ class _SensorHeaderCard extends StatelessWidget {
                 child: Center(
                   child: Icon(
                     isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
-                    color: Colors.white,
-                    size: 20,
+                    color: AppTheme.onPrimary,
+                    size: AppIconSize.md,
                   ),
                 ),
               ),
@@ -268,7 +268,7 @@ class _SensorHeaderCard extends StatelessWidget {
               children: [
                 Text(
                   isOnline ? 'System Online' : 'System Offline',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
@@ -341,12 +341,12 @@ class _StatTile extends StatelessWidget {
           Text(
             value,
             style: AppTheme.monoStyle(
-              fontSize: 22,
+              fontSize: AppTypography.titleLg,
               fontWeight: FontWeight.w700,
               color: AppTheme.onSurface,
             ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: AppSpacing.xxs),
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
@@ -402,7 +402,7 @@ class _SensorCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Text(
                 sensorId,
-                style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               Container(
@@ -441,12 +441,12 @@ class _SensorCard extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.qr_code_2_rounded, size: 12, color: color),
+                    Icon(Icons.qr_code_2_rounded, size: AppIconSize.xs, color: color),
                     const SizedBox(width: AppSpacing.xs),
                     Text(
                       item.tagUid ?? 'N/A',
                       style: AppTheme.monoStyle(
-                        fontSize: 11,
+                        fontSize: AppTypography.caption,
                         fontWeight: FontWeight.w600,
                         color: color,
                       ),
@@ -491,8 +491,8 @@ class _ActivityRow extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: AppIconSize.xl,
+            height: AppIconSize.xl,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.18),
               shape: BoxShape.circle,
@@ -502,7 +502,7 @@ class _ActivityRow extends StatelessWidget {
                   ? Icons.fiber_manual_record_rounded
                   : Icons.qr_code_scanner_rounded,
               color: accent,
-              size: isFresh ? 14 : 18,
+              size: isFresh ? AppIconSize.xs : AppIconSize.sm,
             ),
           ),
           const SizedBox(width: AppSpacing.md),
@@ -515,7 +515,7 @@ class _ActivityRow extends StatelessWidget {
                     Flexible(
                       child: Text(
                         event.materialVariantId,
-                        style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -543,7 +543,7 @@ class _ActivityRow extends StatelessWidget {
                     ],
                   ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xxs),
                 Text(
                   '${event.tagUid} • ${event.sensorId}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),

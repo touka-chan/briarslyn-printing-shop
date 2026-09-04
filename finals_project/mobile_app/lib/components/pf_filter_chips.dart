@@ -57,7 +57,7 @@ class PfFilterChips extends StatelessWidget {
         onSelected: (_) => onChanged(option),
         showCheckmark: false,
         labelStyle: TextStyle(
-          fontSize: 13,
+          fontSize: AppTypography.bodySm,
           fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
           color: isSelected ? AppTheme.primary : AppTheme.onSurfaceVariant,
         ),

@@ -147,7 +147,7 @@ class _CashierOrderConfirmedScreenState
                             .textTheme
                             .headlineMedium
                             ?.copyWith(
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               color: AppTheme.onSurface,
                             ),
                       ),
@@ -192,7 +192,7 @@ class _CashierOrderConfirmedScreenState
                                     Text(
                                       'Insufficient stock',
                                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                            fontWeight: FontWeight.w700,
+                                            fontWeight: FontWeight.w600,
                                             color: AppTheme.onSurface,
                                           ),
                                     ),
@@ -324,7 +324,7 @@ class _CheckmarkPainter extends CustomPainter {
     );
 
     final paint = Paint()
-      ..color = Colors.white
+      ..color = AppTheme.onPrimary
       ..strokeWidth = size.width * 0.08
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
@@ -422,7 +422,7 @@ class _NextStepsCard extends StatelessWidget {
           Text(
             'What happens next',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: AppTheme.onSurface,
                 ),
           ),
@@ -469,13 +469,13 @@ class _NextStep extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 36,
-          height: 36,
+          width: AppIconSize.xl,
+          height: AppIconSize.xl,
           decoration: BoxDecoration(
             color: AppTheme.primary.withValues(alpha: 0.1),
             borderRadius: AppRadius.rMd,
           ),
-          child: Icon(icon, size: 18, color: AppTheme.primary),
+          child: Icon(icon, size: AppIconSize.sm, color: AppTheme.primary),
         ),
         const SizedBox(width: AppSpacing.md),
         Expanded(
@@ -489,7 +489,7 @@ class _NextStep extends StatelessWidget {
                       color: AppTheme.onSurface,
                     ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
                 subtitle,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(

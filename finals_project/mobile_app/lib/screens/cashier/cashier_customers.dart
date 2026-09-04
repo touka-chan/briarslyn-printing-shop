@@ -248,7 +248,8 @@ class _CustomerListTile extends StatelessWidget {
           builder: (_) => Container(
             decoration: const BoxDecoration(
               color: AppTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
             ),
             padding: const EdgeInsets.all(AppSpacing.lg),
             child: SingleChildScrollView(
@@ -277,7 +278,7 @@ class _CustomerListTile extends StatelessWidget {
                           children: [
                             Text(
                               name,
-                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
                             ),
                             const SizedBox(height: AppSpacing.xxs),
                             if (email.isNotEmpty)
@@ -306,7 +307,7 @@ class _CustomerListTile extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.payments_rounded, size: 16, color: AppTheme.statusCompleted),
+                        Icon(Icons.payments_rounded, size: AppIconSize.sm, color: AppTheme.statusCompleted),
                         const SizedBox(width: AppSpacing.sm),
                         Text(
                           'Total Spent: ₱${_formatAmount(totalSpent)}',
@@ -332,8 +333,8 @@ class _CustomerListTile extends StatelessWidget {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(o.orderId, style: AppTheme.monoStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                          const SizedBox(height: 2),
+                                          Text(o.orderId, style: AppTheme.monoStyle(fontSize: AppTypography.bodySm, fontWeight: FontWeight.w600)),
+                                          const SizedBox(height: AppSpacing.xxs),
                                           Text(
                                             o.itemType + (o.quantity > 1 ? ' ×${o.quantity}' : ''),
                                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
@@ -426,14 +427,14 @@ class _CustomerListTile extends StatelessWidget {
                   'Total',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppTheme.statusCompleted,
-                        fontSize: 9,
+                        fontSize: AppTypography.caption,
                         letterSpacing: 0.5,
                       ),
                 ),
                 Text(
                   '₱${_formatAmount(totalSpent)}',
                   style: AppTheme.monoStyle(
-                    fontSize: 14,
+                    fontSize: AppTypography.bodyMd,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.statusCompleted,
                   ),
@@ -514,7 +515,8 @@ class _AddCustomerSheetState extends State<_AddCustomerSheet> {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       padding: EdgeInsets.only(
         left: AppSpacing.lg,
@@ -541,7 +543,7 @@ class _AddCustomerSheetState extends State<_AddCustomerSheet> {
             Text(
               'Add Customer',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
             ),
             const SizedBox(height: AppSpacing.xs),

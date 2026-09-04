@@ -168,9 +168,9 @@ class OrderDetailScreen extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.arrow_forward_rounded, size: 14, color: AppTheme.primary),
-                      const SizedBox(width: 2),
-                      Text('View profile', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                      Icon(Icons.arrow_forward_rounded, size: AppIconSize.xs, color: AppTheme.primary),
+                      const SizedBox(width: AppSpacing.xxs),
+                      Text('View profile', style: TextStyle(fontSize: AppTypography.caption, fontWeight: FontWeight.w600, color: AppTheme.primary)),
                     ],
                   ),
                 ),
@@ -257,7 +257,7 @@ class OrderDetailScreen extends StatelessWidget {
       builder: (_) => Container(
         decoration: const BoxDecoration(
           color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
         ),
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: SingleChildScrollView(
@@ -286,7 +286,7 @@ class OrderDetailScreen extends StatelessWidget {
                       children: [
                         Text(
                           order.customerName,
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         if (order.customerEmail != null)
                           Text(
@@ -322,9 +322,9 @@ class OrderDetailScreen extends StatelessWidget {
                                 children: [
                                   Text(
                                     o.orderId,
-                                    style: AppTheme.monoStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                    style: AppTheme.monoStyle(fontSize: AppTypography.bodySm, fontWeight: FontWeight.w600),
                                   ),
-                                  const SizedBox(height: 2),
+                                  const SizedBox(height: AppSpacing.xxs),
                                   Text(
                                     o.itemType,
                                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
@@ -416,7 +416,7 @@ class OrderDetailScreen extends StatelessWidget {
               Text('Total Amount', style: Theme.of(context).textTheme.bodyMedium),
               Text(
                 '₱${_formatAmount(order.paymentAmount)}',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -512,32 +512,6 @@ class OrderDetailScreen extends StatelessWidget {
               size: PfButtonSize.large,
               onPressed: () => _confirmCancelOrder(context, order),
             ),
-          ),
-
-        const SizedBox(height: AppSpacing.md),
-        if (order.status == 'Pending' && isCashier)
-          Row(
-            children: [
-              Expanded(
-                child: PfButton.outlined(
-                  label: 'Edit Order',
-                  icon: Icons.edit_rounded,
-                  fullWidth: true,
-                  size: PfButtonSize.large,
-                  onPressed: () {
-                    HapticFeedback.selectionClick();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Editing of orders is coming soon. Cancel and re-create for now.',
-                        ),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
           ),
       ],
     );
@@ -702,7 +676,7 @@ class OrderDetailScreen extends StatelessWidget {
       builder: (sheetContext) => Container(
         decoration: const BoxDecoration(
           color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
         ),
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
         child: Column(
@@ -864,8 +838,8 @@ class _TimelineRow extends StatelessWidget {
             children: [
               AnimatedContainer(
                 duration: AppMotion.base,
-                width: 36,
-                height: 36,
+                width: AppIconSize.xl,
+                height: AppIconSize.xl,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: isActive ? color : Colors.transparent,
@@ -875,7 +849,7 @@ class _TimelineRow extends StatelessWidget {
                   child: Icon(
                     stage.icon,
                     size: AppIconSize.sm,
-                    color: isActive ? Colors.white : color,
+                    color: isActive ? AppTheme.onPrimary : color,
                   ),
                 ),
               ),
@@ -897,7 +871,7 @@ class _TimelineRow extends StatelessWidget {
               child: Text(
                 stage.label,
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: AppTypography.bodyLg,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                   color: isActive ? AppTheme.onSurface : AppTheme.onSurfaceVariant,
                 ),

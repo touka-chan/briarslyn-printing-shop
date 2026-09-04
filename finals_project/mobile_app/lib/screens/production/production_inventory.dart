@@ -156,6 +156,23 @@ class _InventoryCard extends StatelessWidget {
     return (item.currentStock / item.reorderPoint).clamp(0.0, 1.0);
   }
 
+  /// Returns true when current stock is projected to fall at or below the
+  /// reorder point within the next 7 days, using the forecasted demand
+  /// (title §VIII Holt-Winters / Exponential Smoothing forecast). Mirrors
+  /// the same arithmetic the backend's predictive ROP would apply.
+  bool _isReorderSuggested(InventoryItem item) {
+    final projectedAfter = item.currentStock - item.forecastedDemandNext7Days;
+    return projectedAfter <= item.reorderPoint;
+  }
+
+  /// How many units short the projected stock is of the reorder point.
+  /// Always non-negative when [_isReorderSuggested] is true.
+  int _reorderShortfall(InventoryItem item) {
+    final projectedAfter = item.currentStock - item.forecastedDemandNext7Days;
+    final gap = item.reorderPoint - projectedAfter;
+    return gap < 0 ? 0 : gap;
+  }
+
   @override
   Widget build(BuildContext context) {
     return PressScale(
@@ -214,7 +231,7 @@ class _InventoryCard extends StatelessWidget {
                     child: Text(
                       item.status,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: AppTypography.caption,
                         fontWeight: FontWeight.w700,
                         color: _statusColor,
                       ),
@@ -223,7 +240,7 @@ class _InventoryCard extends StatelessWidget {
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     item.materialVariantId,
-                    style: AppTheme.monoStyle(fontSize: 11, color: AppTheme.onSurfaceVariant),
+                    style: AppTheme.monoStyle(fontSize: AppTypography.caption, color: AppTheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -275,6 +292,17 @@ class _InventoryCard extends StatelessWidget {
                   ),
                 ],
               ),
+              // Predictive ROP indicator — title §VIII. Surfaces only when the
+              // variant is at or below its reorder point after the 7-day
+              // forecast is applied, so the cashier / production staff see
+              // a clear "reorder now" cue aligned with the model's threshold.
+              if (_isReorderSuggested(item)) ...[
+                const SizedBox(height: AppSpacing.sm),
+                _ReorderSuggestedChip(
+                  shortfall: _reorderShortfall(item),
+                  forecast: item.forecastedDemandNext7Days,
+                ),
+              ],
             ],
           ),
           if (item.sensorId != null) ...[
@@ -320,7 +348,7 @@ class _ItemDetailSheet extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
@@ -340,11 +368,11 @@ class _ItemDetailSheet extends StatelessWidget {
           ),
           Text(
             item.itemType,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
           ),
           Text(
             item.materialVariantId,
-            style: AppTheme.monoStyle(fontSize: 14, color: AppTheme.onSurfaceVariant),
+            style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.lg),
           _DetailRow(label: 'Category', value: item.category),
@@ -480,7 +508,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       padding: EdgeInsets.fromLTRB(
         AppSpacing.lg,
@@ -506,13 +534,13 @@ class _ReorderSheetState extends State<_ReorderSheet> {
           Text(
             'Place reorder',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
             '${widget.item.materialVariantId} • ${widget.item.itemType}',
-            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+            style: AppTheme.monoStyle(fontSize: AppTypography.label, color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.lg),
           Row(
@@ -672,7 +700,7 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       padding: EdgeInsets.fromLTRB(
         AppSpacing.lg,
@@ -698,13 +726,13 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
           Text(
             'Adjust Stock',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
             '${widget.item.materialVariantId} • ${widget.item.itemType}',
-            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+            style: AppTheme.monoStyle(fontSize: AppTypography.label, color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.lg),
           Row(
@@ -787,16 +815,16 @@ class _Stat extends StatelessWidget {
           Text(
             label.toUpperCase(),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
+                  fontSize: AppTypography.caption,
                   letterSpacing: 0.6,
                   color: highlight ? AppTheme.success : AppTheme.onSurfaceVariant,
                 ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             value,
             style: AppTheme.monoStyle(
-              fontSize: 18,
+              fontSize: AppTypography.titleMd,
               fontWeight: FontWeight.w700,
               color: highlight ? AppTheme.success : AppTheme.onSurface,
             ),
@@ -824,8 +852,74 @@ class _DetailRow extends StatelessWidget {
           Flexible(
             child: Text(
               value,
-              style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w500),
               textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Predictive ROP chip rendered under the inventory card's stock bar when
+/// the variant is projected to fall at or below the reorder point within
+/// the 7-day forecast window. Reuses the existing status palette — no new
+/// colors introduced. The icon + shortfall number tell production staff
+/// exactly how many units to order to clear the predicted gap.
+class _ReorderSuggestedChip extends StatelessWidget {
+  const _ReorderSuggestedChip({
+    required this.shortfall,
+    required this.forecast,
+  });
+
+  final int shortfall;
+  final int forecast;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = shortfall == 0
+        ? AppTheme.statusReadyForPickup
+        : AppTheme.statusUrgent;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: AppRadius.rMd,
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.auto_graph_rounded, size: AppIconSize.sm, color: color),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  shortfall == 0
+                      ? 'Reorder suggested · 7d forecast: $forecast'
+                      : 'Reorder suggested · short by $shortfall (7d forecast $forecast)',
+                  style: TextStyle(
+                    fontSize: AppTypography.bodySm,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  'Predictive reorder point · §VIII',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontSize: AppTypography.caption,
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
             ),
           ),
         ],

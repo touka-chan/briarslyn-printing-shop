@@ -284,9 +284,7 @@ class PfButton extends StatelessWidget {
   }
 
   BorderSide _borderSide(BuildContext context) {
-    if (variant == PfButtonVariant.outlined) {
-      return BorderSide(color: AppTheme.primary);
-    }
+    // The outlined variant already defines its side in styleFrom below.
     return BorderSide.none;
   }
 
@@ -319,7 +317,7 @@ class PfButton extends StatelessWidget {
       case PfButtonSize.medium:
         return AppIconSize.md;
       case PfButtonSize.large:
-        return AppIconSize.md;
+        return AppIconSize.lg;
     }
   }
 

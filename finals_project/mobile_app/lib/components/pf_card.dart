@@ -65,7 +65,7 @@ class PfCard extends StatelessWidget {
       case PfCardVariant.surface:
         effectiveBg = backgroundColor;
         effectiveBorder =
-            borderColor ?? AppTheme.onSurfaceVariant.withValues(alpha: 0.18);
+            borderColor ?? Theme.of(context).colorScheme.outlineVariant;
         shadow = const [];
         break;
     }

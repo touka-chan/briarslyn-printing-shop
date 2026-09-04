@@ -22,7 +22,17 @@ export interface TableColumn<T> {
   className?: string;
 }
 
-// Aligned to IX. API Contract: /api/orders, /api/orders/queue, /api/orders/{id}/status, /api/orders/{id}/eta
+// Aligned to the Flutter POS app (mobile_app/lib/screens/cashier/cashier_new_order.dart)
+// and IX. API Contract: /api/orders, /api/orders/queue, /api/orders/{id}/status, /api/orders/{id}/eta
+export type PaymentStatusLabel =
+  | "Paid"
+  | "Full Paid"
+  | "Unpaid"
+  | "Incomplete"
+  | "Partial"; // kept for backward compat with seeded web data; POS does not emit this
+
+export type PaymentMethod = "Cash" | "E-Wallets" | "Bank Transfer";
+
 export interface Order {
   order_id: string;
   customer_name: string;
@@ -33,7 +43,13 @@ export interface Order {
   layout_file: string; // layout01.png
   target_date: string; // YYYY-MM-DD
   payment_amount: number;
-  payment_status?: "Paid" | "Unpaid" | "Partial";
+  payment_status?: PaymentStatusLabel;
+  // Optional — populated when the POS persists the cashier's payment choice.
+  // The POS form has these values today (cashier_new_order.dart:48-49) but does not
+  // currently persist them on the Order; these fields are additive and safe to leave
+  // undefined for older records.
+  payment_method?: PaymentMethod;
+  cashier_id?: string; // matches mockUsers[].id
   status: "Pending" | "In Production" | "Ready for Pickup" | "Completed";
   priority: "Overdue" | "Urgent" | "Upcoming"; // computed from target_date per FR3
   estimated_completion: string; // YYYY-MM-DD from /api/orders/{id}/eta
@@ -44,6 +60,15 @@ export interface Order {
   customer?: string;
   product?: string;
   dueDate?: string;
+}
+
+// A "Sale" is a UI-only view shape that joins an Order with its POS-side metadata
+// (payment method + cashier identity). The Sales page reasons in sales terms; the
+// Order remains the source of truth persisted by the POS.
+export interface Sale {
+  order: Order;
+  paymentMethod: PaymentMethod;
+  cashierId: string;
 }
 
 // Aligned to /api/inventory/check, /api/inventory/alert, /api/rfid/checkout, /api/inventory/forecast
@@ -102,7 +127,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "POS_Cashier" | "Production Staff";
+  role: "Owner" | "Admin" | "POS_Cashier" | "Production Staff";
   status: "active" | "inactive";
   lastLogin: string;
 }

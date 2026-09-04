@@ -90,9 +90,28 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
 
   @override
   Widget build(BuildContext context) {
+    // Show a back button only when this screen was pushed as a route
+    // (e.g. from "View All" on the cashier home). When the screen is
+    // hosted as a bottom-nav tab the modal route can't pop, so we
+    // suppress the AppBar entirely to keep the tab layout clean.
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
     return Scaffold(
       backgroundColor: AppTheme.background,
+      appBar: canPop
+          ? AppBar(
+              title: const Text('All Orders'),
+              backgroundColor: AppTheme.surface,
+              foregroundColor: AppTheme.onSurface,
+              elevation: 0,
+              scrolledUnderElevation: 1,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            )
+          : null,
       body: SafeArea(
+        top: canPop,
         child: Column(
           children: [
             // Fixed search + filter bar (NOT a sliver — slivers required
@@ -329,7 +348,7 @@ class _SearchFilterBar extends StatelessWidget {
                   child: Text(
                     '${_fmt(fromDate!)} → ${_fmt(toDate!)}',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTypography.label,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.primary,
                     ),
@@ -377,7 +396,7 @@ class _SearchFilterBar extends StatelessWidget {
                   side: BorderSide(
                     color: isSelected
                         ? AppTheme.primary
-                        : AppTheme.surfaceContainer,
+                        : Theme.of(context).colorScheme.outlineVariant,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: AppRadius.rMd,

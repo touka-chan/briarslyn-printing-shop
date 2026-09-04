@@ -65,7 +65,7 @@ class PfFactChip extends StatelessWidget {
     final chip = Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xxs + 1,
+        vertical: AppSpacing.xxs,
       ),
       decoration: BoxDecoration(
         color: AppTheme.surfaceContainer,
@@ -77,7 +77,7 @@ class PfFactChip extends StatelessWidget {
           if (icon != null) ...[
             Icon(
               icon,
-              size: 12,
+              size: AppIconSize.xs,
               color: AppTheme.onSurfaceVariant,
             ),
             const SizedBox(width: AppSpacing.xxs),
@@ -85,7 +85,7 @@ class PfFactChip extends StatelessWidget {
           Text(
             label,
             style: AppTheme.monoStyle(
-              fontSize: 11,
+              fontSize: AppTypography.caption,
               fontWeight: FontWeight.w500,
               color: AppTheme.onSurfaceVariant,
             ),

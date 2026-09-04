@@ -94,7 +94,7 @@ class PfJobTicket extends StatelessWidget {
                       Text(
                         'JOB #',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontSize: 10,
+                          fontSize: AppTypography.caption,
                           letterSpacing: 1.2,
                           color: AppTheme.onSurfaceVariant,
                           fontWeight: FontWeight.w600,
@@ -103,7 +103,7 @@ class PfJobTicket extends StatelessWidget {
                       Text(
                         order.orderId,
                         style: AppTheme.monoStyle(
-                          fontSize: 16,
+                          fontSize: AppTypography.titleMd,
                           fontWeight: FontWeight.w600,
                           color: AppTheme.onSurface,
                         ),
@@ -146,20 +146,33 @@ class PfJobTicket extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // ETA with calendar icon
+                      // ETA with calendar icon — labels so the API contract
+                      // link (§IX /api/orders/{id}/eta) is obvious to a panel.
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             Icons.calendar_today_outlined,
                             size: AppIconSize.xs,
-                            color: AppTheme.onSurfaceVariant,
+                            color: _etaColor(order),
                           ),
                           const SizedBox(width: AppSpacing.xs),
                           Text(
+                            'ETA',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  fontSize: AppTypography.caption,
+                                  letterSpacing: 0.6,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.onSurfaceVariant,
+                                ),
+                          ),
+                          const SizedBox(width: AppSpacing.xxs),
+                          Text(
                             _formatDate(order.estimatedCompletion),
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w500,
+                            style: AppTheme.monoStyle(
+                              fontSize: AppTypography.bodySm,
+                              fontWeight: FontWeight.w700,
+                              color: _etaColor(order),
                             ),
                           ),
                         ],
@@ -178,7 +191,7 @@ class PfJobTicket extends StatelessWidget {
                         child: Text(
                           '₱ ${_formatAmount(order.paymentAmount)}',
                           style: AppTheme.monoStyle(
-                            fontSize: 13,
+                            fontSize: AppTypography.bodySm,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.primary,
                           ),
@@ -205,6 +218,19 @@ class PfJobTicket extends StatelessWidget {
     }
 
     return card;
+  }
+
+  /// Color-codes the ETA based on the gap to the target completion date so
+  /// overdue / at-risk tickets are visible at a glance. Mirrors the queue's
+  /// priority palette — no new colors introduced.
+  Color _etaColor(Order order) {
+    final daysUntilTarget =
+        order.targetDate.difference(DateTime.now()).inDays;
+    if (order.priority == 'Overdue' || daysUntilTarget < 0) {
+      return AppTheme.statusOverdue;
+    }
+    if (daysUntilTarget <= 2) return AppTheme.statusUrgent;
+    return AppTheme.onSurface;
   }
 
   /// Formats a DateTime as "MMM dd" (e.g., "Aug 28").

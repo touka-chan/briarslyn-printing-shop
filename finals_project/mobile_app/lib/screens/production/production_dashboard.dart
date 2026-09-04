@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../design/tokens.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/status_badge.dart';
 import '../../widgets/sensor_pulse.dart';
@@ -80,39 +81,39 @@ class ProductionDashboard extends StatelessWidget {
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(40),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.md),
             child: Row(
               children: [
                 SensorPulse(sensorId: 'ESP32-01'),
-                SizedBox(width: 8),
-                Text('RFID station online', style: TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant)),
+                SizedBox(width: AppSpacing.sm),
+                Text('RFID station online', style: TextStyle(fontSize: AppTypography.caption, color: AppTheme.onSurfaceVariant)),
               ],
             ),
           ),
         ),
       ),
       body: ListView.separated(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         itemCount: _queue.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 8),
+        separatorBuilder: (context, index) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
           final r = _queue[i];
           final basedOn = (r['based_on'] as List).cast<String>();
           return Card(
             child: InkWell(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: AppRadius.rMd,
               onTap: () {
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
                   ),
                   builder: (modalContext) => _orderDetails(r, basedOn, dateFmt, modalContext),
                 );
               },
               child: Padding(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(AppSpacing.md),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -120,9 +121,8 @@ class ProductionDashboard extends StatelessWidget {
                       children: [
                         Text(
                           r['order_id'] as String,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
+                          style: AppTheme.monoStyle(
+                            fontSize: AppTypography.label,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -130,34 +130,34 @@ class ProductionDashboard extends StatelessWidget {
                         StatusBadge.priority(r['priority'] as String, dense: true),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(r['item_type'] as String, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.xs + 2),
+                    Text(r['item_type'] as String, style: const TextStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: AppSpacing.sm),
                     Row(
                       children: [
                         StatusBadge.orderStatus(r['status'] as String, dense: true),
-                        const SizedBox(width: 8),
-                        Icon(Icons.event, size: 12, color: AppTheme.onSurfaceVariant),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AppSpacing.sm),
+                        Icon(Icons.event, size: AppIconSize.xs, color: AppTheme.onSurfaceVariant),
+                        const SizedBox(width: AppSpacing.xs),
                         Text('Target ${dateFmt.format(DateTime.parse(r['target_date'] as String))}',
-                            style: const TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant)),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.flag, size: 12, color: AppTheme.primary),
-                        const SizedBox(width: 4),
+                            style: const TextStyle(fontSize: AppTypography.caption, color: AppTheme.onSurfaceVariant)),
+                        const SizedBox(width: AppSpacing.sm),
+                        const Icon(Icons.flag, size: AppIconSize.xs, color: AppTheme.primary),
+                        const SizedBox(width: AppSpacing.xs),
                         Text('ETA ${dateFmt.format(DateTime.parse(r['eta'] as String))}',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                            style: const TextStyle(fontSize: AppTypography.caption, fontWeight: FontWeight.w600, color: AppTheme.primary)),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
                       children: basedOn
                           .map((f) => Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
                                 decoration: BoxDecoration(
                                   color: AppTheme.primary.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(4),
+                                  borderRadius: AppRadius.rXs,
                                   border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                                 ),
                                 child: Text(
@@ -189,7 +189,7 @@ class ProductionDashboard extends StatelessWidget {
       minChildSize: 0.4,
       builder: (sheetContext, controller) => SingleChildScrollView(
         controller: controller,
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -203,42 +203,42 @@ class ProductionDashboard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.lg),
             Row(
               children: [
-                Text(r['order_id'] as String, style: const TextStyle(fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.w700)),
+                Text(r['order_id'] as String, style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 StatusBadge.priority(r['priority'] as String),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(r['item_type'] as String, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.md),
+            Text(r['item_type'] as String, style: const TextStyle(fontSize: AppTypography.titleLg, fontWeight: FontWeight.w600)),
+            const SizedBox(height: AppSpacing.lg),
             _detailRow('Status', r['status'] as String),
             _detailRow('Target Date', r['target_date'] as String),
             _detailRow('ETA', r['eta'] as String),
-            const SizedBox(height: 16),
-            const Text('Queue Factors (ETA rationale)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.onSurfaceVariant)),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.lg),
+            const Text('Queue Factors (ETA rationale)', style: TextStyle(fontSize: AppTypography.label, fontWeight: FontWeight.w700, color: AppTheme.onSurfaceVariant)),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
               children: basedOn
                   .map((f) => Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs + 1),
                         decoration: BoxDecoration(
                           color: AppTheme.primary.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: AppRadius.rPill,
                           border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                         ),
                         child: Text(
                           _factorLabel(f),
-                          style: const TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontSize: AppTypography.label, color: AppTheme.primary, fontWeight: FontWeight.w600),
                         ),
                       ))
                   .toList(),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
               onPressed: () {
                 Navigator.pop(modalContext);
@@ -255,15 +255,15 @@ class ProductionDashboard extends StatelessWidget {
 
   Widget _detailRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs + 2),
       child: Row(
         children: [
           SizedBox(
             width: 120,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant)),
+            child: Text(label, style: const TextStyle(fontSize: AppTypography.label, color: AppTheme.onSurfaceVariant)),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            child: Text(value, style: const TextStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600)),
           ),
         ],
       ),

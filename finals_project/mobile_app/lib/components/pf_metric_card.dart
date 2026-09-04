@@ -48,7 +48,7 @@ class PfMetricCard extends StatelessWidget {
         color: AppTheme.surface,
         borderRadius: AppRadius.rLg,
         border: Border.all(
-          color: AppTheme.surfaceContainer,
+          color: Theme.of(context).colorScheme.outlineVariant,
           width: 1,
         ),
         boxShadow: [
@@ -73,7 +73,7 @@ class PfMetricCard extends StatelessWidget {
                 ),
                 child: Icon(
                   icon,
-                  size: 20,
+                  size: AppIconSize.md,
                   color: accentColor,
                 ),
               ),
@@ -151,7 +151,7 @@ class _ChangeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.xs,
-        vertical: 2,
+        vertical: AppSpacing.xxs,
       ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
@@ -162,14 +162,14 @@ class _ChangeBadge extends StatelessWidget {
         children: [
           Icon(
             positive ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
-            size: 12,
+            size: AppIconSize.xs,
             color: color,
           ),
-          const SizedBox(width: 2),
+          const SizedBox(width: AppSpacing.xxs),
           Text(
             change,
             style: AppTheme.monoStyle(
-              fontSize: 11,
+              fontSize: AppTypography.caption,
               fontWeight: FontWeight.w600,
               color: color,
             ),

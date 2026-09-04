@@ -1,8 +1,21 @@
 "use client";
 
-import { useState, ReactNode } from "react";
-import { Bell, Search, User, LogOut, Moon, Sun, ChevronDown } from "lucide-react";
+import { useEffect, useState, ReactNode } from "react";
+import {
+ Bell,
+ Search,
+ User,
+ LogOut,
+ Moon,
+ Sun,
+ ChevronDown,
+ Settings,
+ Package,
+ AlertTriangle,
+ ShoppingBag,
+} from "lucide-react";
 import { Button } from "@/components/ui";
+import { mockUsers, mockOrders, mockInventory } from "@/lib/mockData";
 
 interface HeaderProps {
  title: string;
@@ -12,29 +25,142 @@ interface HeaderProps {
  searchPlaceholder?: string;
 }
 
-export function Header({ title, subtitle, actions, onSearch, searchPlaceholder = "Search orders, inventory..." }: HeaderProps) {
+type Theme = "light" | "dark";
+
+function readStoredTheme(): Theme {
+ if (typeof window === "undefined") return "light";
+ try {
+  const t = localStorage.getItem("printflow-theme");
+  if (t === "dark" || t === "light") return t;
+ } catch {}
+ if (
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-color-scheme: dark)").matches
+ ) {
+  return "dark";
+ }
+ return "light";
+}
+
+function applyTheme(theme: Theme) {
+ const root = document.documentElement;
+ if (theme === "dark") {
+  root.classList.add("dark");
+ } else {
+  root.classList.remove("dark");
+ }
+ try {
+  localStorage.setItem("printflow-theme", theme);
+ } catch {}
+}
+
+function timeAgo(iso: string, now: Date = new Date("2026-08-20T12:00:00Z")): string {
+ const then = new Date(iso);
+ const ms = now.getTime() - then.getTime();
+ const mins = Math.round(ms / 60000);
+ if (mins < 1) return "just now";
+ if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+ const hrs = Math.round(mins / 60);
+ if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+ const days = Math.round(hrs / 24);
+ return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export function Header({
+ title,
+ subtitle,
+ actions,
+ onSearch,
+ searchPlaceholder = "Search orders, inventory...",
+}: HeaderProps) {
  const [notificationsOpen, setNotificationsOpen] = useState(false);
  const [userMenuOpen, setUserMenuOpen] = useState(false);
  const [searchValue, setSearchValue] = useState("");
+ const [theme, setTheme] = useState<Theme>("light");
+ const [mounted, setMounted] = useState(false);
+
+ useEffect(() => {
+  setMounted(true);
+  setTheme(readStoredTheme());
+ }, []);
+
+ const toggleTheme = () => {
+  const next: Theme = theme === "dark" ? "light" : "dark";
+  setTheme(next);
+  applyTheme(next);
+ };
 
  const handleSearchChange = (value: string) => {
   setSearchValue(value);
   onSearch?.(value);
  };
 
+ const adminUser = mockUsers.find((u) => u.role === "Admin") ?? mockUsers[0];
+
+ // Derive three live notifications from real data
+ const latestReady = mockOrders.find((o) => o.status === "Ready for Pickup");
+ const lowStockItem = [...mockInventory]
+  .sort((a, b) => a.current_stock - b.current_stock)
+  .find((i) => i.current_stock <= i.reorder_point);
+ const newestOrder = [...mockOrders].sort(
+  (a, b) =>
+   new Date(b.createdAt ?? b.target_date).getTime() -
+   new Date(a.createdAt ?? a.target_date).getTime(),
+ )[0];
+
+ const notifications = [
+  latestReady && {
+   id: `ready-${latestReady.id ?? latestReady.order_id}`,
+   icon: Package,
+   accent: "text-printflow-success",
+   title: `Order ${latestReady.order_id}`,
+   detail: `Ready for pickup — ${latestReady.customer_name}`,
+   meta: "Production completed",
+  },
+  lowStockItem && {
+   id: `low-${lowStockItem.id ?? lowStockItem.material_variant_id}`,
+   icon: AlertTriangle,
+   accent: "text-printflow-warning",
+   title: "Low stock alert",
+   detail: `${lowStockItem.item_type} — ${lowStockItem.current_stock} units remaining`,
+   meta: "Reorder recommended",
+  },
+  newestOrder && {
+   id: `new-${newestOrder.id ?? newestOrder.order_id}`,
+   icon: ShoppingBag,
+   accent: "text-printflow-primary",
+   title: "New order received",
+   detail: `Order ${newestOrder.order_id} from ${newestOrder.customer_name}`,
+   meta: timeAgo(newestOrder.createdAt ?? newestOrder.target_date),
+  },
+ ].filter(Boolean) as Array<{
+  id: string;
+  icon: typeof Package;
+  accent: string;
+  title: string;
+  detail: string;
+  meta: string;
+ }>;
+
  return (
   <header className="sticky top-0 z-30 bg-printflow-surface/80 backdrop-blur-sm border-b border-printflow-outline-variant">
    <div className="flex items-center justify-between h-16 px-6 gap-4">
     {/* Left: Title */}
     <div className="flex-1 min-w-0">
-     <h1 className="text-xl font-headline font-semibold text-printflow-on-surface truncate">{title}</h1>
-     {subtitle && <p className="text-sm text-printflow-on-surface-variant truncate">{subtitle}</p>}
+     <h1 className="text-xl font-semibold text-printflow-on-surface truncate">
+      {title}
+     </h1>
+     {subtitle && (
+      <p className="text-sm text-printflow-on-surface-variant truncate">
+       {subtitle}
+      </p>
+     )}
     </div>
 
     {/* Center: Search (hidden on mobile) */}
     <div className="hidden md:flex flex-1 max-w-xl mx-8">
      <div className="relative w-full">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-printflow-on-surface-variant w-5 h-5" />
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-printflow-on-surface-variant w-5 h-5 pointer-events-none" />
       <input
        type="text"
        placeholder={searchPlaceholder}
@@ -59,42 +185,79 @@ export function Header({ title, subtitle, actions, onSearch, searchPlaceholder =
        aria-expanded={notificationsOpen}
       >
        <Bell className="w-5 h-5" />
-       <span className="absolute top-1 right-1 w-2 h-2 bg-printflow-error rounded-full" />
+       {notifications.length > 0 && (
+        <span className="absolute top-1 right-1 w-2 h-2 bg-printflow-error rounded-full" />
+       )}
       </button>
 
       {notificationsOpen && (
-       <div className="absolute right-0 mt-2 w-72 bg-printflow-surface rounded-xl shadow-lg border border-printflow-outline-variant py-2 z-50">
+       <div
+        className="absolute right-0 mt-2 w-80 bg-printflow-surface rounded-xl shadow-lg border border-printflow-outline-variant py-2 z-50"
+        style={{ animation: "slide-in-up 180ms ease-out" }}
+       >
         <div className="px-4 py-3 border-b border-printflow-outline-variant flex items-center justify-between">
          <h3 className="font-semibold text-printflow-on-surface">Notifications</h3>
-         <Button variant="ghost" size="sm">Mark all read</Button>
+         <span className="type-label text-printflow-on-surface-variant">
+          {notifications.length} new
+         </span>
         </div>
-        <div className="max-h-64 overflow-y-auto">
-         <div className="px-4 py-3">
-          <p className="text-sm font-medium text-printflow-on-surface mb-1">Order #PF-2024-001</p>
-          <p className="text-xs text-printflow-on-surface-variant">Production completed</p>
-          <p className="text-xs text-printflow-on-surface-variant mt-1">2 minutes ago</p>
-         </div>
-         <div className="px-4 py-3 border-t border-printflow-outline-variant">
-          <p className="text-sm font-medium text-printflow-on-surface mb-1">Low Stock Alert</p>
-          <p className="text-xs text-printflow-on-surface-variant">Cardboard A4 - 15 units remaining</p>
-          <p className="text-xs text-printflow-on-surface-variant mt-1">15 minutes ago</p>
-         </div>
-         <div className="px-4 py-3 border-t border-printflow-outline-variant">
-          <p className="text-sm font-medium text-printflow-on-surface mb-1">New Order Received</p>
-          <p className="text-xs text-printflow-on-surface-variant">Order #PF-2024-002 from Acme Corp</p>
-          <p className="text-xs text-printflow-on-surface-variant mt-1">1 hour ago</p>
-         </div>
+        <div className="max-h-72 overflow-y-auto scrollbar-thin">
+         {notifications.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-printflow-on-surface-variant">
+           You&apos;re all caught up.
+          </div>
+         ) : (
+          notifications.map((n, idx) => {
+           const Icon = n.icon;
+           return (
+            <div
+             key={n.id}
+             className={`px-4 py-3 flex gap-3 ${
+              idx > 0 ? "border-t border-printflow-outline-variant/60" : ""
+             }`}
+            >
+             <div
+              className={`shrink-0 w-8 h-8 rounded-full bg-printflow-surface-container flex items-center justify-center ${n.accent}`}
+             >
+              <Icon className="w-4 h-4" />
+             </div>
+             <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-printflow-on-surface">
+               {n.title}
+              </p>
+              <p className="text-xs text-printflow-on-surface-variant truncate">
+               {n.detail}
+              </p>
+              <p className="text-xs text-printflow-on-surface-variant/80 mt-0.5">
+               {n.meta}
+              </p>
+             </div>
+            </div>
+           );
+          })
+         )}
         </div>
         <div className="p-3 border-t border-printflow-outline-variant">
-         <Button variant="secondary" className="w-full" size="sm">View all notifications</Button>
+         <Button variant="secondary" className="w-full" size="sm">
+          View all activity
+         </Button>
         </div>
        </div>
       )}
      </div>
 
      {/* Theme Toggle */}
-     <button className="btn-ghost p-2" aria-label="Toggle theme">
-      <Sun className="w-5 h-5" />
+     <button
+      onClick={toggleTheme}
+      className="btn-ghost p-2"
+      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+     >
+      {mounted && theme === "dark" ? (
+       <Sun className="w-5 h-5" />
+      ) : (
+       <Moon className="w-5 h-5" />
+      )}
      </button>
 
      {/* User Menu */}
@@ -108,15 +271,30 @@ export function Header({ title, subtitle, actions, onSearch, searchPlaceholder =
        <div className="w-8 h-8 bg-printflow-primary-fixed rounded-full flex items-center justify-center">
         <User className="w-5 h-5 text-printflow-primary" />
        </div>
+       <div className="hidden sm:block text-left">
+        <p className="text-sm font-medium text-printflow-on-surface leading-tight">
+         {adminUser.name}
+        </p>
+        <p className="text-xs text-printflow-on-surface-variant leading-tight">
+         {adminUser.role}
+        </p>
+       </div>
        <ChevronDown className="w-4 h-4 text-printflow-on-surface-variant" />
       </button>
 
       {userMenuOpen && (
-       <div className="absolute right-0 mt-2 w-48 bg-printflow-surface rounded-xl shadow-lg border border-printflow-outline-variant py-2 z-50">
+       <div
+        className="absolute right-0 mt-2 w-60 bg-printflow-surface rounded-xl shadow-lg border border-printflow-outline-variant py-2 z-50"
+        style={{ animation: "slide-in-up 180ms ease-out" }}
+       >
         <div className="px-4 py-3 border-b border-printflow-outline-variant">
-         <p className="font-medium text-printflow-on-surface">John Doe</p>
-         <p className="text-xs text-printflow-on-surface-variant">admin@printfow.com</p>
-         <p className="text-xs text-printflow-success mt-1">Admin</p>
+         <p className="font-medium text-printflow-on-surface truncate">
+          {adminUser.name}
+         </p>
+         <p className="text-xs text-printflow-on-surface-variant truncate">
+          {adminUser.email}
+         </p>
+         <p className="text-xs text-printflow-success mt-1">{adminUser.role}</p>
         </div>
         <button className="dropdown-item w-full">
          <User className="w-4 h-4" />
@@ -139,5 +317,3 @@ export function Header({ title, subtitle, actions, onSearch, searchPlaceholder =
   </header>
  );
 }
-
-import { Settings } from "lucide-react";

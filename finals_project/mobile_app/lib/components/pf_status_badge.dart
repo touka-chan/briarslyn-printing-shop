@@ -180,7 +180,7 @@ class PfStatusBadge extends StatelessWidget {
         children: [
           if (icon != null) ...[
             Icon(icon, size: iconSize, color: color),
-            const SizedBox(width: 4),
+            const SizedBox(width: AppSpacing.xs),
           ],
           Text(
             label,

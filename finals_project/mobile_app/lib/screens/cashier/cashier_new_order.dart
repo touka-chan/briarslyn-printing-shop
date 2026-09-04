@@ -143,6 +143,53 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     }
   }
 
+  /// Returns true if the user has entered any data that would be lost on
+  /// pop. Used by [_handleBack] to decide whether to confirm-discard.
+  bool _hasUserInput() {
+    return _customerNameCtrl.text.trim().isNotEmpty ||
+        _customerEmailCtrl.text.trim().isNotEmpty ||
+        _customerPhoneCtrl.text.trim().isNotEmpty ||
+        _layoutFileCtrl.text.isNotEmpty ||
+        _selectedTargetDate != null ||
+        _paymentAmountCtrl.text != '0.00' ||
+        (_quantityCtrl.text != '1') ||
+        _paymentStatus != 'Unpaid';
+  }
+
+  /// AppBar back handler. Confirms with the user if the form has any input
+  /// so an accidental back-tap doesn't silently discard the draft.
+  Future<void> _handleBack() async {
+    if (!_hasUserInput()) {
+      Navigator.pop(context);
+      return;
+    }
+    HapticFeedback.selectionClick();
+    final shouldDiscard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Discard new order?'),
+        content: const Text(
+          'You have unsaved changes. Going back now will clear all entered '
+          'customer, item, and payment details.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep editing'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDiscard == true && mounted) {
+      Navigator.pop(context);
+    }
+  }
+
   /// Computes order priority based on target date.
   static String _computePriority(DateTime targetDate) {
     final daysUntil = targetDate.difference(DateTime.now()).inDays;
@@ -299,7 +346,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         foregroundColor: AppTheme.onSurface,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _handleBack,
         ),
       ),
       body: SafeArea(
@@ -344,7 +391,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         color: AppTheme.surface,
         border: Border(
           bottom: BorderSide(
-            color: AppTheme.surfaceContainer,
+            color: Theme.of(context).colorScheme.outlineVariant,
             width: 1,
           ),
         ),
@@ -649,7 +696,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                 Text(
                   'Order Summary',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -725,7 +772,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.surfaceContainer)),
+        border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -796,7 +843,9 @@ class _ItemTypeOption extends StatelessWidget {
           color: isSelected ? AppTheme.primary : AppTheme.surface,
           borderRadius: AppRadius.rMd,
           border: Border.all(
-            color: isSelected ? AppTheme.primary : AppTheme.surfaceContainer,
+            color: isSelected
+                ? AppTheme.primary
+                : Theme.of(context).colorScheme.outlineVariant,
             width: 2,
           ),
         ),
@@ -804,7 +853,7 @@ class _ItemTypeOption extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (isSelected)
-              Icon(Icons.check_rounded, size: 16, color: AppTheme.onPrimary),
+              Icon(Icons.check_rounded, size: AppIconSize.sm, color: AppTheme.onPrimary),
             if (isSelected) const SizedBox(width: AppSpacing.xs),
             Text(
               label,
@@ -848,8 +897,8 @@ class _StepCircle extends StatelessWidget {
       children: [
         AnimatedContainer(
           duration: AppMotion.base,
-          width: 36,
-          height: 36,
+          width: AppIconSize.xl,
+          height: AppIconSize.xl,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: isCompleted || isActive ? color : AppTheme.surfaceContainer,
@@ -860,15 +909,15 @@ class _StepCircle extends StatelessWidget {
           ),
           child: Center(
             child: isCompleted
-                ? Icon(Icons.check_rounded, size: 18, color: Colors.white)
-                : Icon(icon, size: 18, color: isActive ? Colors.white : AppTheme.onSurfaceVariant),
+                ? Icon(Icons.check_rounded, size: AppIconSize.sm, color: AppTheme.onPrimary)
+                : Icon(icon, size: AppIconSize.sm, color: isActive ? AppTheme.onPrimary : AppTheme.onSurfaceVariant),
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
           label,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: AppTypography.caption,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
             color: isActive ? AppTheme.primary : AppTheme.onSurfaceVariant,
           ),
@@ -1021,7 +1070,7 @@ class _LayoutUploadAreaState extends State<_LayoutUploadArea> {
                     children: [
                       Icon(
                         Icons.insert_drive_file_rounded,
-                        size: 18,
+                        size: AppIconSize.sm,
                         color: AppTheme.primary,
                       ),
                       const SizedBox(width: AppSpacing.sm),
@@ -1194,16 +1243,16 @@ class _AvailabilityBanner extends StatelessWidget {
         Text(
           label.toUpperCase(),
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontSize: 9,
+                fontSize: AppTypography.caption,
                 letterSpacing: 0.6,
                 color: AppTheme.onSurfaceVariant,
               ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: AppSpacing.xxs),
         Text(
           value,
           style: AppTheme.monoStyle(
-            fontSize: 13,
+            fontSize: AppTypography.bodySm,
             fontWeight: FontWeight.w700,
             color: AppTheme.onSurface,
           ),
@@ -1251,7 +1300,7 @@ class _CustomerPickerSheet extends StatelessWidget {
                 Text(
                   'Select Customer',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const Spacer(),

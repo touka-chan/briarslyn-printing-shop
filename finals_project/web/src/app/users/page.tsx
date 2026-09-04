@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Plus, Shield, User, UserCheck, Eye, EyeOff, Mail, Lock, ChevronDown, Pencil, UserPlus } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard } from "@/components/ui";
-import { mockUsers } from "@/lib/mockData";
+import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, useToast } from "@/components/ui";
+import { mockUsers, sparklineData, kpiUpdatedLabel } from "@/lib/mockData";
 import { User as UserType } from "@/types";
 
 export default function UsersPage() {
@@ -16,6 +16,18 @@ export default function UsersPage() {
  const [showPw, setShowPw] = useState(false);
  const [showConfirm, setShowConfirm] = useState(false);
  const [roleVal, setRoleVal] = useState<UserType["role"]>("POS_Cashier");
+ const [kpiModal, setKpiModal] = useState<null | "all" | "Admin" | "POS_Cashier" | "Production Staff">(null);
+ const toast = useToast();
+
+ const handleSubmit = () => {
+  if (mode === "create") {
+   toast.success(`Invitation sent to new ${roleVal} account`);
+  } else if (sel) {
+   toast.success(`Updated ${sel.name}'s account`);
+  }
+  setOpen(false);
+  setSel(null);
+ };
 
  const tabs = [
   { id: "All", label: "All", count: mockUsers.length },
@@ -38,6 +50,69 @@ export default function UsersPage() {
  const inputBase = "w-full pl-10 pr-4 py-2.5 text-sm bg-printflow-surface-container rounded-xl border border-printflow-outline-variant/40 focus:bg-printflow-surface focus:border-printflow-primary focus:ring-4 focus:ring-printflow-primary/10 focus:outline-none transition-all placeholder:text-printflow-on-surface-variant/50";
  const labelCls = "text-[12px] font-medium tracking-wide text-printflow-on-surface-variant";
 
+ // --- KPI drill-down ----------------------------------------------------
+ // Click a role card on the header row → modal opens with the users that
+ // contribute to that count. Clicking a row deep-links into the existing
+ // view modal so the user can be inspected without losing context.
+ const kpiFilteredUsers = useMemo(() => {
+  if (kpiModal === null) return [] as UserType[];
+  if (kpiModal === "all") return mockUsers;
+  return mockUsers.filter((u) => u.role === kpiModal);
+ }, [kpiModal]);
+
+ const kpiMeta: Record<NonNullable<typeof kpiModal>, { title: string; desc: string; icon: ReactNode; count: number }> = {
+  all: {
+   title: "All Users",
+   desc: `${kpiFilteredUsers.length} accounts across all roles`,
+   icon: <User className="w-5 h-5" />,
+   count: kpiFilteredUsers.length,
+  },
+  Admin: {
+   title: "Admin Users",
+   desc: `${kpiFilteredUsers.length} accounts with admin access`,
+   icon: <Shield className="w-5 h-5" />,
+   count: kpiFilteredUsers.length,
+  },
+  POS_Cashier: {
+   title: "POS / Cashier Users",
+   desc: `${kpiFilteredUsers.length} accounts on the front-of-house team`,
+   icon: <UserCheck className="w-5 h-5" />,
+   count: kpiFilteredUsers.length,
+  },
+  "Production Staff": {
+   title: "Production Staff Users",
+   desc: `${kpiFilteredUsers.length} accounts on the production floor`,
+   icon: <User className="w-5 h-5" />,
+   count: kpiFilteredUsers.length,
+  },
+ };
+
+ const userKpiColumns: { key: keyof UserType | "actions"; header: string; className?: string; render?: (r: UserType) => ReactNode }[] = [
+  { key: "name", header: "Name" },
+  { key: "email", header: "Email" },
+  {
+   key: "role",
+   header: "Role",
+   render: (r) => (
+    <span className="px-2.5 py-0.5 rounded-full text-xs bg-printflow-primary-fixed/20 text-printflow-primary">
+     {r.role}
+    </span>
+   ),
+  },
+  {
+   key: "status",
+   header: "Status",
+   render: (r) => <StatusBadge status={r.status} />,
+  },
+  { key: "lastLogin", header: "Last Login" },
+  {
+   key: "actions",
+   header: "",
+   className: "w-10",
+   render: () => <Eye className="w-4 h-4 text-printflow-on-surface-variant" />,
+  },
+ ];
+
  const openCreate = () => { setSel(null); setMode("create"); setRoleVal("POS_Cashier"); setShowPw(false); setShowConfirm(false); setOpen(true); };
  const openView = (r: UserType) => { setSel(r); setRoleVal(r.role); setMode("view"); setOpen(true); };
 
@@ -51,10 +126,10 @@ export default function UsersPage() {
  return (
   <AdminLayout title="Users" subtitle="Manage team accounts" onSearch={setSearch}>
    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    <KpiCard label="Total Users" value={mockUsers.length} icon="User" />
-    <KpiCard label="Admin" value={mockUsers.filter(u=>u.role==="Admin").length} icon="Shield" />
-    <KpiCard label="POS/Cashier" value={mockUsers.filter(u=>u.role==="POS_Cashier").length} icon="UserCheck" />
-    <KpiCard label="Production Staff" value={mockUsers.filter(u=>u.role==="Production Staff").length} icon="User" />
+    <KpiCard label="Total Users" value={mockUsers.length} icon="User" sparkline={sparklineData(mockUsers.length, "rising", "users-total")} sparklineTone="primary" lastUpdated={kpiUpdatedLabel("users-total")} onClick={()=>setKpiModal("all")} />
+    <KpiCard label="Admin" value={mockUsers.filter(u=>u.role==="Admin").length} icon="Shield" sparkline={sparklineData(mockUsers.filter(u=>u.role==="Admin").length, "stable", "users-admin")} sparklineTone="primary" lastUpdated={kpiUpdatedLabel("users-admin")} onClick={()=>setKpiModal("Admin")} />
+    <KpiCard label="POS/Cashier" value={mockUsers.filter(u=>u.role==="POS_Cashier").length} icon="UserCheck" sparkline={sparklineData(mockUsers.filter(u=>u.role==="POS_Cashier").length, "stable", "users-pos")} sparklineTone="success" lastUpdated={kpiUpdatedLabel("users-pos")} onClick={()=>setKpiModal("POS_Cashier")} />
+    <KpiCard label="Production Staff" value={mockUsers.filter(u=>u.role==="Production Staff").length} icon="User" sparkline={sparklineData(mockUsers.filter(u=>u.role==="Production Staff").length, "wave", "users-prod")} sparklineTone="warning" lastUpdated={kpiUpdatedLabel("users-prod")} onClick={()=>setKpiModal("Production Staff")} />
    </div>
 
    <ContentCard title="Team Members" subtitle={`${filtered.length} accounts`}>
@@ -78,7 +153,7 @@ export default function UsersPage() {
      ) : (mode==="edit"||mode==="create") ? (
       <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
        <Button variant="secondary" onClick={()=>setOpen(false)} className="flex-1 sm:flex-none">Cancel</Button>
-       <Button variant="primary" className="flex-1 sm:flex-none shadow-sm">{mode==="create" ? <><Plus className="w-4 h-4" />Create</> : "Save changes"}</Button>
+       <Button variant="primary" onClick={handleSubmit} className="flex-1 sm:flex-none shadow-sm">{mode==="create" ? <><Plus className="w-4 h-4" />Create</> : "Save changes"}</Button>
       </div>
      ) : null
     }
@@ -206,6 +281,38 @@ export default function UsersPage() {
       )}
      </form>
     )}
+   </Modal>
+
+   {/* KPI drill-down: filtered user list for the clicked role card */}
+   <Modal
+    isOpen={kpiModal !== null}
+    onClose={() => setKpiModal(null)}
+    title={kpiModal ? kpiMeta[kpiModal].title : ""}
+    description={kpiModal ? kpiMeta[kpiModal].desc : undefined}
+    icon={kpiModal ? kpiMeta[kpiModal].icon : undefined}
+    size="lg"
+    footer={
+     <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+      <Button
+       variant="secondary"
+       onClick={() => setKpiModal(null)}
+       className="flex-1 sm:flex-none"
+      >
+       Close
+      </Button>
+     </div>
+    }
+   >
+    <DataTable
+     columns={userKpiColumns as any}
+     data={kpiFilteredUsers}
+     keyExtractor={(u) => u.id}
+     emptyMessage="No users in this group"
+     onRowClick={(u) => {
+      setKpiModal(null);
+      openView(u);
+     }}
+    />
    </Modal>
   </AdminLayout>
  );

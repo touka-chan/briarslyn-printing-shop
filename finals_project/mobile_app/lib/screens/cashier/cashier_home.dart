@@ -76,7 +76,7 @@ class CashierHomeScreen extends StatelessWidget {
                   'Welcome back, Maria',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         color: AppTheme.onPrimary,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                       ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
@@ -99,7 +99,7 @@ class CashierHomeScreen extends StatelessWidget {
             child: Icon(
               Icons.waving_hand_rounded,
               color: AppTheme.onPrimary,
-              size: 32,
+              size: AppIconSize.lg,
             ),
           ),
         ],
@@ -338,7 +338,7 @@ class _CustomerTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: AppRadius.rMd,
-        border: Border.all(color: AppTheme.surfaceContainer),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -357,7 +357,7 @@ class _CustomerTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xxs),
                 Text(
                   '${stats.orderCount} order${stats.orderCount == 1 ? '' : 's'}'
                   '${stats.lastOrderDate != null ? ' • last ${_fmt(stats.lastOrderDate!)}' : ''}',
@@ -383,7 +383,7 @@ class _CustomerTile extends StatelessWidget {
             child: Text(
               '₱${_amount(stats.totalSpent)}',
               style: AppTheme.monoStyle(
-                fontSize: 12,
+                fontSize: AppTypography.label,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.success,
               ),

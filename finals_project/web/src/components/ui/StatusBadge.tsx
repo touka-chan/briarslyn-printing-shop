@@ -1,11 +1,12 @@
 "use client";
 
-type StatusVariant = 
- | "pending" 
- | "in-production" 
+export type StatusVariant =
+ | "pending"
+ | "in-production"
  | "ready for pickup"
  | "ready"
- | "completed" 
+ | "ready-for-pickup"
+ | "completed"
  | "cancelled"
  | "in-stock"
  | "low-stock"
@@ -22,6 +23,7 @@ const statusConfig: Record<StatusVariant, { label: string; className: string }> 
  pending: { label: "Pending", className: "status-badge status-pending" },
  "in-production": { label: "In Production", className: "status-badge status-in-production" },
  "ready for pickup": { label: "Ready for Pickup", className: "status-badge status-ready" },
+ "ready-for-pickup": { label: "Ready for Pickup", className: "status-badge status-ready" },
  ready: { label: "Ready", className: "status-badge status-ready" },
  completed: { label: "Completed", className: "status-badge status-completed" },
  cancelled: { label: "Cancelled", className: "status-badge status-cancelled" },

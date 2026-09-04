@@ -145,7 +145,10 @@ class _DialogButton extends StatelessWidget {
     final fg = isPrimary ? AppTheme.onPrimary : AppTheme.onSurface;
     final border = isPrimary
         ? null
-        : Border.all(color: AppTheme.surfaceContainer, width: 1);
+        : Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 1,
+          );
 
     return Material(
       color: Colors.transparent,
@@ -165,7 +168,7 @@ class _DialogButton extends StatelessWidget {
             label,
             style: TextStyle(
               fontWeight: FontWeight.w600,
-              fontSize: 14,
+              fontSize: AppTypography.bodyMd,
               color: fg,
             ),
           ),
