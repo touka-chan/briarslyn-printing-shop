@@ -47,10 +47,8 @@ class InventoryItem {
         model: json['model'] as String?,
         status: json['status'] as String,
         isStale: json['isStale'] as bool? ?? false,
-        lastUpdated: DateTime.parse(json['last_updated'] as String),
-        lastCheckoutAt: json['lastCheckoutAt'] != null
-            ? DateTime.parse(json['lastCheckoutAt'] as String)
-            : null,
+        lastUpdated: _parseInventoryDate(json['last_updated']),
+        lastCheckoutAt: _parseInventoryDate(json['lastCheckoutAt']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -69,4 +67,15 @@ class InventoryItem {
         'last_updated': lastUpdated.toIso8601String(),
         'lastCheckoutAt': lastCheckoutAt?.toIso8601String(),
       };
+}
+
+DateTime _parseInventoryDate(dynamic raw) {
+  if (raw == null) return DateTime.now();
+  if (raw is DateTime) return raw;
+  if (raw is String) return DateTime.parse(raw);
+  try {
+    return (raw as dynamic).toDate() as DateTime;
+  } catch (_) {
+    return DateTime.now();
+  }
 }

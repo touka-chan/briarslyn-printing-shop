@@ -1,12 +1,18 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/app_user.dart';
+import '../services/firebase_users.dart' as fb_users;
 import 'role.dart';
 
 /// Permissions that can be granted to roles.
 ///
-/// These are the atomic permissions that control what actions a user can perform.
-/// They are intentionally granular so we can compose role capabilities precisely.
+/// Atomic permissions controlling what actions a user can perform.
+/// Composed into role capabilities via [RolePermissions].
 enum Permission {
   // Order permissions
   orderCreate,           // Create new orders
@@ -40,9 +46,8 @@ enum Permission {
 
 /// Maps roles to their permissions.
 ///
-/// This is the single source of truth for what each role can do.
-/// Think of this as the "policy" layer — the UI checks this to conditionally
-/// render actions, and the service layer checks this to gate writes.
+/// Single source of truth for what each role can do. UI checks this to
+/// conditionally render actions; service layer checks it to gate writes.
 class RolePermissions {
   /// Returns true if [role] has [permission].
   static bool can(Role role, Permission permission) {
@@ -61,7 +66,51 @@ class RolePermissions {
   ///
   /// Production: Can read orders, advance production status, reorder queue,
   /// read/update/create inventory, and read/configure sensors.
+  ///
+  /// Admin/Owner: All permissions.
   static const Map<Role, Set<Permission>> _rolePermissions = {
+    Role.owner: {
+      Permission.orderCreate,
+      Permission.orderRead,
+      Permission.orderUpdatePayment,
+      Permission.orderUpdateStatus,
+      Permission.orderCancel,
+      Permission.orderDelete,
+      Permission.customerRead,
+      Permission.customerCreate,
+      Permission.customerUpdate,
+      Permission.customerDelete,
+      Permission.productionQueueRead,
+      Permission.productionQueueAdvance,
+      Permission.productionQueueReorder,
+      Permission.inventoryRead,
+      Permission.inventoryUpdate,
+      Permission.inventoryCreate,
+      Permission.inventoryDelete,
+      Permission.sensorRead,
+      Permission.sensorConfigure,
+    },
+    Role.admin: {
+      Permission.orderCreate,
+      Permission.orderRead,
+      Permission.orderUpdatePayment,
+      Permission.orderUpdateStatus,
+      Permission.orderCancel,
+      Permission.orderDelete,
+      Permission.customerRead,
+      Permission.customerCreate,
+      Permission.customerUpdate,
+      Permission.customerDelete,
+      Permission.productionQueueRead,
+      Permission.productionQueueAdvance,
+      Permission.productionQueueReorder,
+      Permission.inventoryRead,
+      Permission.inventoryUpdate,
+      Permission.inventoryCreate,
+      Permission.inventoryDelete,
+      Permission.sensorRead,
+      Permission.sensorConfigure,
+    },
     Role.cashier: {
       // Orders
       Permission.orderCreate,
@@ -94,64 +143,147 @@ class RolePermissions {
   };
 }
 
-/// A simple authentication/session service that holds the current user's role.
+/// FirebaseAuth-backed authentication/session service.
 ///
-/// This is intentionally lightweight — no backend, no tokens, no persistence.
-/// It's a [ChangeNotifier] so widgets can listen for role changes (e.g., on logout/login).
-///
-/// In a real app, this would be replaced by a proper auth provider (Firebase Auth,
-/// Supabase, custom JWT, etc.) and would include user identity, token refresh,
-/// session expiry, etc. For this frontend-only stage, a simple in-memory role is sufficient.
+/// Public API (preserved from the in-memory version):
+///   - `currentRole`         (Role? — null when signed out or no profile)
+///   - `isLoggedIn`          (true iff Firebase user is signed in AND the
+///                            Firestore `users/{uid}` doc exists with
+///                            `status: 'active'`)
+///   - `isCashier`           (current role == cashier)
+///   - `isProduction`        (current role == production)
+///   - `isAdminOrOwner`      (current role in {admin, owner})
+///   - `signIn(email, pwd)`  (replaces `login(Role)`)
+///   - `signOut()`           (replaces `logout()`)
+///   - `can(Permission)`, `assertCan(Permission)`
 class AuthService extends ChangeNotifier {
-  Role? _currentRole;
+  final fb.FirebaseAuth _auth = fb.FirebaseAuth.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  /// The currently logged-in role, or null if not logged in.
-  Role? get currentRole => _currentRole;
+  fb.User? _user;
+  AppUser? _profile;
+  StreamSubscription<fb.User?>? _authSub;
+  StreamSubscription<DocumentSnapshot>? _profileSub;
 
-  /// True if a user is currently logged in.
-  bool get isLoggedIn => _currentRole != null;
+  /// The currently logged-in user, or null if not signed in.
+  AppUser? get currentUser => _profile;
+
+  /// The currently logged-in role, or null if not signed in.
+  Role? get currentRole {
+    final role = _profile?.role;
+    if (role == null) return null;
+    return _roleFromServer(role);
+  }
+
+  /// True if a user is currently signed in with an active profile.
+  bool get isLoggedIn => _user != null && _profile?.status == 'active';
 
   /// True if the current user is a cashier.
-  bool get isCashier => _currentRole == Role.cashier;
+  bool get isCashier => currentRole == Role.cashier;
 
   /// True if the current user is production staff.
-  bool get isProduction => _currentRole == Role.production;
+  bool get isProduction => currentRole == Role.production;
 
-  /// Log in with the given [role].
-  ///
-  /// In a real app, this would validate credentials against a backend.
-  /// Here we just set the role and notify listeners.
-  void login(Role role) {
-    _currentRole = role;
+  /// True if the current user is an admin or owner.
+  bool get isAdminOrOwner => currentRole == Role.admin || currentRole == Role.owner;
+
+  /// Map Title 1 server role strings to the mobile `Role` enum.
+  /// Web/admin writes one of four strings; the mobile app consumes them.
+  static Role? _roleFromServer(String serverRole) {
+    switch (serverRole) {
+      case 'Owner':
+        return Role.owner;
+      case 'Admin':
+        return Role.admin;
+      case 'POS_Cashier':
+        return Role.cashier;
+      case 'Production Staff':
+        return Role.production;
+      default:
+        return null;
+    }
+  }
+
+  /// Bootstrap auth state at app launch. Should be called from `main()` before
+  /// `runApp`. Subscribes to Firebase auth state changes and resolves the
+  /// `users/{uid}` profile on sign-in.
+  Future<void> bootstrap() async {
+    _authSub = _auth.authStateChanges().listen((user) async {
+      _user = user;
+      _profileSub?.cancel();
+      if (user == null) {
+        _profile = null;
+        notifyListeners();
+        return;
+      }
+      _profileSub = _db.collection('users').doc(user.uid).snapshots().listen((doc) {
+        if (!doc.exists) {
+          _profile = null;
+          notifyListeners();
+          return;
+        }
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        // Flatten the web's nested `address` sub-object and translate
+        // `last_login_at` (Timestamp) to `lastLogin` (ISO string) so
+        // the mobile `AppUser.fromJson` can parse the doc the same
+        // way it does in `subscribeUsersStream`.
+        fb_users.normaliseUserDoc(data);
+        _profile = AppUser.fromJson(data);
+        notifyListeners();
+      }, onError: (_) {
+        _profile = null;
+        notifyListeners();
+      });
+    });
+  }
+
+  /// Sign in with email + password.
+  /// Throws [fb.FirebaseAuthException] on failure.
+  Future<void> signIn(String email, String password) async {
     HapticFeedback.mediumImpact();
-    notifyListeners();
+    await _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
-  /// Log out the current user.
-  void logout() {
-    _currentRole = null;
-    HapticFeedback.selectionClick();
-    notifyListeners();
+  /// Send a password reset email.
+  Future<void> sendPasswordResetEmail(String email) async {
+    await _auth.sendPasswordResetEmail(email: email);
   }
+
+  /// Sign out and clear profile.
+  Future<void> signOut() async {
+    HapticFeedback.selectionClick();
+    await _auth.signOut();
+  }
+
+  /// Backwards-compatible alias for [signOut]. Pre-FirebaseAuth shells and
+  /// the logout dialog call `auth.logout()`; this keeps the public surface
+  /// intact without forcing every consumer to rename.
+  Future<void> logout() => signOut();
 
   /// Check if the current user has [permission].
-  ///
-  /// Returns false if not logged in.
+  /// Returns false if not signed in.
   bool can(Permission permission) {
-    if (_currentRole == null) return false;
-    return RolePermissions.can(_currentRole!, permission);
+    final role = currentRole;
+    if (role == null) return false;
+    return RolePermissions.can(role, permission);
   }
 
   /// Assert that the current user has [permission], throwing if not.
-  ///
-  /// Use this in service methods to gate write operations.
   /// Throws [PermissionDeniedException] if the user lacks the permission.
   void assertCan(Permission permission) {
     if (!can(permission)) {
       throw PermissionDeniedException(
-        'Permission denied: $permission required, current role: ${_currentRole?.label ?? 'none'}',
+        'Permission denied: $permission required, current role: ${currentRole?.label ?? 'none'}',
       );
     }
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    _profileSub?.cancel();
+    super.dispose();
   }
 }
 
@@ -188,12 +320,6 @@ class AuthProvider extends InheritedNotifier<AuthService> {
 }
 
 /// A widget that gates its child based on a permission check.
-///
-/// If the current user has [permission], renders [child].
-/// If not, renders [fallback] (or nothing if fallback is null).
-///
-/// Use this for conditional UI rendering (e.g., show "Advance Status" button
-/// only for production, show "Mark Paid" only for cashier).
 class PermissionGate extends StatelessWidget {
   const PermissionGate({
     super.key,
@@ -202,13 +328,8 @@ class PermissionGate extends StatelessWidget {
     this.fallback,
   });
 
-  /// The permission required to show the child.
   final Permission permission;
-
-  /// The widget to show if the permission is granted.
   final Widget child;
-
-  /// Optional widget to show if the permission is denied.
   final Widget? fallback;
 
   @override
@@ -222,9 +343,6 @@ class PermissionGate extends StatelessWidget {
 }
 
 /// A widget that gates its child based on the current role.
-///
-/// Renders [child] if the current user's role is in [allowedRoles].
-/// Otherwise renders [fallback] (or nothing).
 class RoleGate extends StatelessWidget {
   const RoleGate({
     super.key,
@@ -233,13 +351,8 @@ class RoleGate extends StatelessWidget {
     this.fallback,
   });
 
-  /// The roles that are allowed to see the child.
   final List<Role> allowedRoles;
-
-  /// The widget to show if the role matches.
   final Widget child;
-
-  /// Optional widget to show if the role doesn't match.
   final Widget? fallback;
 
   @override

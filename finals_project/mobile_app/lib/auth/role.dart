@@ -1,9 +1,17 @@
 /// User roles in the PrintFlow app.
 ///
-/// The app supports exactly two roles:
-/// - [Role.cashier] — POS/Cashier: creates orders, manages payments, views customers
-/// - [Role.production] — Production Staff: manages production queue, inventory, sensors
+/// Server-side (Firestore `users/{uid}.role`) carries one of the four
+/// Title 1 strings: `"Owner"`, `"Admin"`, `"POS_Cashier"`, or
+/// `"Production Staff"`. The mobile `Role` enum mirrors the four — the
+/// in-app UI uses the enum exclusively; the conversion happens in
+/// `AuthService._roleFromServer`.
 enum Role {
+  /// Owner — full access (admin dashboard, all pages)
+  owner,
+
+  /// Admin — admin dashboard access
+  admin,
+
   /// POS / Cashier role — handles orders, payments, and customers
   cashier,
 
@@ -15,6 +23,10 @@ extension RoleX on Role {
   /// Human-readable label for the role (used in UI).
   String get label {
     switch (this) {
+      case Role.owner:
+        return 'Owner';
+      case Role.admin:
+        return 'Admin';
       case Role.cashier:
         return 'POS / Cashier';
       case Role.production:
@@ -25,6 +37,10 @@ extension RoleX on Role {
   /// Short label for compact UI (e.g., chips, badges).
   String get shortLabel {
     switch (this) {
+      case Role.owner:
+        return 'Owner';
+      case Role.admin:
+        return 'Admin';
       case Role.cashier:
         return 'Cashier';
       case Role.production:
@@ -35,6 +51,10 @@ extension RoleX on Role {
   /// Icon representing the role.
   String get icon {
     switch (this) {
+      case Role.owner:
+        return '👑';
+      case Role.admin:
+        return '🛡️';
       case Role.cashier:
         return '💳';
       case Role.production:
@@ -45,6 +65,10 @@ extension RoleX on Role {
   /// Primary color associated with the role.
   int get colorValue {
     switch (this) {
+      case Role.owner:
+        return 0xFF5B1F8C; // Royal purple
+      case Role.admin:
+        return 0xFF00479B; // Blue
       case Role.cashier:
         return 0xFF004D53; // Teal
       case Role.production:
@@ -55,6 +79,9 @@ extension RoleX on Role {
   /// The default home route for this role.
   String get homeRoute {
     switch (this) {
+      case Role.owner:
+      case Role.admin:
+        return '/admin/home';
       case Role.cashier:
         return '/cashier/home';
       case Role.production:

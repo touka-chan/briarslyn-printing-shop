@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app_router.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
-import '../../theme/app_theme.dart';
-import '../../utils/mock_data.dart';
 import '../../models/order.dart';
-import '../../app_router.dart';
+import '../../services/firebase_orders.dart' as fb_orders;
+import '../../theme/app_theme.dart';
 
 /// The Orders list screen for POS/Cashier.
 ///
-/// Displays all orders in a filterable, searchable list using job ticket cards.
-/// Supports pull-to-refresh and status filtering.
+/// Displays all orders in a filterable, searchable list using job ticket
+/// cards. Subscribes live to Firestore — empty states render honestly when
+/// the cashier has not yet created any orders.
 class CashierOrdersScreen extends StatelessWidget {
   const CashierOrdersScreen({super.key});
 
@@ -47,23 +48,34 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
     super.dispose();
   }
 
-  List<Order> get _filteredOrders {
-    return mockOrders.where((order) {
-      final matchesSearch =
+  List<Order> _filter(List<Order> orders) {
+    return orders.where((order) {
+      final matchesSearch = _searchQuery.isEmpty ||
           order.customerName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-              order.orderId.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-              order.itemType.toLowerCase().contains(_searchQuery.toLowerCase());
+          order.orderId.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          order.itemType.toLowerCase().contains(_searchQuery.toLowerCase());
 
       final matchesStatus =
           _statusFilter == 'All' || order.status == _statusFilter;
 
       final matchesFrom = _fromDate == null ||
-          !order.targetDate.isBefore(DateTime(_fromDate!.year, _fromDate!.month, _fromDate!.day));
+          !order.targetDate.isBefore(
+              DateTime(_fromDate!.year, _fromDate!.month, _fromDate!.day));
       final matchesTo = _toDate == null ||
-          !order.targetDate.isAfter(DateTime(_toDate!.year, _toDate!.month, _toDate!.day));
+          !order.targetDate.isAfter(
+              DateTime(_toDate!.year, _toDate!.month, _toDate!.day));
 
       return matchesSearch && matchesStatus && matchesFrom && matchesTo;
-    }).toList();
+    }).toList()
+      ..sort((a, b) {
+        final ad = a.createdAt;
+        final bd = b.createdAt;
+        if (ad == null && bd == null) return 0;
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        // ad and bd are non-null here
+        return b.createdAt!.compareTo(a.createdAt!);
+      });
   }
 
   Future<void> _pickDateRange() async {
@@ -87,6 +99,10 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
   }
 
   bool get _hasDateFilter => _fromDate != null && _toDate != null;
+  bool get _hasActiveFilter =>
+      _searchQuery.isNotEmpty ||
+      _statusFilter != 'All' ||
+      _hasDateFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -112,53 +128,56 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
           : null,
       body: SafeArea(
         top: canPop,
-        child: Column(
-          children: [
-            // Fixed search + filter bar (NOT a sliver — slivers required
-            // hardcoded minExtent == maxExtent and broke with "layoutExtent
-            // exceeds paintExtent" when the real content was shorter).
-            _SearchFilterBar(
-              searchController: _searchController,
-              searchQuery: _searchQuery,
-              onSearchChanged: (v) => setState(() => _searchQuery = v),
-              statusFilter: _statusFilter,
-              statusFilters: _statusFilters,
-              onStatusFilterChanged: (v) => setState(() => _statusFilter = v),
-              hasDateFilter: _hasDateFilter,
-              fromDate: _fromDate,
-              toDate: _toDate,
-              onPickDateRange: _pickDateRange,
-              onClearDateRange: () => setState(() {
-                _fromDate = null;
-                _toDate = null;
-              }),
-            ),
-            // Scrollable list of orders
-            Expanded(
-              child: CustomScrollView(
-                slivers: [
-                  const SliverPadding(
-                    padding: EdgeInsets.only(top: AppSpacing.md),
+        child: StreamBuilder<List<Order>>(
+          stream: fb_orders.subscribeOrdersStream(),
+          builder: (context, snap) {
+            final orders = snap.data ?? const <Order>[];
+            final filtered = _filter(orders);
+            return Column(
+              children: [
+                _SearchFilterBar(
+                  searchController: _searchController,
+                  searchQuery: _searchQuery,
+                  onSearchChanged: (v) => setState(() => _searchQuery = v),
+                  statusFilter: _statusFilter,
+                  statusFilters: _statusFilters,
+                  onStatusFilterChanged: (v) =>
+                      setState(() => _statusFilter = v),
+                  hasDateFilter: _hasDateFilter,
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  onPickDateRange: _pickDateRange,
+                  onClearDateRange: () => setState(() {
+                    _fromDate = null;
+                    _toDate = null;
+                  }),
+                ),
+                Expanded(
+                  child: CustomScrollView(
+                    slivers: [
+                      const SliverPadding(
+                        padding: EdgeInsets.only(top: AppSpacing.md),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg, 0, AppSpacing.lg, 0),
+                        sliver: _buildOrdersList(context, filtered),
+                      ),
+                      const SliverPadding(
+                        padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                      ),
+                    ],
                   ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg, 0, AppSpacing.lg, 0),
-                    sliver: _buildOrdersList(context),
-                  ),
-                  const SliverPadding(
-                    padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildOrdersList(BuildContext context) {
-    final orders = _filteredOrders;
+  Widget _buildOrdersList(BuildContext context, List<Order> orders) {
     if (orders.isEmpty) {
       return SliverFillRemaining(
         hasScrollBody: false,
@@ -196,7 +215,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
                 color: AppTheme.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.receipt_long_outlined,
                 size: 48,
                 color: AppTheme.primary,
@@ -204,7 +223,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
-              _searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter
+              _hasActiveFilter
                   ? 'No orders match your filters'
                   : 'No orders yet',
               style: Theme.of(context)
@@ -215,7 +234,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              _searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter
+              _hasActiveFilter
                   ? 'Try adjusting your search or filter'
                   : 'Create your first order to get started',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -224,7 +243,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.lg),
-            if (_searchQuery.isNotEmpty || _statusFilter != 'All' || _hasDateFilter)
+            if (_hasActiveFilter)
               PfButton.filled(
                 label: 'Clear Filters',
                 onPressed: () => setState(() {
@@ -248,10 +267,6 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
 }
 
 /// Fixed search + status filter bar shown above the orders list.
-///
-/// This is a regular [Column] (not a sliver) so it can size itself to its
-/// real content height without the SliverPersistentHeader constraints
-/// that previously produced "layoutExtent exceeds paintExtent" assertions.
 class _SearchFilterBar extends StatelessWidget {
   const _SearchFilterBar({
     required this.searchController,
@@ -293,7 +308,6 @@ class _SearchFilterBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Search field + date filter button row.
           Row(
             children: [
               Expanded(
@@ -369,7 +383,6 @@ class _SearchFilterBar extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          // Status filter chips
           SizedBox(
             height: 36,
             child: ListView.separated(

@@ -26,6 +26,7 @@ class Order {
   final String priority; // 'Overdue' | 'Urgent' | 'Upcoming'
   final DateTime estimatedCompletion;
   final List<String>? basedOn; // 'backlog' | 'job_complexity' | 'capacity'
+  final String? cashierId; // Firebase Auth uid of the cashier who created the order
   final DateTime? createdAt;
 
   const Order({
@@ -48,6 +49,7 @@ class Order {
     required this.priority,
     required this.estimatedCompletion,
     this.basedOn,
+    this.cashierId,
     this.createdAt,
   });
 
@@ -65,16 +67,16 @@ class Order {
         itemType: json['item_type'] as String,
         quantity: json['quantity'] as int,
         layoutFile: json['layout_file'] as String,
-        targetDate: DateTime.parse(json['target_date'] as String),
+        targetDate: _requireDate(json['target_date'], 'target_date'),
         paymentAmount: (json['payment_amount'] as num).toDouble(),
         paymentStatus: json['payment_status'] as String?,
         status: json['status'] as String,
         priority: json['priority'] as String,
-        estimatedCompletion: DateTime.parse(json['estimated_completion'] as String),
+        estimatedCompletion:
+            _requireDate(json['estimated_completion'], 'estimated_completion'),
         basedOn: (json['based_on'] as List?)?.cast<String>(),
-        createdAt: json['createdAt'] != null
-            ? DateTime.parse(json['createdAt'] as String)
-            : null,
+        cashierId: json['cashier_id'] as String?,
+        createdAt: _parseDate(json['created_at']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -97,6 +99,36 @@ class Order {
         'priority': priority,
         'estimated_completion': estimatedCompletion.toIso8601String().split('T').first,
         'based_on': basedOn,
-        'createdAt': createdAt?.toIso8601String().split('T').first,
+        'cashier_id': cashierId,
+        'created_at': createdAt?.toIso8601String().split('T').first,
       };
+}
+
+/// Parses a Firestore Timestamp, ISO string, or null into a [DateTime].
+DateTime? _parseDate(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is DateTime) return raw;
+  if (raw is String) return DateTime.parse(raw);
+  // Firestore Timestamp: has a toDate() method
+  try {
+    final dyn = raw as dynamic;
+    return dyn.toDate() as DateTime;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Like [_parseDate] but throws a descriptive [FormatException] if the
+/// value is missing or unrecognised. Used for required date fields
+/// (`target_date`, `estimated_completion`) where a missing or
+/// unparseable value is a data error that should surface immediately
+/// rather than silently becoming `DateTime.now()` or crashing on an
+/// `as String` cast.
+DateTime _requireDate(dynamic raw, String fieldName) {
+  final parsed = _parseDate(raw);
+  if (parsed != null) return parsed;
+  throw FormatException(
+    'Order.$fieldName is required and must be a Firestore Timestamp, '
+    'DateTime, or ISO-8601 string; got ${raw.runtimeType}: $raw',
+  );
 }

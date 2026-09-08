@@ -1,3 +1,7 @@
+// Firebase: the Google Services plugin classpath is declared in
+// `settings.gradle.kts` via `id("com.google.gms.google-services")` and
+// applied in `app/build.gradle.kts`. We don't repeat it here.
+
 allprojects {
     repositories {
         google()

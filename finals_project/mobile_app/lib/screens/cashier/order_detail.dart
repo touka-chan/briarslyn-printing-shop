@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,51 +6,59 @@ import '../../app_router.dart';
 import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../models/order.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
-import '../../utils/mock_data.dart';
-import '../../models/order.dart';
+import '../../services/firebase_orders.dart' as fb_orders;
+import '../../services/order_service.dart';
 import '../../services/services.dart';
 
 /// The Order Detail screen — shared between Cashier and Production.
 ///
-/// Shows full order info, status timeline, customer info,
-/// production details, payment, and contextual actions.
-class OrderDetailScreen extends StatelessWidget {
+/// Subscribes live to the `orders/{orderId}` doc so payment + status
+/// updates from any device (web POS, web production, mobile) reflect
+/// immediately. When the doc is missing (e.g. order was deleted from the
+/// web admin), shows an honest "Order not found" state.
+class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.orderId});
 
   final String orderId;
 
-  Order? get _order {
-    try {
-      return mockOrders.firstWhere((o) => o.orderId == orderId);
-    } catch (_) {
-      return null;
-    }
-  }
+  @override
+  State<OrderDetailScreen> createState() => _OrderDetailScreenState();
+}
 
+class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   Widget build(BuildContext context) {
-    final order = _order;
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.orderId)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: AppTheme.background,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final doc = snap.data;
+        if (doc == null || !doc.exists) {
+          return _NotFoundScaffold(
+            onBack: () => Navigator.of(context).pop(),
+            message:
+                'This order no longer exists in the database. It may have been deleted from the web admin.',
+          );
+        }
+        final data = doc.data() as Map<String, dynamic>;
+        final order = Order.fromJson({...data, 'order_id': doc.id});
+        return _buildLoaded(context, order);
+      },
+    );
+  }
 
-    if (order == null) {
-      return Scaffold(
-        backgroundColor: AppTheme.background,
-        appBar: AppBar(
-          title: const Text('Order Not Found'),
-          backgroundColor: AppTheme.surface,
-          foregroundColor: AppTheme.onSurface,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ),
-        body: const Center(
-          child: Text('Order not found'),
-        ),
-      );
-    }
-
+  Widget _buildLoaded(BuildContext context, Order order) {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
@@ -81,7 +90,7 @@ class OrderDetailScreen extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.more_vert_rounded),
-                  onPressed: () => _showMoreMenu(context),
+                  onPressed: () => _showMoreMenu(context, order),
                   tooltip: 'More',
                 ),
               ],
@@ -269,107 +278,13 @@ class OrderDetailScreen extends StatelessWidget {
 
   void _viewCustomerDetails(BuildContext context, Order order) {
     HapticFeedback.selectionClick();
-    // Show customer profile with their orders
+    // Subscribe live to all orders for this customer; show a real list
+    // (or an honest empty state) instead of mock data.
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
-        ),
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Row(
-                children: [
-                  PfAvatar(name: order.customerName, size: 60),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          order.customerName,
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        if (order.customerEmail != null)
-                          Text(
-                            order.customerEmail!,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
-                          ),
-                        if (order.customerPhone != null)
-                          Text(
-                            order.customerPhone!,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              const PfSectionHeader(title: 'Customer Orders', subtitle: 'Previous and current orders'),
-              const SizedBox(height: AppSpacing.md),
-              // Show mock orders for this customer
-              ...mockOrders
-                  .where((o) => o.customerName == order.customerName)
-                  .map((o) => Column(
-                    children: [
-                      PressScale(
-                        onTap: () => Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(o.orderId)),
-                        child: PfCard(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    o.orderId,
-                                    style: AppTheme.monoStyle(fontSize: AppTypography.bodySm, fontWeight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(height: AppSpacing.xxs),
-                                  Text(
-                                    o.itemType,
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PfStatusBadge.orderStatus(o.status, size: PfBadgeSize.small),
-                          ],
-                        ),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                    ],
-                  )),
-              const SizedBox(height: AppSpacing.lg),
-              PfButton.filled(
-                label: 'Close',
-                fullWidth: true,
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (_) => _CustomerOrdersSheet(customerName: order.customerName),
     );
   }
 
@@ -387,7 +302,7 @@ class OrderDetailScreen extends StatelessWidget {
           _SpecRow(label: 'Quantity', value: '${order.quantity}'),
           _SpecRow(
             label: 'Layout File',
-            value: order.layoutFile,
+            value: order.layoutFile.isEmpty ? '—' : order.layoutFile,
           ),
           if (order.createdAt != null)
             _SpecRow(
@@ -413,8 +328,10 @@ class OrderDetailScreen extends StatelessWidget {
   }
 
   Widget _buildPaymentSummary(BuildContext context, Order order) {
-    final isPaid = order.paymentStatus == 'Paid';
-    final isPartial = order.paymentStatus == 'Partial';
+    final isPaid = order.paymentStatus == 'Paid' ||
+        order.paymentStatus == 'Full Paid';
+    final isPartial = order.paymentStatus == 'Partial' ||
+        order.paymentStatus == 'Incomplete';
     final color = isPaid
         ? AppTheme.statusCompleted
         : isPartial
@@ -480,12 +397,12 @@ class OrderDetailScreen extends StatelessWidget {
     final auth = AuthProvider.of(context);
     final isCashier = auth.isCashier;
     final isProduction = auth.isProduction;
-    final canCancel = order.status == 'Pending' || order.status == 'Overdue' || order.status == 'Urgent';
+    final canCancel = order.status == 'Pending';
 
     return Column(
       children: [
         // Cashier actions: Payment status update
-        if (isCashier && order.paymentStatus != 'Paid')
+        if (isCashier && order.paymentStatus != 'Paid' && order.paymentStatus != 'Full Paid')
           PermissionGate(
             permission: Permission.orderUpdatePayment,
             child: PfButton.filled(
@@ -496,7 +413,7 @@ class OrderDetailScreen extends StatelessWidget {
               onPressed: () => _updatePaymentStatus(context, order, 'Paid'),
             ),
           ),
-        if (isCashier && order.paymentStatus == 'Paid')
+        if (isCashier && (order.paymentStatus == 'Paid' || order.paymentStatus == 'Full Paid'))
           PermissionGate(
             permission: Permission.orderUpdatePayment,
             child: PfButton.outlined(
@@ -579,9 +496,7 @@ class OrderDetailScreen extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      // Force rebuild by popping and pushing again
-      Navigator.pop(context);
-      Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(order.orderId));
+      // No need to pop+push: the StreamBuilder will pick up the change.
     } on PermissionDeniedException catch (e) {
       if (!context.mounted) return;
       HapticFeedback.heavyImpact();
@@ -610,8 +525,6 @@ class OrderDetailScreen extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      Navigator.pop(context);
-      Navigator.pushNamed(context, AppRoutes.productionOrderDetail(order.orderId));
     } on PermissionDeniedException catch (e) {
       if (!context.mounted) return;
       HapticFeedback.heavyImpact();
@@ -663,12 +576,8 @@ class OrderDetailScreen extends StatelessWidget {
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
-                Navigator.pop(context);
-                // Navigate back to appropriate list
-                if (auth.isCashier) {
-                  Navigator.pushNamed(context, AppRoutes.cashierOrders);
-                } else {
-                  Navigator.pushNamed(context, AppRoutes.productionQueue);
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
                 }
               } on PermissionDeniedException catch (e) {
                 if (!context.mounted) return;
@@ -688,7 +597,7 @@ class OrderDetailScreen extends StatelessWidget {
     );
   }
 
-  void _showMoreMenu(BuildContext context) {
+  void _showMoreMenu(BuildContext context, Order order) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -712,25 +621,17 @@ class OrderDetailScreen extends StatelessWidget {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.cancel_outlined),
-              title: const Text('Cancel Order'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                HapticFeedback.mediumImpact();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cancel order - coming soon'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.content_copy_rounded),
               title: const Text('Duplicate Order'),
               onTap: () {
                 Navigator.pop(sheetContext);
                 HapticFeedback.selectionClick();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Duplicate - coming soon'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
               },
             ),
             ListTile(
@@ -748,9 +649,6 @@ class OrderDetailScreen extends StatelessWidget {
   }
 
   /// Returns true if the order has at least one address component set.
-  /// Used to decide whether to render the address line under the contact
-  /// info — orders captured before the address cascade was added will
-  /// skip this block entirely.
   bool _hasAddress(Order order) {
     return (order.customerRegion != null && order.customerRegion!.isNotEmpty) ||
         (order.customerProvince != null && order.customerProvince!.isNotEmpty) ||
@@ -759,10 +657,7 @@ class OrderDetailScreen extends StatelessWidget {
         (order.customerZip != null && order.customerZip!.isNotEmpty);
   }
 
-  /// Composes a one-line summary of the customer's address, omitting any
-  /// missing parts. Mirrors `UserAddress.summary()` on the web, with the
-  /// region prepended so the cashier can tell at a glance which
-  /// province / region the order ships to.
+  /// Composes a one-line summary of the customer's address.
   String _addressSummary(Order order) {
     final parts = <String>[
       if (order.customerBarangay != null && order.customerBarangay!.isNotEmpty)
@@ -794,6 +689,195 @@ class OrderDetailScreen extends StatelessWidget {
     }
 
     return '${buffer.toString()}.$decPart';
+  }
+}
+
+/// Shown when the order doc doesn't exist (e.g. deleted from web admin).
+class _NotFoundScaffold extends StatelessWidget {
+  const _NotFoundScaffold({required this.onBack, required this.message});
+  final VoidCallback onBack;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Order Not Found'),
+        backgroundColor: AppTheme.surface,
+        foregroundColor: AppTheme.onSurface,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: onBack,
+        ),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.receipt_long_outlined,
+                size: 56,
+                color: AppTheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet showing all live orders for a given customer name. Subscribes
+/// to the orders collection; orders whose `customerName` matches the argument
+/// are rendered, with an empty state when no matches exist.
+class _CustomerOrdersSheet extends StatelessWidget {
+  const _CustomerOrdersSheet({required this.customerName});
+  final String customerName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: StreamBuilder<List<Order>>(
+        stream: fb_orders.subscribeOrdersStream(),
+        builder: (context, snap) {
+          final all = snap.data ?? const <Order>[];
+          final mine = all
+              .where((o) => o.customerName.trim() == customerName.trim())
+              .toList()
+            ..sort((a, b) {
+              final ad = a.createdAt;
+              final bd = b.createdAt;
+              if (ad == null && bd == null) return 0;
+              if (ad == null) return 1;
+              if (bd == null) return -1;
+              // ad and bd are non-null here
+              return b.createdAt!.compareTo(a.createdAt!);
+            });
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    PfAvatar(name: customerName, size: 60),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            customerName,
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            mine.isEmpty
+                                ? 'No orders yet'
+                                : '${mine.length} order${mine.length == 1 ? '' : 's'} on file',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                const PfSectionHeader(title: 'Customer Orders', subtitle: 'Previous and current orders'),
+                const SizedBox(height: AppSpacing.md),
+                if (mine.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: AppTheme.background,
+                      borderRadius: AppRadius.rMd,
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.inbox_outlined, color: AppTheme.onSurfaceVariant),
+                        const SizedBox(width: AppSpacing.md),
+                        const Expanded(
+                          child: Text(
+                            'No orders for this customer yet.',
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ...mine.map((o) => Column(
+                        children: [
+                          PressScale(
+                            onTap: () {
+                              Navigator.pop(context);
+                              Navigator.pushNamed(context, AppRoutes.cashierOrderDetail(o.orderId));
+                            },
+                            child: PfCard(
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          o.orderId,
+                                          style: AppTheme.monoStyle(fontSize: AppTypography.bodySm, fontWeight: FontWeight.w600),
+                                        ),
+                                        const SizedBox(height: AppSpacing.xxs),
+                                        Text(
+                                          o.itemType,
+                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PfStatusBadge.orderStatus(o.status, size: PfBadgeSize.small),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                      )),
+                const SizedBox(height: AppSpacing.lg),
+                PfButton.filled(
+                  label: 'Close',
+                  fullWidth: true,
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 
@@ -886,7 +970,6 @@ class _TimelineRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Vertical line + icon
           Column(
             children: [
               AnimatedContainer(
@@ -917,7 +1000,6 @@ class _TimelineRow extends StatelessWidget {
             ],
           ),
           const SizedBox(width: AppSpacing.md),
-          // Label
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(top: AppSpacing.sm, bottom: AppSpacing.md),

@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// PrintFlow — Firestore Security Rules
+// Deployed via `firebase deploy --only firestore:rules`
+// See SETUP_FIREBASE.md for the role matrix and the ESP32 service-account
+// story (rfid_events is service-account-only — no user can fake a check-out).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // myRole() is safe to call when the caller has no profile doc yet:
+    // `get()` on a non-existent path throws PERMISSION_DENIED, so we wrap
+    // it in `exists()` and return an empty string in that case. This lets
+    // a brand-new user self-create their profile doc without needing an
+    // already-existing admin doc to authorize them.
+    function myRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : '';
+    }
+
+    function isOwner()    { return myRole() == 'Owner'; }
+    function isAdmin()    { return isOwner() || myRole() == 'Admin'; }
+    function isCashier()  { return isAdmin() || myRole() == 'POS_Cashier'; }
+    function isProduction() { return isAdmin() || myRole() == 'Production Staff'; }
+
+    // ---- users/{uid} ----
+    // Three ways a user/{uid} doc can be created:
+    //   1. Self-create (you create your own profile; `uid` == auth.uid).
+    //   2. First-user bootstrap (the caller has no profile doc yet, so
+    //      we can't read their role to authorize them — let them in).
+    //   3. Owner/Admin creates a profile for a teammate.
+    // After the doc exists, the normal self/Admin rules apply for updates.
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid
+        || !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        || isAdmin()
+      );
+      allow update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ---- employees/{employeeId} ----
+    // HR records. Any signed-in user can read (the Employees page is
+    // a directory). Only Owner/Admin can write. Employees are *not* sign-in
+    // accounts — see /users for that.
+    match /employees/{employeeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---- orders/{orderId} ----
+    // Any signed-in user can read.
+    // Cashier/Owner/Admin can create.
+    // Cashier/Owner/Admin can update general fields.
+    // Production Staff + Admin can update `status` (the production flow).
+    // No one can delete (use a `cancelled` status instead).
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow create: if isCashier();
+      allow update: if isCashier() ||
+                       (isProduction() &&
+                        request.resource.data.diff(resource.data)
+                          .affectedKeys()
+                          .hasOnly(['status', 'startedAt', 'completedAt', 'actualMinutes', 'productionNotes']));
+      allow delete: if false;
+    }
+
+    // ---- inventory/{materialVariantId} ----
+    // Any signed-in user can read.
+    // Production Staff + Admin can write (stock adjustments, ROP edits,
+    // new variant creation).
+    match /inventory/{materialVariantId} {
+      allow read: if isSignedIn();
+      allow write: if isProduction();
+    }
+
+    // ---- sensors/{sensorId} ----
+    // Any signed-in user can read sensor status.
+    // Production Staff + Admin can toggle online state.
+    match /sensors/{sensorId} {
+      allow read: if isSignedIn();
+      allow write: if isProduction();
+    }
+
+    // ---- rfid_events/{auto} ----
+    // **Service-account only.** The ESP32 firmware uses a service-account key
+    // to write check-out events. No signed-in user (cashier, owner, anyone)
+    // can read from or write to this collection via the client SDK.
+    // The web and mobile apps read rfid_events via a server-side proxy
+    // (a Cloud Function) or via the service account on the ESP32's behalf.
+    //
+    // For the demo without a Cloud Function yet, this rule can be relaxed
+    // to `allow read: if isSignedIn();` — the data is still write-protected.
+    match /rfid_events/{eventId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if false; // service-account only
+    }
+
+    // ---- everything else ----
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

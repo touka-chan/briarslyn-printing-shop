@@ -17,6 +17,17 @@ class RfidCheckoutEvent {
         materialVariantId: json['material_variant_id'] as String,
         tagUid: json['tag_uid'] as String,
         sensorId: json['sensor_id'] as String,
-        timestamp: DateTime.parse(json['timestamp'] as String),
+        timestamp: _parseRfidDate(json['timestamp']),
       );
+}
+
+DateTime _parseRfidDate(dynamic raw) {
+  if (raw == null) return DateTime.now();
+  if (raw is DateTime) return raw;
+  if (raw is String) return DateTime.parse(raw);
+  try {
+    return (raw as dynamic).toDate() as DateTime;
+  } catch (_) {
+    return DateTime.now();
+  }
 }

@@ -38,6 +38,14 @@ export interface Order {
   customer_name: string;
   customer_email?: string;
   customer_phone?: string;
+  // Address — sourced from the PSGC cascade on the Cashier New Order screen.
+  // Mirrors the fields on mobile_app/lib/models/order.dart. All optional so
+  // legacy mock orders and orders entered without an address round-trip cleanly.
+  customer_region?: string;
+  customer_province?: string;
+  customer_city?: string;
+  customer_barangay?: string;
+  customer_zip?: string;
   item_type: string; // e.g., Tarpaulin - Medium, T-shirt Printing, Shirt Blank, Mug, Paper
   quantity: number;
   layout_file: string; // layout01.png
@@ -49,17 +57,20 @@ export interface Order {
   // currently persist them on the Order; these fields are additive and safe to leave
   // undefined for older records.
   payment_method?: PaymentMethod;
-  cashier_id?: string; // matches mockUsers[].id
+  cashier_id?: string; // matches users/{uid}.id — the cashier who created the order
   status: "Pending" | "In Production" | "Ready for Pickup" | "Completed";
   priority: "Overdue" | "Urgent" | "Upcoming"; // computed from target_date per FR3
   estimated_completion: string; // YYYY-MM-DD from /api/orders/{id}/eta
   based_on?: ("backlog" | "job_complexity" | "capacity")[];
-  createdAt?: string;
+  /** ISO YYYY-MM-DD — set by the Firestore service on create. */
+  created_at?: string;
   // compat aliases for old code
   id?: string;
   customer?: string;
   product?: string;
   dueDate?: string;
+  /** Legacy alias for `created_at` — pages that pre-date the snake_case rename. */
+  createdAt?: string;
 }
 
 // A "Sale" is a UI-only view shape that joins an Order with its POS-side metadata
@@ -97,6 +108,7 @@ export interface InventoryItem {
 }
 
 export interface RfidCheckoutEvent {
+  id: string;
   material_variant_id: string;
   tag_uid: string;
   sensor_id: string;
@@ -123,8 +135,8 @@ export interface ProductionJob {
 }
 
 // Address — sourced from the PSGC cascade dropdown in the Add/Edit form on
-// /users and /employees. All fields are optional so legacy mock data (and the
-// Owner row) stay valid without an address. The values are display names
+// /users. All fields are optional so legacy mock data (and the Owner row)
+// stay valid without an address. The values are display names
 // (e.g., "Region IV-A (CALABARZON)", "Laguna", "Sta. Cruz", "Pagsawitan"),
 // resolved by name from web/public/Address/*.json at runtime by
 // components/forms/AddressCascade.
@@ -139,10 +151,45 @@ export interface UserAddress {
 // Proposal VI: 3 roles only - Admin/Owner, POS/Cashier, Production Staff (Firebase Auth)
 export interface User {
   id: string;
+  uid?: string;
   name: string;
   email: string;
   role: "Owner" | "Admin" | "POS_Cashier" | "Production Staff";
   status: "active" | "inactive";
-  lastLogin: string;
+  /** ISO string OR Firestore Timestamp — pages format via a helper. */
+  lastLogin?: string | { toDate: () => Date } | null;
   address?: UserAddress;
+}
+
+/**
+ * Employee — HR record for a team member. Lives in the `employees`
+ * Firestore collection, separate from the `users` collection. An Employee
+ * has rich personal information (name parts, contact, age, gender) and a
+ * `role` field that mirrors the `users` role enum, but does NOT have a
+ * Firebase Auth account — adding an employee here is an HR/records action
+ * and does not create app sign-in credentials. Use the /users page to
+ * provision an account that can sign in to PrintFlow.
+ */
+export type EmployeeRole = Exclude<User["role"], "Owner">;
+export type EmployeeGender = "Male" | "Female" | "Other" | "Prefer not to say";
+
+export interface Employee {
+  id: string;
+  /** Human-readable id like "EMP-0001" — auto-generated on create. */
+  employee_id: string;
+  fname: string;
+  initial?: string; // middle initial, e.g. "A." — single letter w/ optional dot
+  lname: string;
+  contact_number: string;
+  /** ISO YYYY-MM-DD. The on-document source of truth for the derived `age`. */
+  birthdate?: string;
+  /** Derived from `birthdate` on read/write. Kept on the doc so tables and
+   *  legacy rows (without a `birthdate` yet) can still show the value. */
+  age: number;
+  gender: EmployeeGender;
+  address?: UserAddress;
+  role: EmployeeRole;
+  status: "active" | "inactive";
+  created_at?: string;
+  updated_at?: string;
 }

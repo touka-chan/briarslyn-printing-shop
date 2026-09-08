@@ -1,13 +1,15 @@
-import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+import 'package:flutter/foundation.dart';
 
 import '../auth/auth_service.dart';
 import '../models/order.dart';
-import '../utils/mock_data.dart';
+import 'firebase_orders.dart' as fb;
 
 /// Service layer for order operations with permission enforcement.
 ///
-/// All write operations check permissions via [AuthService] before mutating data.
-/// In a real app, these would be API calls to a backend that also enforces permissions.
+/// All write operations check permissions via [AuthService] before
+/// delegating to the Firestore-backed `firebase_orders` service. Errors
+/// (permission denied, network, missing doc) propagate to the caller.
 class OrderService {
   OrderService._();
 
@@ -16,7 +18,7 @@ class OrderService {
 
   /// Updates the payment status of an order.
   ///
-  /// Requires [Permission.orderUpdatePayment] (cashier role).
+  /// Requires [Permission.orderUpdatePayment].
   /// Throws [PermissionDeniedException] if the user lacks permission.
   static Future<void> updatePaymentStatus({
     required String orderId,
@@ -24,159 +26,79 @@ class OrderService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderUpdatePayment);
-
-    // Find and update the order in mock data
-    final index = mockOrders.indexWhere((o) => o.orderId == orderId);
-    if (index == -1) {
-      throw ArgumentError('Order not found: $orderId');
+    try {
+      await fb.updatePaymentStatus(orderId, newPaymentStatus);
+      debugPrint('[OrderService] Updated payment for $orderId to $newPaymentStatus');
+    } catch (e) {
+      debugPrint('[OrderService] updatePaymentStatus failed: $e');
+      rethrow;
     }
-
-    // Simulate network latency
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    final order = mockOrders[index];
-    mockOrders[index] = Order(
-      orderId: order.orderId,
-      customerName: order.customerName,
-      customerEmail: order.customerEmail,
-      customerPhone: order.customerPhone,
-      customerRegion: order.customerRegion,
-      customerProvince: order.customerProvince,
-      customerCity: order.customerCity,
-      customerBarangay: order.customerBarangay,
-      customerZip: order.customerZip,
-      itemType: order.itemType,
-      quantity: order.quantity,
-      layoutFile: order.layoutFile,
-      targetDate: order.targetDate,
-      paymentAmount: order.paymentAmount,
-      paymentStatus: newPaymentStatus,
-      status: order.status,
-      priority: order.priority,
-      estimatedCompletion: order.estimatedCompletion,
-      basedOn: order.basedOn,
-      createdAt: order.createdAt,
-    );
-
-    debugPrint('[OrderService] Updated payment status for $orderId to $newPaymentStatus');
   }
 
   /// Advances an order to the next production status.
   ///
   /// Requires [Permission.orderUpdateStatus] (production role).
   /// Throws [PermissionDeniedException] if the user lacks permission.
+  /// Throws [StateError] if the order is already at the final status.
   static Future<void> advanceStatus({
     required String orderId,
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderUpdateStatus);
-
-    final index = mockOrders.indexWhere((o) => o.orderId == orderId);
-    if (index == -1) {
+    final snap = await FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId)
+        .get();
+    if (!snap.exists) {
       throw ArgumentError('Order not found: $orderId');
     }
-
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    final order = mockOrders[index];
-    final nextStatus = _nextProductionStatus(order.status);
-
-    if (nextStatus == null) {
-      throw StateError('Order $orderId is already at final status: ${order.status}');
+    final currentStatus = (snap.data() as Map<String, dynamic>)['status'] as String? ?? 'Pending';
+    final next = _nextProductionStatus(currentStatus);
+    if (next == null) {
+      throw StateError('Order $orderId is already at final status: $currentStatus');
     }
-
-    mockOrders[index] = Order(
-      orderId: order.orderId,
-      customerName: order.customerName,
-      customerEmail: order.customerEmail,
-      customerPhone: order.customerPhone,
-      customerRegion: order.customerRegion,
-      customerProvince: order.customerProvince,
-      customerCity: order.customerCity,
-      customerBarangay: order.customerBarangay,
-      customerZip: order.customerZip,
-      itemType: order.itemType,
-      quantity: order.quantity,
-      layoutFile: order.layoutFile,
-      targetDate: order.targetDate,
-      paymentAmount: order.paymentAmount,
-      paymentStatus: order.paymentStatus,
-      status: nextStatus,
-      priority: order.priority,
-      estimatedCompletion: order.estimatedCompletion,
-      basedOn: order.basedOn,
-      createdAt: order.createdAt,
-    );
-
-    debugPrint('[OrderService] Advanced $orderId from ${order.status} to $nextStatus');
+    await fb.updateOrderStatus(orderId, next);
+    debugPrint('[OrderService] Advanced $orderId from $currentStatus to $next');
   }
 
   /// Cancels an order.
   ///
-  /// Requires [Permission.orderCancel] (both roles can cancel before production).
+  /// Requires [Permission.orderCancel].
   /// Throws [PermissionDeniedException] if the user lacks permission.
+  /// Throws [StateError] if the order is in production or completed.
   static Future<void> cancelOrder({
     required String orderId,
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderCancel);
-
-    final index = mockOrders.indexWhere((o) => o.orderId == orderId);
-    if (index == -1) {
+    final snap = await FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId)
+        .get();
+    if (!snap.exists) {
       throw ArgumentError('Order not found: $orderId');
     }
-
-    final order = mockOrders[index];
-
-    // Only allow cancellation if not yet in production
-    if (order.status == 'In Production' || order.status == 'Ready for Pickup' || order.status == 'Completed') {
+    final currentStatus = (snap.data() as Map<String, dynamic>)['status'] as String? ?? 'Pending';
+    if (currentStatus == 'In Production' ||
+        currentStatus == 'Ready for Pickup' ||
+        currentStatus == 'Completed') {
       throw StateError('Cannot cancel order $orderId: already in production or completed');
     }
-
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    mockOrders[index] = Order(
-      orderId: order.orderId,
-      customerName: order.customerName,
-      customerEmail: order.customerEmail,
-      customerPhone: order.customerPhone,
-      customerRegion: order.customerRegion,
-      customerProvince: order.customerProvince,
-      customerCity: order.customerCity,
-      customerBarangay: order.customerBarangay,
-      customerZip: order.customerZip,
-      itemType: order.itemType,
-      quantity: order.quantity,
-      layoutFile: order.layoutFile,
-      targetDate: order.targetDate,
-      paymentAmount: order.paymentAmount,
-      paymentStatus: order.paymentStatus,
-      status: 'Cancelled',
-      priority: order.priority,
-      estimatedCompletion: order.estimatedCompletion,
-      basedOn: order.basedOn,
-      createdAt: order.createdAt,
-    );
-
+    await fb.cancelOrder(orderId);
     debugPrint('[OrderService] Cancelled order $orderId');
   }
 
-  /// Creates a new order.
+  /// Creates a new order. Returns the persisted order id.
   ///
   /// Requires [Permission.orderCreate] (cashier role).
-  /// Throws [PermissionDeniedException] if the user lacks permission.
-  static Future<Order> createOrder({
+  static Future<String> createOrder({
     required Order order,
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderCreate);
-
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    mockOrders.insert(0, order);
-
-    debugPrint('[OrderService] Created new order ${order.orderId}');
-    return order;
+    final id = await fb.createOrder(order);
+    debugPrint('[OrderService] Created new order $id');
+    return id;
   }
 
   /// Returns the next production status in the workflow.

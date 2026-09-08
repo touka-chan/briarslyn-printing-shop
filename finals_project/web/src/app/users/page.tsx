@@ -1,74 +1,181 @@
 "use client";
 
-import { useState, useMemo, type ReactNode } from "react";
-import { Plus, Shield, User, UserCheck, Eye, EyeOff, Mail, Lock, ChevronDown, Pencil, UserPlus, MapPin } from "lucide-react";
+/**
+ * /users — VIEW-ONLY directory of Firebase Auth sign-in accounts.
+ *
+ * Edit/create flow was removed when the Add/Edit employee form was
+ * consolidated onto /employees (the source of truth for HR records).
+ * Sign-in accounts here are read-only: admins can browse, filter,
+ * and inspect existing users, but cannot add new accounts or change
+ * a user's role/status from this page. New sign-in accounts are
+ * created via the "Add Employee" form on /employees — both the
+ * HR record and the Firebase Auth account are written from a single
+ * submission. The /users page only displays the resulting accounts.
+ */
+
+import { useState, useMemo, useEffect, type ReactNode } from "react";
+import {
+ Shield,
+ User as UserIcon,
+ UserCheck,
+ Eye,
+ Inbox,
+} from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, useToast } from "@/components/ui";
-import { AddressCascade } from "@/components/forms";
-import { mockUsers, sparklineData, kpiUpdatedLabel } from "@/lib/mockData";
-import { User as UserType, UserAddress } from "@/types";
+import {
+ ContentCard,
+ FilterToolbar,
+ DataTable,
+ StatusBadge,
+ Button,
+ Modal,
+ KpiCard,
+ EmptyState,
+} from "@/components/ui";
+import { subscribeUsers } from "@/lib/services/users";
+import {
+ useSparkSeries,
+ userLastLoginKey,
+} from "@/lib/hooks/useSparkSeries";
+import type { User as UserType } from "@/types";
+
+function formatLastLogin(iso: string | undefined): string {
+ if (!iso) return "—";
+ const d = new Date(iso);
+ return d.toLocaleDateString("en-PH", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+ });
+}
+
+function getLastLogin(u: any): string {
+ return u.lastLogin ?? u.last_login_at ?? "";
+}
 
 export default function UsersPage() {
+ const [users, setUsers] = useState<UserType[]>([]);
  const [active, setActive] = useState("All");
  const [search, setSearch] = useState("");
  const [sel, setSel] = useState<UserType | null>(null);
  const [open, setOpen] = useState(false);
- const [mode, setMode] = useState<"view"|"edit"|"create">("view");
- const [showPw, setShowPw] = useState(false);
- const [showConfirm, setShowConfirm] = useState(false);
- const [roleVal, setRoleVal] = useState<UserType["role"]>("POS_Cashier");
- const [addrVal, setAddrVal] = useState<UserAddress>({});
- const [kpiModal, setKpiModal] = useState<null | "all" | "Admin" | "POS_Cashier" | "Production Staff">(null);
- const toast = useToast();
+ const [kpiModal, setKpiModal] = useState<
+  null | "all" | "Admin" | "POS_Cashier" | "Production Staff"
+ >(null);
 
- const handleSubmit = () => {
-  if (mode === "create") {
-   const where = addrVal?.city ? ` in ${addrVal.city}` : "";
-   toast.success(`Invitation sent to new ${roleVal} account${where}`);
-  } else if (sel) {
-   toast.success(`Updated ${sel.name}'s account`);
-  }
-  setOpen(false);
-  setSel(null);
-  setAddrVal({});
- };
+ useEffect(() => {
+  const unsub = subscribeUsers(setUsers);
+  return () => unsub();
+ }, []);
 
- const tabs = [
-  { id: "All", label: "All", count: mockUsers.length },
-  { id: "Admin", label: "Admin", count: mockUsers.filter(u=>u.role==="Admin").length },
-  { id: "POS_Cashier", label: "POS/Cashier", count: mockUsers.filter(u=>u.role==="POS_Cashier").length },
-  { id: "Production Staff", label: "Production Staff", count: mockUsers.filter(u=>u.role==="Production Staff").length },
- ];
+ // /users is the user-management page — the signed-in admin (Owner or
+ // Admin) needs to see every account so they can browse them. The
+ // previous "owner-only sees self" filter was hiding newly-created
+ // users from the bootstrap Owner and made the page look broken
+ // right after a successful Create. The page is now view-only.
+ const visibleUsers = useMemo(() => users, [users]);
 
- const filtered = active==="All" ? mockUsers : mockUsers.filter(u=>u.role===active);
+ // Live sparkline series — last-login counts per day for the last 7 days.
+ const allUsersSeries = useSparkSeries(visibleUsers, userLastLoginKey, 7);
+ const adminSeries = useSparkSeries(
+  visibleUsers.filter((u) => u.role === "Admin"),
+  userLastLoginKey,
+  7,
+ );
+ const cashierSeries = useSparkSeries(
+  visibleUsers.filter((u) => u.role === "POS_Cashier"),
+  userLastLoginKey,
+  7,
+ );
+ const productionSeries = useSparkSeries(
+  visibleUsers.filter((u) => u.role === "Production Staff"),
+  userLastLoginKey,
+  7,
+ );
+
+ const tabs = useMemo(
+  () => [
+   { id: "All", label: "All", count: visibleUsers.length },
+   {
+    id: "Owner",
+    label: "Owner",
+    count: visibleUsers.filter((u) => u.role === "Owner").length,
+   },
+   {
+    id: "Admin",
+    label: "Admin",
+    count: visibleUsers.filter((u) => u.role === "Admin").length,
+   },
+   {
+    id: "POS_Cashier",
+    label: "POS/Cashier",
+    count: visibleUsers.filter((u) => u.role === "POS_Cashier").length,
+   },
+   {
+    id: "Production Staff",
+    label: "Production Staff",
+    count: visibleUsers.filter((u) => u.role === "Production Staff").length,
+   },
+  ],
+  [visibleUsers],
+ );
+
+ const filtered = useMemo(() => {
+  const byRole = active === "All" ? visibleUsers : visibleUsers.filter((u) => u.role === active);
+  if (!search) return byRole;
+  const q = search.toLowerCase();
+  return byRole.filter(
+   (u) =>
+    u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
+  );
+ }, [visibleUsers, active, search]);
 
  const cols = [
   { key: "name", header: "Name" },
   { key: "email", header: "Email" },
-  { key: "role", header: "Role (Firebase Auth)", render: (r:UserType)=><span className="px-2.5 py-0.5 rounded-full text-xs bg-printflow-primary-fixed/20 text-printflow-primary">{r.role}</span> },
-  { key: "status", header: "Status", render: (r:UserType)=><StatusBadge status={r.status} /> },
-  { key: "lastLogin", header: "Last Login" },
-  { key: "actions", header: "", className: "w-10", render: ()=><Eye className="w-4 h-4 text-printflow-on-surface-variant" /> },
+  {
+   key: "role",
+   header: "Role (Firebase Auth)",
+   render: (r: UserType) => (
+    <span className="px-2.5 py-0.5 rounded-full text-xs bg-printflow-primary-fixed/20 text-printflow-primary">
+     {r.role}
+    </span>
+   ),
+  },
+  {
+   key: "status",
+   header: "Status",
+   render: (r: UserType) => <StatusBadge status={r.status} />,
+  },
+  {
+   key: "lastLogin",
+   header: "Last Login",
+   render: (r: any) => formatLastLogin(getLastLogin(r)),
+  },
+  {
+   key: "actions",
+   header: "",
+   className: "w-10",
+   render: () => <Eye className="w-4 h-4 text-printflow-on-surface-variant" />,
+  },
  ];
 
- const inputBase = "w-full pl-10 pr-4 py-2.5 text-sm bg-printflow-surface-container rounded-xl border border-printflow-outline-variant/40 focus:bg-printflow-surface focus:border-printflow-primary focus:ring-4 focus:ring-printflow-primary/10 focus:outline-none transition-all placeholder:text-printflow-on-surface-variant/50";
  const labelCls = "text-[12px] font-medium tracking-wide text-printflow-on-surface-variant";
 
- // --- KPI drill-down ----------------------------------------------------
- // Click a role card on the header row → modal opens with the users that
- // contribute to that count. Clicking a row deep-links into the existing
- // view modal so the user can be inspected without losing context.
  const kpiFilteredUsers = useMemo(() => {
   if (kpiModal === null) return [] as UserType[];
-  if (kpiModal === "all") return mockUsers;
-  return mockUsers.filter((u) => u.role === kpiModal);
- }, [kpiModal]);
+  if (kpiModal === "all") return visibleUsers;
+  return visibleUsers.filter((u) => u.role === kpiModal);
+ }, [kpiModal, visibleUsers]);
 
- const kpiMeta: Record<NonNullable<typeof kpiModal>, { title: string; desc: string; icon: ReactNode; count: number }> = {
+ const kpiMeta: Record<
+  NonNullable<typeof kpiModal>,
+  { title: string; desc: string; icon: ReactNode; count: number }
+ > = {
   all: {
    title: "All Users",
    desc: `${kpiFilteredUsers.length} accounts across all roles`,
-   icon: <User className="w-5 h-5" />,
+   icon: <UserIcon className="w-5 h-5" />,
    count: kpiFilteredUsers.length,
   },
   Admin: {
@@ -86,12 +193,17 @@ export default function UsersPage() {
   "Production Staff": {
    title: "Production Staff Users",
    desc: `${kpiFilteredUsers.length} accounts on the production floor`,
-   icon: <User className="w-5 h-5" />,
+   icon: <UserIcon className="w-5 h-5" />,
    count: kpiFilteredUsers.length,
   },
  };
 
- const userKpiColumns: { key: keyof UserType | "actions"; header: string; className?: string; render?: (r: UserType) => ReactNode }[] = [
+ const userKpiColumns: {
+  key: keyof UserType | "actions";
+  header: string;
+  className?: string;
+  render?: (r: UserType) => ReactNode;
+ }[] = [
   { key: "name", header: "Name" },
   { key: "email", header: "Email" },
   {
@@ -108,7 +220,11 @@ export default function UsersPage() {
    header: "Status",
    render: (r) => <StatusBadge status={r.status} />,
   },
-  { key: "lastLogin", header: "Last Login" },
+  {
+   key: "lastLogin",
+   header: "Last Login",
+   render: (r: any) => formatLastLogin(getLastLogin(r)),
+  },
   {
    key: "actions",
    header: "",
@@ -117,84 +233,168 @@ export default function UsersPage() {
   },
  ];
 
- const openCreate = () => { setSel(null); setMode("create"); setRoleVal("POS_Cashier"); setAddrVal({}); setShowPw(false); setShowConfirm(false); setOpen(true); };
- const openView = (r: UserType) => { setSel(r); setRoleVal(r.role); setAddrVal(r.address ?? {}); setMode("view"); setOpen(true); };
- const openEdit = (r: UserType) => { setSel(r); setRoleVal(r.role); setAddrVal(r.address ?? {}); setMode("edit"); };
-
- const modalIcon = mode==="create" ? <UserPlus className="w-5 h-5" /> : mode==="edit" ? <Pencil className="w-5 h-5" /> : sel ? <User className="w-5 h-5" /> : <User className="w-5 h-5" />;
- const modalTitle = mode==="create" ? "Add User" : mode==="edit" ? `Edit ${sel?.name}` : sel ? sel.name : "User";
-  const modalDesc = mode==="create"
-   ? "Create a team account, 3 roles only (Admin, POS/Cashier, Production Staff)"
-   : mode==="edit" ? "Update account details and access"
-   : sel ? `${sel.role} • ${sel.email}` : undefined;
+ const openView = (r: UserType) => {
+  setSel(r);
+  setOpen(true);
+ };
+ const closeView = () => {
+  setOpen(false);
+  setSel(null);
+ };
 
  return (
-  <AdminLayout title="Users" subtitle="Manage team accounts" onSearch={setSearch}>
+  <AdminLayout title="Users" subtitle="Team sign-in accounts" onSearch={setSearch}>
    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    <KpiCard label="Total Users" value={mockUsers.length} icon="User" sparkline={sparklineData(mockUsers.length, "rising", "users-total")} sparklineTone="primary" lastUpdated={kpiUpdatedLabel("users-total")} onClick={()=>setKpiModal("all")} />
-    <KpiCard label="Admin" value={mockUsers.filter(u=>u.role==="Admin").length} icon="Shield" sparkline={sparklineData(mockUsers.filter(u=>u.role==="Admin").length, "stable", "users-admin")} sparklineTone="primary" lastUpdated={kpiUpdatedLabel("users-admin")} onClick={()=>setKpiModal("Admin")} />
-    <KpiCard label="POS/Cashier" value={mockUsers.filter(u=>u.role==="POS_Cashier").length} icon="UserCheck" sparkline={sparklineData(mockUsers.filter(u=>u.role==="POS_Cashier").length, "stable", "users-pos")} sparklineTone="success" lastUpdated={kpiUpdatedLabel("users-pos")} onClick={()=>setKpiModal("POS_Cashier")} />
-    <KpiCard label="Production Staff" value={mockUsers.filter(u=>u.role==="Production Staff").length} icon="User" sparkline={sparklineData(mockUsers.filter(u=>u.role==="Production Staff").length, "wave", "users-prod")} sparklineTone="warning" lastUpdated={kpiUpdatedLabel("users-prod")} onClick={()=>setKpiModal("Production Staff")} />
+    <KpiCard
+     label="Total Users"
+     value={visibleUsers.length}
+     icon="User"
+     sparkline={allUsersSeries}
+     sparklineTone="primary"
+     lastUpdated="Live"
+     onClick={() => setKpiModal("all")}
+    />
+    <KpiCard
+     label="Admin"
+     value={visibleUsers.filter((u) => u.role === "Admin").length}
+     icon="Shield"
+     sparkline={adminSeries}
+     sparklineTone="primary"
+     lastUpdated="Live"
+     onClick={() => setKpiModal("Admin")}
+    />
+    <KpiCard
+     label="POS/Cashier"
+     value={visibleUsers.filter((u) => u.role === "POS_Cashier").length}
+     icon="UserCheck"
+     sparkline={cashierSeries}
+     sparklineTone="success"
+     lastUpdated="Live"
+     onClick={() => setKpiModal("POS_Cashier")}
+    />
+    <KpiCard
+     label="Production Staff"
+     value={visibleUsers.filter((u) => u.role === "Production Staff").length}
+     icon="User"
+     sparkline={productionSeries}
+     sparklineTone="warning"
+     lastUpdated="Live"
+     onClick={() => setKpiModal("Production Staff")}
+    />
    </div>
 
    <ContentCard title="Team Members" subtitle={`${filtered.length} accounts`}>
-    <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search name or email" onSearchChange={setSearch} searchValue={search} customActions={<Button variant="primary" onClick={openCreate}><Plus className="w-4 h-4" />Add User</Button>} />
-    <DataTable columns={cols} data={filtered.filter(u=> !search || `${u.name} ${u.email}`.toLowerCase().includes(search.toLowerCase()))} keyExtractor={r=>r.id} onRowClick={openView} emptyMessage="No users" />
+    <FilterToolbar
+     tabs={tabs}
+     activeTab={active}
+     onTabChange={setActive}
+     searchPlaceholder="Search name or email"
+     onSearchChange={setSearch}
+     searchValue={search}
+    />
+    {filtered.length === 0 ? (
+     <div className="py-12">
+      <EmptyState
+       icon={<Inbox className="w-7 h-7" />}
+       title="No users"
+       description="No accounts match this filter."
+      />
+     </div>
+    ) : (
+     <DataTable
+      columns={cols}
+      data={filtered}
+      keyExtractor={(r) => r.id}
+      onRowClick={openView}
+      emptyMessage="No users"
+     />
+    )}
    </ContentCard>
 
+   {/* View modal — read-only. Same fields as before, no Edit button. */}
    <Modal
     isOpen={open}
-    onClose={()=>{setOpen(false); setSel(null); setAddrVal({});}}
-    title={modalTitle}
-    description={modalDesc}
-    icon={modalIcon}
+    onClose={closeView}
+    title={sel?.name ?? "User"}
+    description={sel ? `${sel.role} • ${sel.email}` : undefined}
+    icon={<UserIcon className="w-5 h-5" />}
     size="lg"
     footer={
-     sel && mode==="view" ? (
-      <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
-       <Button variant="secondary" onClick={()=>setOpen(false)} className="flex-1 sm:flex-none">Close</Button>
-       <Button variant="primary" onClick={()=>openEdit(sel)}><Pencil className="w-4 h-4" />Edit</Button>
-      </div>
-     ) : (mode==="edit"||mode==="create") ? (
-      <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
-       <Button variant="secondary" onClick={()=>setOpen(false)} className="flex-1 sm:flex-none">Cancel</Button>
-       <Button variant="primary" onClick={handleSubmit} className="flex-1 sm:flex-none shadow-sm">{mode==="create" ? <><Plus className="w-4 h-4" />Create</> : "Save changes"}</Button>
-      </div>
-     ) : null
+     <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+      <Button
+       variant="secondary"
+       onClick={closeView}
+       className="flex-1 sm:flex-none"
+      >
+       Close
+      </Button>
+     </div>
     }
    >
-    {sel && mode==="view" && (
+    {sel && (
      <div className="space-y-5">
       <div className="flex items-center gap-4 p-4 bg-printflow-surface-container/50 rounded-xl border border-printflow-outline-variant/40">
-       <div className="w-12 h-12 rounded-xl bg-printflow-primary-fixed flex items-center justify-center font-bold text-printflow-primary text-sm shrink-0">{sel.name.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+       <div className="w-12 h-12 rounded-xl bg-printflow-primary-fixed flex items-center justify-center font-bold text-printflow-primary text-sm shrink-0">
+        {sel.name
+         .split(" ")
+         .map((n) => n[0])
+         .join("")
+         .slice(0, 2)}
+       </div>
        <div className="min-w-0 flex-1">
-        <p className="font-semibold text-printflow-on-surface leading-tight truncate">{sel.name}</p>
-        <p className="text-[13px] text-printflow-on-surface-variant truncate">{sel.email}</p>
-        <p className="text-xs text-printflow-on-surface-variant/80">{sel.role}</p>
+        <p className="font-semibold text-printflow-on-surface leading-tight truncate">
+         {sel.name}
+        </p>
+        <p className="text-[13px] text-printflow-on-surface-variant truncate">
+         {sel.email}
+        </p>
+        <p className="text-xs text-printflow-on-surface-variant/80">
+         {sel.role}
+        </p>
        </div>
        <StatusBadge status={sel.status} className="shrink-0" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>EMAIL</p><p className="text-sm font-medium text-printflow-on-surface mt-1 truncate">{sel.email}</p>
+        <p className={labelCls}>EMAIL</p>
+        <p className="text-sm font-medium text-printflow-on-surface mt-1 truncate">
+         {sel.email}
+        </p>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>ROLE</p><p className="text-sm font-medium text-printflow-on-surface mt-1">{sel.role}</p>
+        <p className={labelCls}>ROLE</p>
+        <p className="text-sm font-medium text-printflow-on-surface mt-1">
+         {sel.role}
+        </p>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>STATUS</p><div className="mt-1.5"><StatusBadge status={sel.status} /></div>
+        <p className={labelCls}>STATUS</p>
+        <div className="mt-1.5">
+         <StatusBadge status={sel.status} />
+        </div>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>LAST LOGIN</p><p className="text-sm font-medium text-printflow-on-surface mt-1">{sel.lastLogin}</p>
+        <p className={labelCls}>LAST LOGIN</p>
+        <p className="text-sm font-medium text-printflow-on-surface mt-1">
+         {formatLastLogin(getLastLogin(sel))}
+        </p>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>USER ID</p><p className="font-mono text-xs text-printflow-on-surface mt-1 truncate">{sel.id}</p>
+        <p className={labelCls}>USER ID</p>
+        <p className="font-mono text-xs text-printflow-on-surface mt-1 truncate">
+         {sel.id}
+        </p>
        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>ADDRESS</p>
         {sel.address?.region ? (
          <p className="text-sm font-medium text-printflow-on-surface mt-1 leading-snug">
-          {[sel.address.barangay, sel.address.city, sel.address.province, sel.address.zip]
+          {[
+           sel.address.barangay,
+           sel.address.city,
+           sel.address.province,
+           sel.address.zip,
+          ]
            .filter(Boolean)
            .join(", ")}
          </p>
@@ -202,117 +402,23 @@ export default function UsersPage() {
          <p className="text-sm text-printflow-on-surface-variant/60 mt-1">—</p>
         )}
         {sel.address?.region && (
-         <p className="text-xs text-printflow-on-surface-variant/70 mt-0.5">{sel.address.region}</p>
+         <p className="text-xs text-printflow-on-surface-variant/70 mt-0.5">
+          {sel.address.region}
+         </p>
         )}
        </div>
       </div>
+      {/* Read-only hint: directs admins to the right surface to make
+          changes. The /users page intentionally has no edit affordance. */}
+      <p className="text-[12px] text-printflow-on-surface-variant/80 leading-relaxed">
+       To add or edit an employee&apos;s HR record, go to{" "}
+       <span className="font-medium text-printflow-on-surface">Employees</span>.
+       Sign-in accounts are created from the Add Employee form there.
+      </p>
      </div>
-    )}
-
-    {(mode==="edit"||mode==="create") && (
-     <form className="space-y-6" onSubmit={(e)=>e.preventDefault()}>
-      {/* Group: Account Details */}
-      <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">ACCOUNT DETAILS</p>
-       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-         <label className={labelCls}>Name</label>
-         <div className="relative mt-1.5">
-          <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-          <input defaultValue={sel?.name||""} placeholder="Juan Dela Cruz" className={inputBase} />
-         </div>
-        </div>
-        <div>
-         <label className={labelCls}>Email</label>
-         <div className="relative mt-1.5">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-          <input defaultValue={sel?.email||""} placeholder="juan@brialyns.com" className={inputBase} />
-         </div>
-        </div>
-       </div>
-      </div>
-
-      {/* Group: Access */}
-      <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">ACCESS</p>
-       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-         <label className={labelCls}>Role 3 only</label>
-         <div className="relative mt-1.5">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-printflow-on-surface-variant pointer-events-none">
-           {roleVal==="Admin" ? <Shield className="w-4 h-4" /> : roleVal==="POS_Cashier" ? <UserCheck className="w-4 h-4" /> : <User className="w-4 h-4" />}
-          </span>
-          <select
-           value={roleVal}
-           onChange={(e)=>setRoleVal(e.target.value as UserType["role"])}
-           className={`${inputBase} pl-10 pr-10 appearance-none`}
-          >
-           <option value="Admin">Admin</option>
-           <option value="POS_Cashier">POS_Cashier</option>
-           <option value="Production Staff">Production Staff</option>
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-         </div>
-         <p className="text-[11px] text-printflow-on-surface-variant mt-1.5 flex items-center gap-1">
-          {roleVal==="Admin" && <><Shield className="w-3 h-3" /> Full access to dashboard & settings</>}
-          {roleVal==="POS_Cashier" && <><UserCheck className="w-3 h-3" /> POS orders & payments only</>}
-          {roleVal==="Production Staff" && <><User className="w-3 h-3" /> Production queue only</>}
-         </p>
-        </div>
-        <div>
-         <label className={labelCls}>Status</label>
-         <div className="relative mt-1.5">
-          <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full ${sel?.status==="active" || (!sel && roleVal) ? "bg-printflow-success" : "bg-printflow-outline-variant"}`} />
-          <select defaultValue={sel?.status||"active"} className={`${inputBase} pl-8 pr-10 appearance-none`}>
-           <option value="active">Active</option>
-           <option value="inactive">Inactive</option>
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-         </div>
-        </div>
-       </div>
-      </div>
-
-      {/* Group: Address — PSGC cascade dropdown */}
-      <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">ADDRESS</p>
-       <AddressCascade value={addrVal} onChange={setAddrVal} />
-      </div>
-
-      {/* Group: Security */}
-      {mode==="create" && (
-       <div>
-        <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">SECURITY</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-         <div>
-          <label className={labelCls}>Password</label>
-          <div className="relative mt-1.5">
-           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-           <input type={showPw ? "text" : "password"} placeholder="••••••••" className={`${inputBase} pr-10`} />
-           <button type="button" onClick={()=>setShowPw(v=>!v)} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full hover:bg-printflow-surface-container-high flex items-center justify-center text-printflow-on-surface-variant transition-colors">
-            {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-           </button>
-          </div>
-          <p className="text-[11px] text-printflow-on-surface-variant mt-1.5">Min 8 characters</p>
-         </div>
-         <div>
-          <label className={labelCls}>Confirm Password</label>
-          <div className="relative mt-1.5">
-           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
-           <input type={showConfirm ? "text" : "password"} placeholder="••••••••" className={`${inputBase} pr-10`} />
-           <button type="button" onClick={()=>setShowConfirm(v=>!v)} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full hover:bg-printflow-surface-container-high flex items-center justify-center text-printflow-on-surface-variant transition-colors">
-            {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-           </button>
-          </div>
-         </div>
-        </div>
-       </div>
-      )}
-     </form>
     )}
    </Modal>
 
-   {/* KPI drill-down: filtered user list for the clicked role card */}
    <Modal
     isOpen={kpiModal !== null}
     onClose={() => setKpiModal(null)}
@@ -332,16 +438,26 @@ export default function UsersPage() {
      </div>
     }
    >
-    <DataTable
-     columns={userKpiColumns as any}
-     data={kpiFilteredUsers}
-     keyExtractor={(u) => u.id}
-     emptyMessage="No users in this group"
-     onRowClick={(u) => {
-      setKpiModal(null);
-      openView(u);
-     }}
-    />
+    {kpiFilteredUsers.length === 0 ? (
+     <div className="py-8">
+      <EmptyState
+       icon={<Inbox className="w-7 h-7" />}
+       title="No users in this group"
+       description="No accounts match this role filter."
+      />
+     </div>
+    ) : (
+     <DataTable
+      columns={userKpiColumns as any}
+      data={kpiFilteredUsers}
+      keyExtractor={(u) => u.id}
+      emptyMessage="No users in this group"
+      onRowClick={(u) => {
+       setKpiModal(null);
+       openView(u);
+      }}
+     />
+    )}
    </Modal>
   </AdminLayout>
  );

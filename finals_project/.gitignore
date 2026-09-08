@@ -46,3 +46,16 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# === Firebase / secrets ===
+# Defense in depth — each platform also has its own .gitignore.
+# These patterns would otherwise let a service-account JSON slip through
+# if it's placed at the repo root or in a less-expected location.
+**/service-account*.json
+**/serviceAccount*.json
+**/firebase-adminsdk-*.json
+**/secrets.h
+**/secrets.json
+
+# Web: `web/.env.local` is gitignored by Next.js' default .gitignore.
+# (`.env*.local` is excluded; `.env.local.example` is allowed through.)

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Eye, Download, Factory, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Eye, Download, Factory, Check, Inbox } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
  ContentCard,
@@ -11,10 +11,13 @@ import {
  Button,
  Modal,
  PriorityBadge,
+ EmptyState,
  useToast,
 } from "@/components/ui";
-import { mockProduction, mockOrders } from "@/lib/mockData";
-import { ProductionJob } from "@/types";
+import { subscribeOrders } from "@/lib/services/orders";
+import { updateOrderStatus } from "@/lib/services/orders";
+import { getPriority, priorityWeight } from "@/lib/derived";
+import type { Order, ProductionJob } from "@/types";
 
 const STATUSES: ProductionJob["status"][] = [
  "Pending",
@@ -23,50 +26,73 @@ const STATUSES: ProductionJob["status"][] = [
  "Completed",
 ];
 
+function orderToJob(o: Order): ProductionJob {
+ return {
+  id: o.id ?? o.order_id,
+  order_id: o.order_id,
+  item_type: o.item_type,
+  priority: o.priority ?? getPriority(o),
+  status: o.status as ProductionJob["status"],
+  target_date: o.target_date,
+  estimated_completion: o.estimated_completion,
+  based_on: o.based_on,
+ };
+}
+
 export default function ProductionPage() {
+ const [orders, setOrders] = useState<Order[]>([]);
+ const [ready, setReady] = useState(false);
  const [active, setActive] = useState("All");
  const [search, setSearch] = useState("");
  const [sel, setSel] = useState<ProductionJob | null>(null);
  const [open, setOpen] = useState(false);
- const [statusMap, setStatusMap] = useState<Record<string, ProductionJob["status"]>>({});
+ const [saving, setSaving] = useState(false);
  const toast = useToast();
 
+ useEffect(() => {
+  const unsub = subscribeOrders((rows) => {
+   setOrders(rows);
+   setReady(true);
+  });
+  return () => unsub();
+ }, []);
+
+ const queue: ProductionJob[] = orders
+  .filter(
+   (o) =>
+    o.status === "Pending" ||
+    o.status === "In Production" ||
+    o.status === "Ready for Pickup",
+  )
+  .map(orderToJob);
+
  const tabs = [
-  { id: "All", label: "All", count: mockProduction.length },
+  { id: "All", label: "All", count: queue.length },
   {
    id: "Overdue",
    label: "Overdue",
-   count: mockProduction.filter((p) => p.priority === "Overdue").length,
+   count: queue.filter((p) => p.priority === "Overdue").length,
   },
   {
    id: "Urgent",
    label: "Urgent",
-   count: mockProduction.filter((p) => p.priority === "Urgent").length,
+   count: queue.filter((p) => p.priority === "Urgent").length,
   },
   {
    id: "Upcoming",
    label: "Upcoming",
-   count: mockProduction.filter((p) => p.priority === "Upcoming").length,
+   count: queue.filter((p) => p.priority === "Upcoming").length,
   },
  ];
 
- const priorityRank: Record<ProductionJob["priority"], number> = {
-  Overdue: 0,
-  Urgent: 1,
-  Upcoming: 2,
- };
- const data: ProductionJob[] = mockProduction.map((p) => ({
-  ...p,
-  status: statusMap[p.order_id] ?? p.status,
- }));
  const filtered =
   active === "All"
-   ? [...data].sort(
+   ? [...queue].sort(
     (a, b) =>
-     priorityRank[a.priority] - priorityRank[b.priority] ||
+     priorityWeight(a.priority) - priorityWeight(b.priority) ||
      a.target_date.localeCompare(b.target_date),
    )
-   : data
+   : queue
     .filter((p) => p.priority === active)
     .sort((a, b) => a.target_date.localeCompare(b.target_date));
  const searched = filtered.filter(
@@ -75,12 +101,21 @@ export default function ProductionPage() {
    `${p.order_id} ${p.item_type}`.toLowerCase().includes(search.toLowerCase()),
  );
 
- const changeStatus = (orderId: string, next: ProductionJob["status"]) => {
-  setStatusMap((prev) => ({ ...prev, [orderId]: next }));
-  toast.success(`${orderId} → ${next}`);
+ const changeStatus = async (orderId: string, next: ProductionJob["status"]) => {
+  setSel((prev) => (prev && prev.order_id === orderId ? { ...prev, status: next } : prev));
+  setSaving(true);
+  try {
+   await updateOrderStatus(orderId, next);
+   toast.success(`${orderId} → ${next}`);
+  } catch {
+   toast.error("Failed to update status — please try again.");
+  } finally {
+   setSaving(false);
+  }
  };
 
  const exportCSV = () => {
+  if (searched.length === 0) return;
   const headers = ["order_id", "item_type", "priority", "status", "target_date", "eta"];
   const lines = [
    headers.join(","),
@@ -140,7 +175,8 @@ export default function ProductionPage() {
        changeStatus(r.order_id, e.target.value as ProductionJob["status"])
       }
       onClick={(e) => e.stopPropagation()}
-      className="text-xs px-1.5 py-0.5 rounded border border-printflow-outline-variant bg-printflow-surface text-printflow-on-surface focus:outline-none focus:ring-1 focus:ring-printflow-primary"
+      disabled={saving}
+      className="text-xs px-1.5 py-0.5 rounded border border-printflow-outline-variant bg-printflow-surface text-printflow-on-surface focus:outline-none focus:ring-1 focus:ring-printflow-primary disabled:opacity-50"
       aria-label={`Change status for ${r.order_id}`}
      >
       {STATUSES.map((s) => (
@@ -208,22 +244,34 @@ export default function ProductionPage() {
      onSearchChange={setSearch}
      searchValue={search}
      customActions={
-      <Button variant="secondary" onClick={exportCSV}>
+      <Button
+       variant="secondary"
+       onClick={exportCSV}
+       disabled={searched.length === 0}
+      >
        <Download className="w-4 h-4" />
        Export
       </Button>
      }
     />
-    <DataTable
-     columns={cols}
-     data={searched}
-     keyExtractor={(r) => r.order_id}
-     onRowClick={(r) => {
-      setSel(r);
-      setOpen(true);
-     }}
-     emptyMessage="No production queue"
-    />
+    {ready && queue.length === 0 ? (
+     <EmptyState
+      icon={<Inbox className="w-7 h-7" />}
+      title="No production queue"
+      description="Orders will appear here once they enter Pending or In Production."
+     />
+    ) : (
+     <DataTable
+      columns={cols}
+      data={searched}
+      keyExtractor={(r) => r.order_id}
+      onRowClick={(r) => {
+       setSel(r);
+       setOpen(true);
+      }}
+      emptyMessage="No production queue"
+     />
+    )}
    </ContentCard>
 
    <Modal
@@ -245,12 +293,9 @@ export default function ProductionPage() {
         <Button
          variant="primary"
          onClick={() => {
-          if (next) {
-           changeStatus(sel.order_id, next);
-           setSel({ ...sel, status: next });
-          }
+          if (next) changeStatus(sel.order_id, next);
          }}
-         disabled={!next}
+         disabled={!next || saving}
         >
          <Check className="w-4 h-4" />
          {next ? `Advance to ${next}` : "Completed"}

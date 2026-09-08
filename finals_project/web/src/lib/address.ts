@@ -36,10 +36,12 @@ export type Barangay = {
   region_code: string;
 };
 
-export type ZipEntry = {
-  area: string;
-  zip: string;
-};
+// city_zip_map.json is a flat object keyed by PSGC city code, with the
+// Philippine zip code as the value (e.g. { "140101": "2800", ... }).
+// This is the authoritative source for the zip auto-fill — the old
+// ph-zip-codes.json used free-text "area" strings that didn't match
+// the city code returned by city.json, so the lookup was unreliable.
+export type CityZipMap = Record<string, string>;
 
 const BASE = "/Address";
 
@@ -51,11 +53,22 @@ let _cities: City[] | null = null;
 let _citiesPromise: Promise<City[]> | null = null;
 let _barangays: Barangay[] | null = null;
 let _barangaysPromise: Promise<Barangay[]> | null = null;
-let _zips: ZipEntry[] | null = null;
-let _zipsPromise: Promise<ZipEntry[]> | null = null;
+let _cityZips: CityZipMap | null = null;
+let _cityZipsPromise: Promise<CityZipMap> | null = null;
 
 async function fetchJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path, { cache: "force-cache" });
+  // Use a build-time cache buster so a fresh deploy always re-fetches
+  // the JSON (and never serves a stale 404 from a previous build's
+  // browser cache). `cache: "default"` lets the browser reuse the
+  // response within a session but respects server cache headers on
+  // revalidation.
+  const buildId =
+    (typeof process !== "undefined" && (process as { env?: { NEXT_PUBLIC_BUILD_ID?: string } }).env?.NEXT_PUBLIC_BUILD_ID) ||
+    (typeof globalThis !== "undefined" &&
+      (globalThis as { __NEXT_DATA__?: { buildId?: string } }).__NEXT_DATA__?.buildId) ||
+    "dev";
+  const url = `${path}?v=${encodeURIComponent(buildId)}`;
+  const res = await fetch(url, { cache: "default" });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${path}: ${res.status} ${res.statusText}`);
   }
@@ -126,20 +139,20 @@ export async function loadBarangays(): Promise<Barangay[]> {
   return _barangaysPromise;
 }
 
-export async function loadZips(): Promise<ZipEntry[]> {
-  if (_zips) return _zips;
-  if (!_zipsPromise) {
-    _zipsPromise = fetchJSON<ZipEntry[]>(`${BASE}/ph-zip-codes.json`)
+export async function loadCityZipMap(): Promise<CityZipMap> {
+  if (_cityZips) return _cityZips;
+  if (!_cityZipsPromise) {
+    _cityZipsPromise = fetchJSON<CityZipMap>(`${BASE}/city_zip_map.json`)
       .then((data) => {
-        _zips = data;
+        _cityZips = data;
         return data;
       })
       .catch((err) => {
-        _zipsPromise = null;
+        _cityZipsPromise = null;
         throw err;
       });
   }
-  return _zipsPromise;
+  return _cityZipsPromise;
 }
 
 // Filter helpers — pre-filter the cached list to the selected parent so the
@@ -168,26 +181,33 @@ export async function getBarangaysForCity(
   return all.filter((b) => b.city_code === cityCode);
 }
 
-// Best-effort zip lookup: the ph-zip-codes.json has free-text "area" strings
-// like "PH - Laguna Sta. Cruz" so we match the city name (case-insensitive)
-// and prefer entries that also include the province. Returns the first match
-// or null if nothing fits.
+// Direct zip lookup by PSGC city code. city_zip_map.json is keyed by the
+// same `city_code` value that city.json returns (e.g. "140101"), so the
+// lookup is unambiguous and doesn't need name-based fuzzy matching.
+export async function findZipByCode(
+  cityCode: string,
+): Promise<string | null> {
+  if (!cityCode) return null;
+  const map = await loadCityZipMap();
+  return map[cityCode] ?? null;
+}
+
+// Backwards-compatible name-based lookup. Prefer findZipByCode when the
+// city_code is available (which it is in AddressCascade), but keep this
+// for any caller that still passes names.
 export async function findZip(
   cityName: string,
-  provinceName: string,
+  provinceName?: string,
 ): Promise<string | null> {
-  const all = await loadZips();
+  const map = await loadCityZipMap();
   const cn = cityName.trim().toLowerCase();
-  const pn = provinceName.trim().toLowerCase();
-  // Prefer exact province + city match.
-  const exact = all.find((z) => {
-    const a = z.area.toLowerCase();
-    return a.includes(pn) && a.includes(cn);
-  });
-  if (exact) return exact.zip;
-  // Fall back to city-only match.
-  const fuzzy = all.find((z) => z.area.toLowerCase().includes(cn));
-  return fuzzy ? fuzzy.zip : null;
+  // The map is keyed by PSGC code, so we need to find the city whose name
+  // (case-insensitive) matches. For callers that have a city_code, use
+  // findZipByCode instead — it's exact and cheaper.
+  const cities = await loadCities();
+  const match = cities.find((c) => c.city_name.toLowerCase() === cn);
+  if (match) return map[match.city_code] ?? null;
+  return null;
 }
 
 // Lookup by display name (used when seeding the cascade with a User's existing

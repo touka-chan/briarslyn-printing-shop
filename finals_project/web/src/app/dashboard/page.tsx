@@ -1,130 +1,190 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
- Package,
- Clock,
- CheckCircle,
- AlertTriangle,
- ShoppingCart,
- Factory,
- TrendingUp,
+  Package,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
+  ShoppingCart,
+  Factory,
+  TrendingUp,
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
- KpiCard,
- ContentCard,
- FilterToolbar,
- DataTable,
- StatusBadge,
- ChartCard,
- Modal,
- Button,
- PriorityBadge,
- useToast,
+  KpiCard,
+  ContentCard,
+  FilterToolbar,
+  DataTable,
+  StatusBadge,
+  ChartCard,
+  Modal,
+  Button,
 } from "@/components/ui";
+import { subscribeOrders } from "@/lib/services/orders";
+import { subscribeInventory } from "@/lib/services/inventory";
 import {
- mockDashboardSummary,
- mockOrders,
- mockInventory,
- mockProduction,
- chartData,
- sparklineData,
- kpiUpdatedLabel,
-} from "@/lib/mockData";
-import { Order, InventoryItem, ProductionJob } from "@/types";
+  useSparkSeries,
+  orderCreatedAtKey,
+  inventoryCheckoutKey,
+} from "@/lib/hooks/useSparkSeries";
+import { getInventoryStatus, priorityWeight } from "@/lib/derived";
+import type { Order, InventoryItem, ProductionJob } from "@/types";
 
 export default function DashboardPage() {
  const [activePriority, setActivePriority] = useState("All");
  const [activeStockFilter, setActiveStockFilter] = useState("All");
  const [searchValue, setSearchValue] = useState("");
  const [kpiModal, setKpiModal] = useState<string | null>(null);
- const toast = useToast();
 
- const priorityTabs = [
-  { id: "All", label: "All", count: mockOrders.length },
-  {
-   id: "Overdue",
-   label: "Overdue",
-   count: mockOrders.filter((o) => o.priority === "Overdue").length,
-  },
-  {
-   id: "Urgent",
-   label: "Urgent",
-   count: mockOrders.filter((o) => o.priority === "Urgent").length,
-  },
-  {
-   id: "Upcoming",
-   label: "Upcoming",
-   count: mockOrders.filter((o) => o.priority === "Upcoming").length,
-  },
- ];
+ const [orders, setOrders] = useState<Order[]>([]);
+ const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
- const stockTabs = [
-  { id: "All", label: "All", count: mockInventory.length },
-  {
-   id: "In Stock",
-   label: "In Stock",
-   count: mockInventory.filter((i) => i.status === "In Stock").length,
-  },
-  {
-   id: "Low Stock",
-   label: "Low Stock",
-   count: mockInventory.filter((i) => i.status === "Low Stock").length,
-  },
-  {
-   id: "Insufficient Stock",
-   label: "Insufficient",
-   count: mockInventory.filter((i) => i.status === "Insufficient Stock").length,
-  },
- ];
+ useEffect(() => {
+  const unsubOrders = subscribeOrders(setOrders);
+  const unsubInv = subscribeInventory(setInventory);
+  return () => {
+   unsubOrders();
+   unsubInv();
+  };
+ }, []);
 
- const priorityRank: Record<Order["priority"], number> = {
-  Overdue: 0,
-  Urgent: 1,
-  Upcoming: 2,
- };
+ // Live sparkline series (last 7 days, local TZ).
+ const ordersCreatedSeries = useSparkSeries(orders, orderCreatedAtKey, 7);
+ const ordersCompletedSeries = useSparkSeries(
+  orders.filter((o) => o.status === "Completed"),
+  orderCreatedAtKey,
+  7,
+ );
+ const ordersPendingSeries = useSparkSeries(
+  orders.filter((o) =>
+   ["Pending", "In Production", "Ready for Pickup"].includes(o.status),
+  ),
+  orderCreatedAtKey,
+  7,
+ );
+ const checkoutSeries = useSparkSeries(inventory, inventoryCheckoutKey, 7);
+ const productionSeries = useSparkSeries(
+  orders.filter((o) => o.status === "In Production"),
+  orderCreatedAtKey,
+  7,
+ );
 
- const filteredByPriority =
-  activePriority === "All"
-   ? [...mockOrders].sort(
+ const priorityTabs = useMemo(
+  () => [
+   { id: "All", label: "All", count: orders.length },
+   {
+    id: "Overdue",
+    label: "Overdue",
+    count: orders.filter((o) => o.priority === "Overdue").length,
+   },
+   {
+    id: "Urgent",
+    label: "Urgent",
+    count: orders.filter((o) => o.priority === "Urgent").length,
+   },
+   {
+    id: "Upcoming",
+    label: "Upcoming",
+    count: orders.filter((o) => o.priority === "Upcoming").length,
+   },
+  ],
+  [orders],
+ );
+
+ const stockTabs = useMemo(
+  () => [
+   { id: "All", label: "All", count: inventory.length },
+   {
+    id: "In Stock",
+    label: "In Stock",
+    count: inventory.filter((i) => getInventoryStatus(i) === "In Stock").length,
+   },
+   {
+    id: "Low Stock",
+    label: "Low Stock",
+    count: inventory.filter((i) => getInventoryStatus(i) === "Low Stock").length,
+   },
+   {
+    id: "Insufficient Stock",
+    label: "Insufficient",
+    count: inventory.filter((i) => getInventoryStatus(i) === "Insufficient Stock")
+     .length,
+   },
+  ],
+  [inventory],
+ );
+
+ const filteredByPriority = useMemo(() => {
+  if (activePriority === "All") {
+   return [...orders].sort(
     (a, b) =>
-     priorityRank[a.priority] - priorityRank[b.priority] ||
+     priorityWeight(a.priority) - priorityWeight(b.priority) ||
      a.target_date.localeCompare(b.target_date),
-   )
-   : mockOrders
-    .filter((o) => o.priority === activePriority)
-    .sort((a, b) => a.target_date.localeCompare(b.target_date));
+   );
+  }
+  return orders
+   .filter((o) => o.priority === activePriority)
+   .sort((a, b) => a.target_date.localeCompare(b.target_date));
+ }, [orders, activePriority]);
 
- const filteredInventory =
-  activeStockFilter === "All"
-   ? mockInventory
-   : mockInventory.filter((i) => i.status === activeStockFilter);
-
- const reorderAlerts = mockInventory.filter(
-  (i) => i.current_stock <= i.reorder_point,
+ const filteredInventory = useMemo(
+  () =>
+   activeStockFilter === "All"
+    ? inventory
+    : inventory.filter((i) => getInventoryStatus(i) === activeStockFilter),
+  [inventory, activeStockFilter],
  );
- const staleItems = mockInventory.filter((i) => i.isStale);
- const overdueOrders = mockOrders.filter((o) => o.priority === "Overdue");
- const pendingOrders = mockOrders.filter(
-  (o) =>
-   o.status === "Pending" ||
-   o.status === "In Production" ||
-   o.status === "Ready for Pickup",
+
+ const reorderAlerts = useMemo(
+  () => inventory.filter((i) => i.current_stock <= i.reorder_point),
+  [inventory],
  );
- const completedOrders = mockOrders.filter((o) => o.status === "Completed");
+ const staleItems = useMemo(() => inventory.filter((i) => i.isStale), [inventory]);
+ const overdueOrders = useMemo(
+  () => orders.filter((o) => o.priority === "Overdue"),
+  [orders],
+ );
+ const pendingOrders = useMemo(
+  () =>
+   orders.filter(
+    (o) =>
+     o.status === "Pending" ||
+     o.status === "In Production" ||
+     o.status === "Ready for Pickup",
+   ),
+  [orders],
+ );
+ const completedOrders = useMemo(
+  () => orders.filter((o) => o.status === "Completed"),
+  [orders],
+ );
+ const inProductionOrders = useMemo(
+  () => orders.filter((o) => o.status === "In Production"),
+  [orders],
+ );
 
- const handleAlert = (item: InventoryItem) => {
-  toast.info(`Stale sync alert acknowledged for ${item.name}`);
- };
+ const totalOrders = orders.length;
+ const totalCompleted = completedOrders.length;
+ const totalPending = pendingOrders.length;
+ const totalLowStock = reorderAlerts.length;
+ const productionQueue: ProductionJob[] = inProductionOrders.map((o) => ({
+  id: o.id ?? o.order_id,
+  order_id: o.order_id,
+  item_type: o.item_type,
+  status: o.status,
+  priority: o.priority,
+  target_date: o.target_date,
+  estimated_completion: o.estimated_completion,
+  based_on: o.based_on,
+ }));
 
+ // Sparkline-aware KPI cards (last 7 days).
  const orderColumns = [
   {
    key: "order_id",
    header: "Order ID",
-   render: (r: Order) => (
-    <span className="type-mono">{r.order_id}</span>
-   ),
+   render: (r: Order) => <span className="font-mono text-xs">{r.order_id}</span>,
   },
   { key: "customer_name", header: "Customer" },
   { key: "item_type", header: "Item Type" },
@@ -133,14 +193,25 @@ export default function DashboardPage() {
    header: "Qty",
    render: (r: Order) => r.quantity.toLocaleString(),
   },
-  { key: "target_date", header: "Target Date" },
+  {
+   key: "target_date",
+   header: "Target Date",
+  },
   {
    key: "priority",
    header: "Priority",
    render: (r: Order) => (
-    <PriorityBadge
-     priority={r.priority.toLowerCase() as "overdue" | "urgent" | "upcoming"}
-    />
+    <span
+     className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+      r.priority === "Overdue"
+       ? "bg-printflow-error-container text-printflow-on-error-container"
+       : r.priority === "Urgent"
+       ? "bg-printflow-warning-container text-printflow-warning"
+       : "bg-printflow-primary-fixed/20 text-printflow-primary"
+     }`}
+    >
+     {r.priority}
+    </span>
    ),
   },
   {
@@ -158,7 +229,7 @@ export default function DashboardPage() {
    header: "ETA",
    render: (r: Order) => (
     <div>
-     <div className="text-xs font-medium">{r.estimated_completion}</div>
+     <div className="font-medium text-xs">{r.estimated_completion}</div>
      <div className="text-[10px] text-printflow-on-surface-variant">
       {r.based_on?.join(", ")}
      </div>
@@ -172,7 +243,7 @@ export default function DashboardPage() {
    key: "material_variant_id",
    header: "Variant ID",
    render: (r: InventoryItem) => (
-    <span className="type-mono">{r.material_variant_id}</span>
+    <span className="font-mono text-xs">{r.material_variant_id}</span>
    ),
   },
   { key: "item_type", header: "Item Type" },
@@ -207,13 +278,9 @@ export default function DashboardPage() {
       customLabel={r.status}
      />
      {r.isStale && (
-      <button
-       onClick={() => handleAlert(r)}
-       title="Click to acknowledge stale RFID sync"
-       className="text-[10px] px-1.5 py-0.5 rounded bg-printflow-warning-container text-printflow-warning hover:opacity-80 transition-opacity"
-      >
+      <span className="text-[10px] px-1.5 py-0.5 rounded bg-printflow-warning-container text-printflow-warning">
        STALE
-      </button>
+      </span>
      )}
     </span>
    ),
@@ -225,7 +292,7 @@ export default function DashboardPage() {
    key: "order_id",
    header: "Order ID",
    render: (r: ProductionJob) => (
-    <span className="type-mono">{r.order_id}</span>
+    <span className="font-mono text-xs">{r.order_id}</span>
    ),
   },
   { key: "item_type", header: "Item Type" },
@@ -233,9 +300,17 @@ export default function DashboardPage() {
    key: "priority",
    header: "Priority",
    render: (r: ProductionJob) => (
-    <PriorityBadge
-     priority={r.priority.toLowerCase() as "overdue" | "urgent" | "upcoming"}
-    />
+    <span
+     className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+      r.priority === "Overdue"
+       ? "bg-printflow-error-container text-printflow-on-error-container"
+       : r.priority === "Urgent"
+       ? "bg-printflow-warning-container text-printflow-warning"
+       : "bg-printflow-primary-fixed/20 text-printflow-primary"
+     }`}
+    >
+     {r.priority}
+    </span>
    ),
   },
   {
@@ -254,97 +329,103 @@ export default function DashboardPage() {
 
  return (
   <AdminLayout
-   title="PrintFlow Dashboard"
+   title="Briaslyn Printing Shop Dashboard"
    subtitle="Overview of orders, production and inventory"
    onSearch={setSearchValue}
   >
-   {/* Row 1: Key Metrics */}
-   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-4">
+   {/* Row 1: Key Metrics from dashboard summary */}
+   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-4">
     <KpiCard
      label="Total Orders"
-     value={mockDashboardSummary.total_orders}
+     value={totalOrders}
      icon="OrdersIcon"
      change="all orders"
      changeType="neutral"
-     sparkline={sparklineData(mockDashboardSummary.total_orders, "rising", "dash-total-orders")}
+     sparkline={ordersCreatedSeries}
      sparklineTone="primary"
-     lastUpdated={kpiUpdatedLabel("dash-total-orders")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("total")}
     />
     <KpiCard
      label="Pending"
-     value={mockDashboardSummary.pending}
+     value={totalPending}
      icon="Clock"
      change={`${overdueOrders.length} overdue`}
      changeType="negative"
      trend="up"
-     sparkline={sparklineData(mockDashboardSummary.pending, "wave", "dash-pending")}
+     sparkline={ordersPendingSeries}
      sparklineTone="warning"
-     lastUpdated={kpiUpdatedLabel("dash-pending")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("pending")}
     />
     <KpiCard
      label="Completed"
-     value={mockDashboardSummary.completed}
+     value={totalCompleted}
      icon="CheckIcon"
-     change="82% on-time"
+     change="on-time"
      changeType="positive"
      trend="up"
-     sparkline={sparklineData(mockDashboardSummary.completed, "rising", "dash-completed")}
+     sparkline={ordersCompletedSeries}
      sparklineTone="success"
-     lastUpdated={kpiUpdatedLabel("dash-completed")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("completed")}
     />
     <KpiCard
      label="Low Stock Items"
-     value={mockDashboardSummary.low_stock_items}
+     value={totalLowStock}
      icon="AlertIcon"
      change={`${reorderAlerts.length} need reorder`}
      changeType="negative"
      trend="up"
-     sparkline={sparklineData(mockDashboardSummary.low_stock_items, "spike", "dash-lowstock")}
+     sparkline={checkoutSeries}
      sparklineTone="error"
-     lastUpdated={kpiUpdatedLabel("dash-lowstock")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("lowStock")}
     />
    </div>
 
    {/* Row 2: Additional metrics */}
-   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
+   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
     <KpiCard
      label="On-time"
-     value="82%"
+     value={`${
+      totalCompleted + pendingOrders.length > 0
+       ? Math.round(
+          (totalCompleted / (totalCompleted + pendingOrders.length)) * 100,
+         )
+       : 0
+     }%`}
      icon="CheckIcon"
      change="on-time rate"
      changeType="positive"
      trend="up"
-     sparkline={sparklineData(82, "stable", "dash-ontime")}
+     sparkline={ordersCompletedSeries}
      sparklineTone="success"
-     lastUpdated={kpiUpdatedLabel("dash-ontime")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("onTime")}
     />
     <KpiCard
-     label="Production Queue"
-     value={mockProduction.length}
+     label="In Production"
+     value={inProductionOrders.length}
      icon="Clock"
      change="in queue"
      changeType="negative"
      trend="up"
-     sparkline={sparklineData(mockProduction.length, "rising", "dash-prod-queue")}
+     sparkline={productionSeries}
      sparklineTone="warning"
-     lastUpdated={kpiUpdatedLabel("dash-prod-queue")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("productionPending")}
     />
     <KpiCard
-     label="Reorder Alerts"
+     label="Low Stock"
      value={reorderAlerts.length}
      icon="AlertIcon"
      change="materials"
      changeType="negative"
      trend="up"
-     sparkline={sparklineData(reorderAlerts.length, "spike", "dash-reorder")}
+     sparkline={checkoutSeries}
      sparklineTone="error"
-     lastUpdated={kpiUpdatedLabel("dash-reorder")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("lowStock")}
     />
     <KpiCard
@@ -354,19 +435,19 @@ export default function DashboardPage() {
      change="needs sync"
      changeType="negative"
      trend="up"
-     sparkline={sparklineData(staleItems.length, "falling", "dash-stale")}
+     sparkline={staleItems.length ? [1, 1, 1, 1, 1, 1, 1] : [0, 0, 0, 0, 0, 0, 0]}
      sparklineTone="warning"
-     lastUpdated={kpiUpdatedLabel("dash-stale")}
+     lastUpdated="7d"
      onClick={() => setKpiModal("delayed")}
     />
    </div>
 
-   {/* KPI Modals */}
+   {/* KPI Modals — unified users master style */}
    <Modal
     isOpen={kpiModal === "total"}
     onClose={() => setKpiModal(null)}
     title="Total Orders"
-    description={`${mockDashboardSummary.total_orders} orders • GET /api/orders`}
+    description={`${totalOrders} orders • GET /api/orders`}
     icon={<ShoppingCart className="w-5 h-5" />}
     size="lg"
     footer={
@@ -375,12 +456,14 @@ export default function DashboardPage() {
      </Button>
     }
    >
-    <DataTable
-     columns={orderColumns}
-     data={mockOrders}
-     keyExtractor={(r) => r.order_id}
-     emptyMessage="No orders"
-    />
+    <div className="space-y-4">
+     <DataTable
+      columns={orderColumns}
+      data={orders}
+      keyExtractor={(r) => r.order_id}
+      emptyMessage="No orders"
+     />
+    </div>
    </Modal>
 
    <Modal
@@ -449,7 +532,13 @@ export default function DashboardPage() {
    <Modal
     isOpen={kpiModal === "onTime"}
     onClose={() => setKpiModal(null)}
-    title="On time 82%"
+    title={`On time ${
+     totalCompleted + pendingOrders.length > 0
+      ? Math.round(
+         (totalCompleted / (totalCompleted + pendingOrders.length)) * 100,
+        )
+      : 0
+    }%`}
     description="GET /api/orders • on time vs overdue"
     icon={<TrendingUp className="w-5 h-5" />}
     size="lg"
@@ -465,7 +554,14 @@ export default function DashboardPage() {
        <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">
         ON TIME
        </p>
-       <p className="text-xl font-bold text-printflow-success mt-1">82%</p>
+       <p className="text-xl font-bold text-printflow-success mt-1">
+        {totalCompleted + pendingOrders.length > 0
+         ? Math.round(
+            (totalCompleted / (totalCompleted + pendingOrders.length)) * 100,
+           )
+         : 0}
+        %
+       </p>
       </div>
       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40 text-center">
        <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">
@@ -495,7 +591,7 @@ export default function DashboardPage() {
     isOpen={kpiModal === "productionPending"}
     onClose={() => setKpiModal(null)}
     title="Pending Production"
-    description={`${mockProduction.length} jobs • priority Overdue/Urgent/Upcoming`}
+    description={`${productionQueue.length} jobs • priority Overdue/Urgent/Upcoming`}
     icon={<Factory className="w-5 h-5" />}
     size="lg"
     footer={
@@ -506,7 +602,7 @@ export default function DashboardPage() {
    >
     <DataTable
      columns={productionColumns}
-     data={mockProduction}
+     data={productionQueue}
      keyExtractor={(r) => r.order_id}
      emptyMessage="No jobs"
     />
@@ -539,54 +635,104 @@ export default function DashboardPage() {
     )}
    </Modal>
 
-   {/* Charts row 1 */}
-   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 mb-6 lg:mb-8">
-    <ChartCard
-     title="Order Volume Trends"
-     type="area"
-     data={chartData.ordersTrend}
-     xKey="name"
-     yKeys={["orders", "completed", "pending"]}
-     colors={["#00535b", "#2e7d32", "#ed6c02"]}
-     height={280}
-    />
-    <ChartCard
-     title="On-time vs Overdue"
-     type="pie"
-     data={chartData.onTimeVsOverdue}
-     xKey="name"
-     yKeys={["value"]}
-     colors={["#2e7d32", "#ba1a1a"]}
-     height={280}
-    />
-   </div>
+   {/* Live chart data derived from real orders */}
+   {(() => {
+    const dayKeys: string[] = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+     const d = new Date(now);
+     d.setDate(d.getDate() - i);
+     dayKeys.push(d.toISOString().slice(0, 10));
+    }
+    const ordersTrend = dayKeys.map((k) => {
+     const day = orders.filter(
+      (o) => (o.created_at ?? "").slice(0, 10) === k,
+     );
+     const completed = day.filter((o) => o.status === "Completed").length;
+     return {
+      name: new Date(k).toLocaleDateString("en-PH", {
+       month: "short",
+       day: "numeric",
+      }),
+      orders: day.length,
+      completed,
+      pending: day.length - completed,
+     };
+    });
+    const onTimeVsOverdue = [
+     { name: "On time", value: completedOrders.length },
+     { name: "Overdue", value: overdueOrders.length },
+    ];
+    const materialUsageTrends = inventory
+     .map((i) => ({
+      name: i.material_variant_id,
+      usage: i.forecasted_demand_next_7_days,
+     }))
+     .slice(0, 8);
+    const productionByPriority = [
+     {
+      name: "Overdue",
+      value: orders.filter((o) => o.priority === "Overdue").length,
+     },
+     {
+      name: "Urgent",
+      value: orders.filter((o) => o.priority === "Urgent").length,
+     },
+     {
+      name: "Upcoming",
+      value: orders.filter((o) => o.priority === "Upcoming").length,
+     },
+    ];
 
-   {/* Charts row 2 */}
-   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 mb-6 lg:mb-8">
-    <ChartCard
-     title="Material Usage"
-     type="bar"
-     data={chartData.materialUsageTrends}
-     xKey="name"
-     yKeys={["usage"]}
-     colors={["#00535b"]}
-     height={260}
-     showLegend={false}
-    />
-    <ChartCard
-     title="Production by Priority"
-     type="bar"
-     data={chartData.productionByPriority}
-     xKey="name"
-     yKeys={["value"]}
-     colors={["#00535b"]}
-     height={260}
-     showLegend={false}
-    />
-   </div>
+    return (
+     <>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+       <ChartCard
+        title="Order Volume Trends"
+        type="area"
+        data={ordersTrend}
+        xKey="name"
+        yKeys={["orders", "completed", "pending"]}
+        colors={["#00535b", "#2e7d32", "#ed6c02"]}
+        height={280}
+       />
+       <ChartCard
+        title="On-time vs Overdue"
+        type="pie"
+        data={onTimeVsOverdue}
+        xKey="name"
+        yKeys={["value"]}
+        colors={["#2e7d32", "#ba1a1a"]}
+        height={280}
+       />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+       <ChartCard
+        title="Material Usage"
+        type="bar"
+        data={materialUsageTrends}
+        xKey="name"
+        yKeys={["usage"]}
+        colors={["#00535b"]}
+        height={260}
+        showLegend={false}
+       />
+       <ChartCard
+        title="Production by Priority"
+        type="bar"
+        data={productionByPriority}
+        xKey="name"
+        yKeys={["value"]}
+        colors={["#00535b"]}
+        height={260}
+        showLegend={false}
+       />
+      </div>
+     </>
+    );
+   })()}
 
-   {/* Tables */}
-   <div className="space-y-6 lg:space-y-8">
+   <div className="space-y-8">
     <ContentCard
      title="Production Queue"
      subtitle={`${filteredByPriority.length} orders`}
@@ -634,16 +780,15 @@ export default function DashboardPage() {
       </div>
      </div>
     </ContentCard>
-
     <ContentCard
      title="Production Schedule"
-     subtitle={`${mockProduction.length} active jobs`}
+     subtitle={`${productionQueue.length} active jobs`}
      className="min-w-0 overflow-hidden w-full"
     >
      <div className="overflow-x-auto -mx-6 px-6 py-3">
       <DataTable
        columns={productionColumns}
-       data={mockProduction}
+       data={productionQueue}
        keyExtractor={(r) => r.order_id}
        emptyMessage="No jobs"
       />

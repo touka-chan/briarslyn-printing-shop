@@ -1,44 +1,103 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app_router.dart';
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
-import '../../theme/app_theme.dart';
-import '../../utils/mock_data.dart';
-import '../../utils/animations.dart';
-import '../../app_router.dart';
 import '../../models/order.dart';
+import '../../services/firebase_orders.dart' as fb_orders;
+import '../../theme/app_theme.dart';
+import '../../utils/animations.dart';
 
 /// The POS / Cashier home dashboard — the first tab in the Cashier shell.
 ///
 /// Displays 4 KPI tiles with animated count-up, quick action buttons,
 /// and a "Recent Orders" list using the signature job ticket cards.
-/// Uses staggered fade-in entrance animation.
-class CashierHomeScreen extends StatelessWidget {
+/// All data is streamed live from Firestore — empty states render
+/// honestly when no orders have been created yet.
+class CashierHomeScreen extends StatefulWidget {
   const CashierHomeScreen({super.key});
 
   @override
+  State<CashierHomeScreen> createState() => _CashierHomeScreenState();
+}
+
+class _CashierHomeScreenState extends State<CashierHomeScreen> {
+  late final Stream<List<Order>> _orders$ = fb_orders.subscribeOrdersStream();
+
+  @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
-      child: StaggeredFadeIn(
-        children: [
-          // Welcome banner
-          _buildWelcomeBanner(context),
-          const SizedBox(height: AppSpacing.lg),
-          _buildKpiSection(context),
-          const SizedBox(height: AppSpacing.xl),
-          _buildQuickActions(context),
-          const SizedBox(height: AppSpacing.xl),
-          _buildRecentOrders(context),
-          const SizedBox(height: AppSpacing.xl),
-          _buildTopCustomers(context),
-        ],
-      ),
+    return StreamBuilder<List<Order>>(
+      stream: _orders$,
+      builder: (context, snap) {
+        final orders = snap.data ?? const <Order>[];
+        final kpis = _computeKpis(orders);
+        final isEmpty = orders.isEmpty;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
+          child: StaggeredFadeIn(
+            children: [
+              _buildWelcomeBanner(context, orders),
+              const SizedBox(height: AppSpacing.lg),
+              _buildKpiSection(context, kpis, hasData: !isEmpty),
+              const SizedBox(height: AppSpacing.xl),
+              _buildQuickActions(context),
+              const SizedBox(height: AppSpacing.xl),
+              if (isEmpty)
+                _buildEmptyOrders(context)
+              else ...[
+                _buildRecentOrders(context, orders),
+                const SizedBox(height: AppSpacing.xl),
+                _buildTopCustomers(context, orders),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildWelcomeBanner(BuildContext context) {
+  // ──────────────────────────────────────────────
+  // KPI computation
+  // ──────────────────────────────────────────────
+  _CashierKpis _computeKpis(List<Order> orders) {
+    final now = DateTime.now();
+    int todayOrders = 0;
+    int pending = 0;
+    int collectedToday = 0;
+    double collectedAmount = 0;
+    for (final o in orders) {
+      if (o.createdAt != null && _isToday(o.createdAt!, now)) todayOrders++;
+      if (o.status == 'Pending') pending++;
+      if (o.status == 'Completed') {
+        if (o.createdAt != null && _isToday(o.createdAt!, now)) {
+          collectedToday++;
+          collectedAmount += o.paymentAmount;
+        }
+      }
+    }
+    return _CashierKpis(
+      todayOrders: todayOrders,
+      pending: pending,
+      collectedTodayCount: collectedToday,
+      collectedAmount: collectedAmount,
+      avgPrepHours: 0,
+    );
+  }
+
+  bool _isToday(DateTime d, DateTime now) =>
+      d.year == now.year && d.month == now.month && d.day == now.day;
+
+  // ──────────────────────────────────────────────
+  // Sections
+  // ──────────────────────────────────────────────
+  Widget _buildWelcomeBanner(BuildContext context, List<Order> orders) {
+    final auth = AuthProvider.of(context);
+    final name = auth.currentUser?.name ?? 'there';
+    final firstName = name.split(' ').first;
+    final hasOrders = orders.isNotEmpty;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -73,7 +132,7 @@ class CashierHomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
-                  'Welcome back, Maria',
+                  'Welcome back, $firstName',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         color: AppTheme.onPrimary,
                         fontWeight: FontWeight.w600,
@@ -81,7 +140,9 @@ class CashierHomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  "Let's get those orders moving!",
+                  hasOrders
+                      ? "Let's get those orders moving!"
+                      : 'Create your first order to get started.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.onPrimary.withValues(alpha: 0.85),
                       ),
@@ -107,54 +168,52 @@ class CashierHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildKpiSection(BuildContext context) {
-    final kpis = mockKpis('cashier');
+  // Build section
+  Widget _buildKpiSection(BuildContext context, _CashierKpis kpis,
+      {required bool hasData}) {
     final kpiData = [
       {
-        'value': kpis['todayOrders'] as int,
+        'value': kpis.todayOrders.toDouble(),
         'label': "Today's Orders",
         'icon': Icons.receipt_long_rounded,
         'accentColor': AppTheme.statusInProduction,
-        'change': '+12%',
-        'changePositive': true,
-        'sparkline': [8.0, 12.0, 10.0, 15.0, 13.0, 18.0, 23.0],
+        'prefix': '',
+        'sparkline': const <double>[],
       },
       {
-        'value': kpis['pending'] as int,
+        'value': kpis.pending.toDouble(),
         'label': 'Pending',
         'icon': Icons.schedule_rounded,
         'accentColor': AppTheme.statusUrgent,
-        'change': '+3%',
-        'changePositive': true,
-        'sparkline': [5.0, 4.0, 6.0, 5.0, 7.0, 8.0, 9.0],
+        'prefix': '',
+        'sparkline': const <double>[],
       },
       {
-        'value': (kpis['collected'] as num).toDouble(),
+        'value': kpis.collectedAmount,
         'label': 'Collected Today',
         'icon': Icons.payments_rounded,
         'accentColor': AppTheme.statusCompleted,
-        'change': '+8%',
-        'changePositive': true,
         'prefix': '₱',
-        'sparkline': [2800.0, 3200.0, 3100.0, 3600.0, 3400.0, 4100.0, 4350.0],
+        'sparkline': const <double>[],
       },
       {
-        'value': (kpis['avgPrepTime'] as num).toDouble(),
+        'value': kpis.avgPrepHours,
         'label': 'Avg. Prep Time (hrs)',
         'icon': Icons.timer_rounded,
         'accentColor': AppTheme.primary,
-        'change': '-5 min',
-        'changePositive': true,
-        'sparkline': [3.2, 3.5, 3.1, 2.9, 2.7, 2.8, 2.5],
+        'prefix': '',
+        'sparkline': const <double>[],
       },
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const PfSectionHeader(
+        PfSectionHeader(
           title: 'Overview',
-          subtitle: 'Key metrics for today',
+          subtitle: hasData
+              ? 'Key metrics for today'
+              : 'No orders yet — metrics will appear once you create one',
         ),
         const SizedBox(height: AppSpacing.md),
         GridView.builder(
@@ -174,8 +233,6 @@ class CashierHomeScreen extends StatelessWidget {
               label: data['label'] as String,
               icon: data['icon'] as IconData,
               accentColor: data['accentColor'] as Color,
-              change: data['change'] as String,
-              changePositive: data['changePositive'] as bool,
               sparklineData: data['sparkline'] as List<double>?,
               prefix: data['prefix'] as String? ?? '',
             );
@@ -221,9 +278,63 @@ class CashierHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRecentOrders(BuildContext context) {
-    final recentOrders = mockOrders.take(3).toList();
+  Widget _buildEmptyOrders(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const PfSectionHeader(
+          title: 'Recent Orders',
+          subtitle: 'Your latest activity will show here',
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: AppRadius.rMd,
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.receipt_long_outlined,
+                  color: AppTheme.primary,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              const Text(
+                'No orders yet',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: AppTheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Tap "New Order" to create the first one.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
+  Widget _buildRecentOrders(BuildContext context, List<Order> orders) {
+    final recent = orders.take(3).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -236,31 +347,31 @@ class CashierHomeScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
-        ...recentOrders.map((order) => Column(
-          children: [
-            PfJobTicket(
-              order: order,
-              onTap: () => _navigateToOrderDetail(context, order),
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-        )),
+        ...recent.map((order) => Column(
+              children: [
+                PfJobTicket(
+                  order: order,
+                  onTap: () => _navigateToOrderDetail(context, order),
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ],
+            )),
       ],
     );
   }
 
-  Widget _buildTopCustomers(BuildContext context) {
-    // Build a top-3 customer list derived from mock data — single source
-    // of truth, no hardcoded values.
+  Widget _buildTopCustomers(BuildContext context, List<Order> orders) {
     final byName = <String, _CustomerStats>{};
-    for (final order in mockOrders) {
+    for (final order in orders) {
       final stats = byName.putIfAbsent(
         order.customerName,
         () => _CustomerStats(name: order.customerName),
       );
       stats.orderCount += 1;
       stats.totalSpent += order.paymentAmount;
-      if (stats.lastOrderDate == null || order.createdAt!.isAfter(stats.lastOrderDate!)) {
+      if (order.createdAt != null &&
+          (stats.lastOrderDate == null ||
+              order.createdAt!.isAfter(stats.lastOrderDate!))) {
         stats.lastOrderDate = order.createdAt;
       }
     }
@@ -277,15 +388,18 @@ class CashierHomeScreen extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         ...top3.map((c) => Column(
-          children: [
-            _CustomerTile(stats: c),
-            const SizedBox(height: AppSpacing.md),
-          ],
-        )),
+              children: [
+                _CustomerTile(stats: c),
+                const SizedBox(height: AppSpacing.md),
+              ],
+            )),
       ],
     );
   }
 
+  // ──────────────────────────────────────────────
+  // Navigation
+  // ──────────────────────────────────────────────
   void _navigateToNewOrder(BuildContext context) {
     HapticFeedback.selectionClick();
     context.pushNamed(AppRoutes.cashierNewOrder);
@@ -302,11 +416,28 @@ class CashierHomeScreen extends StatelessWidget {
   }
 }
 
+/// Aggregated KPIs for the cashier home — computed from the live orders
+/// snapshot, no hardcoded values.
+class _CashierKpis {
+  const _CashierKpis({
+    required this.todayOrders,
+    required this.pending,
+    required this.collectedTodayCount,
+    required this.collectedAmount,
+    required this.avgPrepHours,
+  });
+  final int todayOrders;
+  final int pending;
+  final int collectedTodayCount;
+  final double collectedAmount;
+  final double avgPrepHours;
+}
+
 /// Aggregated per-customer statistics used by the "Top Customers" section.
 class _CustomerStats {
   _CustomerStats({required this.name});
   final String name;
-  int orderCount = 0;
+  int orderCount = 1;
   double totalSpent = 0;
   DateTime? lastOrderDate;
 }

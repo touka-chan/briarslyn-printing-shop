@@ -13,6 +13,12 @@ interface ModalProps {
  footer?: ReactNode;
  size?: "sm" | "md" | "lg" | "xl";
  closeOnOverlayClick?: boolean;
+ /**
+  * When false, the modal cannot be closed by clicking the overlay,
+  * pressing Escape, or the X button. The caller is expected to provide
+  * its own buttons in `footer` to dismiss. Defaults to false.
+  */
+ dismissible?: boolean;
 }
 
 export function Modal({
@@ -25,17 +31,21 @@ export function Modal({
  footer,
  size = "md",
  closeOnOverlayClick = true,
+ dismissible = false,
 }: ModalProps) {
  useEffect(() => {
   if (!isOpen) return;
   document.body.style.overflow = "hidden";
+  if (!dismissible) return () => {
+   document.body.style.overflow = "unset";
+  };
   const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
   window.addEventListener("keydown", onEsc);
   return () => {
    document.body.style.overflow = "unset";
    window.removeEventListener("keydown", onEsc);
   };
- }, [isOpen, onClose]);
+ }, [isOpen, onClose, dismissible]);
 
  if (!isOpen) return null;
 
@@ -47,7 +57,7 @@ export function Modal({
  };
 
  return (
-  <div className="modal-overlay" onClick={closeOnOverlayClick ? onClose : undefined}>
+  <div className="modal-overlay" onClick={dismissible && closeOnOverlayClick ? onClose : undefined}>
    <div
     className={`modal-content ${sizeClasses[size]}`}
     onClick={(e) => e.stopPropagation()}
@@ -65,7 +75,7 @@ export function Modal({
      </div>
      <button
       onClick={onClose}
-      className="shrink-0 w-8 h-8 rounded-full bg-printflow-surface-container hover:bg-printflow-surface-container-high text-printflow-on-surface-variant hover:text-printflow-on-surface flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:ring-offset-2"
+      className={`shrink-0 w-8 h-8 rounded-full bg-printflow-surface-container hover:bg-printflow-surface-container-high text-printflow-on-surface-variant hover:text-printflow-on-surface flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:ring-offset-2 ${dismissible ? "" : "hidden"}`}
       aria-label="Close modal"
      >
       <X className="w-4 h-4" />

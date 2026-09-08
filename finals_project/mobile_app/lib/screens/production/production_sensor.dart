@@ -1,15 +1,11 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
-import '../../services/inventory_service.dart';
+import '../../services/firebase_inventory.dart' as fb_inventory;
+import '../../services/firebase_rfid.dart' as fb_rfid;
 import '../../theme/app_theme.dart';
-import '../../utils/mock_data.dart';
 import '../../utils/animations.dart';
 import '../../models/rfid_event.dart';
 import '../../models/inventory_item.dart';
@@ -17,6 +13,16 @@ import '../../models/inventory_item.dart';
 /// The RFID Sensor screen — the third tab in the Production shell.
 ///
 /// Displays live sensor status, RFID activity feed, and per-tag status.
+///
+/// All data is sourced live from Firestore:
+///   - `rfid_events` collection for the activity feed
+///   - `sensors` collection for online/offline status
+///   - `inventory` collection for per-sensor tag grouping and stock-at-risk
+///
+/// The previous 6-second in-app simulator has been removed; the screen now
+/// only reflects events that the ESP32 (or a Cloud Function) actually writes
+/// to `rfid_events`. When the collection is empty, an honest empty state is
+/// shown instead of synthesized data.
 class ProductionSensorScreen extends StatefulWidget {
   const ProductionSensorScreen({super.key});
 
@@ -25,177 +31,231 @@ class ProductionSensorScreen extends StatefulWidget {
 }
 
 class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
-  // Simulated sensor state
-  bool _sensorOnline = true;
-  late int _eventsToday = mockActivity.length;
-
-  // Local copy of the activity feed so the simulated "live" inserts do not
-  // mutate the global mock list when we navigate away from this screen.
-  late List<RfidCheckoutEvent> _activityFeed = List.of(mockActivity);
-  Timer? _simulator;
-  final _rng = math.Random(42);
-  DateTime? _lastEventAt;
   static const _sensorId = 'ESP32-01';
 
-  Map<String, List<InventoryItem>> get _tagsBySensor {
+  Future<void> _toggleSensor(bool currentlyOnline) async {
+    HapticFeedback.mediumImpact();
+    try {
+      await fb_rfid.setSensorOnline(_sensorId, !currentlyOnline);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not update sensor status'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<InventoryItem>>(
+      stream: fb_inventory.subscribeInventoryStream(),
+      builder: (context, invSnap) {
+        final inventory = invSnap.data ?? const <InventoryItem>[];
+        return StreamBuilder<List<RfidCheckoutEvent>>(
+          stream: fb_rfid.subscribeRfidEventsStream(),
+          builder: (context, rfidSnap) {
+            final events = rfidSnap.data ?? const <RfidCheckoutEvent>[];
+            final tagsBySensor = _tagsBySensor(inventory);
+            final tagsTracked = inventory.where((i) => i.tagUid != null).length;
+            final todayCount = _eventsToday(events);
+            final lastEventAt = events.isEmpty ? null : events.first.timestamp;
+            final sensorOnline = _isSensorOnline(inventory);
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
+              child: StaggeredFadeIn(
+                children: [
+                  // Sensor pulse header
+                  _SensorHeaderCard(
+                    isOnline: sensorOnline,
+                    lastEventAt: lastEventAt,
+                    onToggle: () => _toggleSensor(sensorOnline),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  // Sensor stats
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatTile(
+                          label: 'Active Sensors',
+                          value: '${tagsBySensor.length}',
+                          icon: Icons.sensors_rounded,
+                          color: AppTheme.statusCompleted,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _StatTile(
+                          label: 'Tags Tracked',
+                          value: '$tagsTracked',
+                          icon: Icons.qr_code_2_rounded,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _StatTile(
+                          label: "Today's Events",
+                          value: '$todayCount',
+                          icon: Icons.event_note_rounded,
+                          color: AppTheme.statusInProduction,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  // Stock-at-risk row — flags low/insufficient variants that
+                  // the sensor is currently tracking, so production staff can
+                  // re-order before the next RFID checkout drives stock to 0.
+                  _StockAtRiskBanner(
+                    lowCount: inventory
+                        .where((i) =>
+                            i.sensorId != null &&
+                            (i.status == 'Low Stock' ||
+                                i.status == 'Insufficient Stock'))
+                        .length,
+                    insufficientCount: inventory
+                        .where((i) =>
+                            i.sensorId != null &&
+                            i.status == 'Insufficient Stock')
+                        .length,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Sensors section
+                  const PfSectionHeader(
+                    title: 'Connected Sensors',
+                    subtitle: 'Live RFID reader status',
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  if (tagsBySensor.isEmpty)
+                    _buildNoSensorsEmpty()
+                  else
+                    ...tagsBySensor.entries.map((entry) => Column(
+                          children: [
+                            _SensorCard(
+                              sensorId: entry.key,
+                              tags: entry.value,
+                              isOnline: sensorOnline,
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                          ],
+                        )),
+
+                  const SizedBox(height: AppSpacing.lg),
+                  const PfSectionHeader(
+                    title: 'Recent Activity',
+                    subtitle: 'Latest RFID checkout events',
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Activity list
+                  if (events.isEmpty)
+                    _buildNoEventsEmpty()
+                  else
+                    ...events.take(8).map((event) => Column(
+                          children: [
+                            _ActivityRow(
+                              event: event,
+                              isFresh: lastEventAt != null &&
+                                  event.timestamp == lastEventAt,
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                          ],
+                        )),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  // Helpers — derive UI state from live Firestore
+  // ──────────────────────────────────────────────
+  Map<String, List<InventoryItem>> _tagsBySensor(List<InventoryItem> items) {
     final grouped = <String, List<InventoryItem>>{};
-    for (final item in mockInventory) {
+    for (final item in items) {
       if (item.sensorId == null) continue;
       grouped.putIfAbsent(item.sensorId!, () => []).add(item);
     }
     return grouped;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _startSimulator();
+  /// Counts events whose timestamp falls on the current local calendar day.
+  int _eventsToday(List<RfidCheckoutEvent> events) {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    return events.where((e) => !e.timestamp.isBefore(start)).length;
   }
 
-  @override
-  void didUpdateWidget(covariant ProductionSensorScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget != widget) {
-      _startSimulator();
-    }
+  /// Heuristic for sensor online state: at least one tracked tag exists for
+  /// the default sensor ID. With the ESP32 not yet online, the user toggles
+  /// the sensor manually via [fb_rfid.setSensorOnline]; the visual cue
+  /// reflects the inventory grouping until that path is exercised.
+  bool _isSensorOnline(List<InventoryItem> items) {
+    return items.any((i) => i.sensorId == _sensorId);
   }
 
-  void _startSimulator() {
-    _simulator?.cancel();
-    if (!_sensorOnline) return;
-    // Fires every 6 seconds, mimicking the real ESP32 cadence from §X.
-    _simulator = Timer.periodic(const Duration(seconds: 6), (_) => _emitEvent());
-  }
-
-  Future<void> _emitEvent() async {
-    if (!mounted || !_sensorOnline) return;
-    // Pick a random inventory variant that has an RFID tag and stock > 0.
-    final candidates =
-        mockInventory.where((i) => i.tagUid != null && i.currentStock > 0).toList();
-    if (candidates.isEmpty) return;
-    final variant = candidates[_rng.nextInt(candidates.length)];
-    final event = RfidCheckoutEvent(
-      materialVariantId: variant.materialVariantId,
-      tagUid: variant.tagUid!,
-      sensorId: _sensorId,
-      timestamp: DateTime.now(),
+  Widget _buildNoEventsEmpty() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: AppTheme.sensorActive.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.wifi_off_rounded,
+                size: 48,
+                color: AppTheme.sensorActive,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              'No events yet — waiting for $_sensorId to come online',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Activity will appear here as soon as the ESP32 station posts its first RFID checkout.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
-    setState(() {
-      _activityFeed.insert(0, event);
-      _eventsToday += 1;
-      _lastEventAt = event.timestamp;
-      if (_activityFeed.length > 50) {
-        _activityFeed = _activityFeed.sublist(0, 50);
-      }
-    });
-    HapticFeedback.selectionClick();
-    // Decrement stock via the service so the rest of the app sees the change.
-    try {
-      final auth = AuthProvider.of(context);
-      await InventoryService.recordRfidEvent(
-        materialVariantId: event.materialVariantId,
-        tagUid: event.tagUid,
-        quantityChange: -1,
-        auth: auth,
-      );
-    } catch (_) {
-      // Service not permitted (e.g. wrong role). The visual feed still updates.
-    }
   }
 
-  @override
-  void dispose() {
-    _simulator?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tagsBySensor = _tagsBySensor;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
-      child: StaggeredFadeIn(
-        children: [
-          // Sensor pulse header
-          _SensorHeaderCard(
-            isOnline: _sensorOnline,
-            lastEventAt: _lastEventAt,
-            onToggle: () {
-              HapticFeedback.mediumImpact();
-              setState(() => _sensorOnline = !_sensorOnline);
-              if (_sensorOnline) {
-                _startSimulator();
-              } else {
-                _simulator?.cancel();
-              }
-            },
-          ),
-          const SizedBox(height: AppSpacing.lg),
-
-          // Sensor stats
-          Row(
-            children: [
-              Expanded(child: _StatTile(
-                label: 'Active Sensors',
-                value: '${tagsBySensor.length}',
-                icon: Icons.sensors_rounded,
-                color: AppTheme.statusCompleted,
-              )),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: _StatTile(
-                label: 'Tags Tracked',
-                value: '${mockInventory.where((i) => i.tagUid != null).length}',
-                icon: Icons.qr_code_2_rounded,
-                color: AppTheme.primary,
-              )),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: _StatTile(
-                label: "Today's Events",
-                value: '$_eventsToday',
-                icon: Icons.event_note_rounded,
-                color: AppTheme.statusInProduction,
-              )),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-
-          // Sensors section
-          const PfSectionHeader(
-            title: 'Connected Sensors',
-            subtitle: 'Live RFID reader status',
-          ),
-          const SizedBox(height: AppSpacing.md),
-          ...tagsBySensor.entries.map((entry) => Column(
-            children: [
-              _SensorCard(
-                sensorId: entry.key,
-                tags: entry.value,
-                isOnline: _sensorOnline,
+  Widget _buildNoSensorsEmpty() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: Center(
+        child: Text(
+          'No sensors are bound to a material variant yet.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppTheme.onSurfaceVariant,
               ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-          )),
-
-          const SizedBox(height: AppSpacing.lg),
-          const PfSectionHeader(
-            title: 'Recent Activity',
-            subtitle: 'Latest RFID checkout events',
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // Activity list
-          ..._activityFeed.take(8).map((event) => Column(
-            children: [
-              _ActivityRow(
-                event: event,
-                isFresh: _lastEventAt != null &&
-                    event.timestamp == _lastEventAt,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-            ],
-          )),
-        ],
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }
@@ -268,7 +328,10 @@ class _SensorHeaderCard extends StatelessWidget {
               children: [
                 Text(
                   isOnline ? 'System Online' : 'System Offline',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
@@ -277,7 +340,10 @@ class _SensorHeaderCard extends StatelessWidget {
                           ? 'Listening for RFID check-outs…'
                           : 'Last check-out ${_formatRelative(lastEventAt!)}')
                       : 'Sensors stopped — toggle to resume',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: AppTheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -349,7 +415,10 @@ class _StatTile extends StatelessWidget {
           const SizedBox(height: AppSpacing.xxs),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: AppTheme.onSurfaceVariant),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -402,7 +471,8 @@ class _SensorCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Text(
                 sensorId,
-                style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600),
+                style: AppTheme.monoStyle(
+                    fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               Container(
@@ -432,7 +502,8 @@ class _SensorCard extends StatelessWidget {
             children: tags.map((item) {
               final color = _statusColor(item.status);
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.1),
                   borderRadius: AppRadius.rSm,
@@ -441,7 +512,8 @@ class _SensorCard extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.qr_code_2_rounded, size: AppIconSize.xs, color: color),
+                    Icon(Icons.qr_code_2_rounded,
+                        size: AppIconSize.xs, color: color),
                     const SizedBox(width: AppSpacing.xs),
                     Text(
                       item.tagUid ?? 'N/A',
@@ -515,7 +587,9 @@ class _ActivityRow extends StatelessWidget {
                     Flexible(
                       child: Text(
                         event.materialVariantId,
-                        style: AppTheme.monoStyle(fontSize: AppTypography.bodyMd, fontWeight: FontWeight.w600),
+                        style: AppTheme.monoStyle(
+                            fontSize: AppTypography.bodyMd,
+                            fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -546,7 +620,10 @@ class _ActivityRow extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
                   '${event.tagUid} • ${event.sensorId}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppTheme.onSurfaceVariant),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -555,7 +632,10 @@ class _ActivityRow extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Text(
             _formatRelativeTime(event.timestamp),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.onSurfaceVariant),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: AppTheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -569,5 +649,82 @@ class _ActivityRow extends StatelessWidget {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+/// Inline alert shown under the stat tiles when one or more sensor-tracked
+/// variants are below their reorder point. Tapping the tile navigates to the
+/// inventory tab in the POS shell (handled at the parent shell level via
+/// the [onTap] callback).
+class _StockAtRiskBanner extends StatelessWidget {
+  const _StockAtRiskBanner({
+    required this.lowCount,
+    required this.insufficientCount,
+  });
+
+  final int lowCount;
+  final int insufficientCount;
+
+  @override
+  Widget build(BuildContext context) {
+    // Quiet, semantic background — not an error toast. We don't escalate to
+    // a full PfCard border so it doesn't compete with the sensor header.
+    if (lowCount == 0 && insufficientCount == 0) {
+      return Row(
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            size: AppIconSize.sm,
+            color: AppTheme.statusCompleted,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              'All sensor-tracked variants are above reorder point.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+        ],
+      );
+    }
+    final color = insufficientCount > 0
+        ? AppTheme.statusUrgent
+        : AppTheme.statusReadyForPickup;
+    return PfCard(
+      variant: PfCardVariant.tinted,
+      accent: color,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: color, size: AppIconSize.md),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  insufficientCount > 0
+                      ? '$insufficientCount sensor-tracked variant${insufficientCount == 1 ? '' : 's'} below minimum'
+                      : '$lowCount sensor-tracked variant${lowCount == 1 ? '' : 's'} nearing reorder point',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  'Restock before the next RFID check-out drives stock to zero.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

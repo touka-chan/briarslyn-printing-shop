@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import {
  Banknote,
  Download,
@@ -14,6 +14,7 @@ import {
  X,
  Shield,
  Eye,
+ Inbox,
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
@@ -29,58 +30,62 @@ import {
  EmptyState,
 } from "@/components/ui";
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
+import { subscribeOrders } from "@/lib/services/orders";
+import { subscribeUsers } from "@/lib/services/users";
+import { useAuth } from "@/lib/auth";
 import {
- mockSales,
- mockUsers,
- mockCashiers,
- paymentMethodColor,
- sparklineData,
- kpiUpdatedLabel,
-} from "@/lib/mockData";
-import { Sale, PaymentMethod, User } from "@/types";
+  useSparkSeries,
+  orderCreatedAtKey,
+} from "@/lib/hooks/useSparkSeries";
+import { Order, PaymentMethod, User } from "@/types";
 
-// --- Date range helpers --------------------------------------------------
-// Same string-comparison approach as reports/page.tsx:59-69 so we don't
-// trip over timezone drift when TODAY is pinned to 2026-08-20.
-const TODAY = "2026-08-20";
+const paymentMethodColor: Record<PaymentMethod, string> = {
+ "Cash": "#00535b",
+ "E-Wallets": "#a8372c",
+ "Bank Transfer": "#00479b",
+};
+
+function todayIso(): string {
+ return new Date().toISOString().slice(0, 10);
+}
 
 function rangeStart(range: string): string {
- switch (range) {
-  case "today":
-   return TODAY;
-  case "week":
-   return "2026-08-14";
-  case "month":
-   return "2026-07-20";
-  case "quarter":
-   return "2026-05-20";
-  default:
-   return "0000-00-00"; // custom range is handled by the from/to inputs
+ const t = new Date();
+ if (range === "today") return t.toISOString().slice(0, 10);
+ if (range === "week") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 6);
+  return d.toISOString().slice(0, 10);
  }
-}
-
-function dateOfSale(s: Sale): string {
- return s.order.createdAt ?? s.order.target_date;
-}
-
-function inRange(s: Sale, range: string, from: string, to: string): boolean {
- const d = dateOfSale(s);
- if (range === "custom") {
-  return d >= from && d <= to;
+ if (range === "month") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 29);
+  return d.toISOString().slice(0, 10);
  }
- return d >= rangeStart(range) && d <= TODAY;
+ if (range === "quarter") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 89);
+  return d.toISOString().slice(0, 10);
+ }
+ return "0000-00-00";
 }
 
-// Stable hash so the same order_id always lands in the same trend bucket.
-function hashIndex(s: string, n: number): number {
- let h = 0;
- for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
- return Math.abs(h) % Math.max(1, n);
+function orderDate(o: Order): string {
+ return o.created_at ?? o.target_date;
 }
 
-// --- CSV export ----------------------------------------------------------
-// Mirrors orders/page.tsx:21-60 — Blob + URL.createObjectURL pattern.
-function exportSalesToCSV(rows: Sale[]) {
+interface Sale {
+ order: Order;
+ paymentMethod: PaymentMethod;
+ cashierId: string;
+}
+
+function inRange(date: string, range: string, from: string, to: string): boolean {
+ if (range === "custom") return date >= from && date <= to;
+ return date >= rangeStart(range) && date <= todayIso();
+}
+
+function exportSalesToCSV(rows: Sale[], users: User[]) {
  const headers = [
   "date",
   "order_id",
@@ -95,10 +100,9 @@ function exportSalesToCSV(rows: Sale[]) {
  const lines = [
   headers.join(","),
   ...rows.map((s) => {
-   const cashier =
-    mockUsers.find((u) => u.id === s.cashierId)?.name ?? s.cashierId;
+   const cashier = users.find((u) => u.id === s.cashierId)?.name ?? s.cashierId;
    return [
-    dateOfSale(s),
+    orderDate(s.order),
     s.order.order_id,
     `"${s.order.customer_name}"`,
     `"${s.order.item_type}"`,
@@ -114,7 +118,7 @@ function exportSalesToCSV(rows: Sale[]) {
  const url = URL.createObjectURL(blob);
  const a = document.createElement("a");
  a.href = url;
- a.download = `sales-${TODAY}.csv`;
+ a.download = `sales-${todayIso()}.csv`;
  document.body.appendChild(a);
  a.click();
  a.remove();
@@ -132,32 +136,55 @@ const TIME_RANGES = [
  { id: "custom", label: "Custom" },
 ];
 
-// Current user — mock-derived. Same pattern as Header.tsx:98: assume the
-// first user in the list. A real auth layer would replace this.
-const CURRENT_USER: User = mockUsers[0];
-
 export default function SalesPage() {
+ const auth = useAuth();
  const [activeRange, setActiveRange] = useState("month");
- const [customFrom, setCustomFrom] = useState("2026-08-01");
- const [customTo, setCustomTo] = useState("2026-08-20");
+ const [customFrom, setCustomFrom] = useState(() => {
+  const d = new Date();
+  d.setDate(d.getDate() - 19);
+  return d.toISOString().slice(0, 10);
+ });
+ const [customTo, setCustomTo] = useState(todayIso());
  const [cashierId, setCashierId] = useState<string>("all");
  const [method, setMethod] = useState<"all" | PaymentMethod>("all");
  const [search, setSearch] = useState("");
  const [kpiModal, setKpiModal] = useState<
-  null | "revenue" | "txns" | "avg" | "topCashier"
+ null | "revenue" | "txns" | "avg" | "topCashier"
  >(null);
  const [selSale, setSelSale] = useState<Sale | null>(null);
+ const [orders, setOrders] = useState<Order[]>([]);
+ const [users, setUsers] = useState<User[]>([]);
  const toast = useToast();
 
- // --- Role gating --------------------------------------------------------
- // Admin → full access. POS_Cashier → read-only (no export buttons).
- // Production Staff → blocked entirely with an EmptyState.
- if (CURRENT_USER.role === "Production Staff") {
+ useEffect(() => {
+  const unsubOrders = subscribeOrders(setOrders);
+  const unsubUsers = subscribeUsers(setUsers);
+  return () => {
+   unsubOrders();
+   unsubUsers();
+  };
+ }, []);
+
+ // Convert orders → sales shape, only those with a payment method
+ const sales: Sale[] = useMemo(() => {
+  return orders
+   .filter((o) => !!o.payment_method)
+   .map((o) => ({
+    order: o,
+    paymentMethod: (o.payment_method ?? "Cash") as PaymentMethod,
+    cashierId: (o as any).cashier_id ?? "",
+   }));
+ }, [orders]);
+
+ const cashiers = useMemo(
+  () => users.filter((u) => u.role === "POS_Cashier" || u.role === "Owner" || u.role === "Admin"),
+  [users],
+ );
+
+ // Role gating
+ if (auth.role === "Production Staff") {
   return (
-   <AdminLayout
-    title="Sales"
-    subtitle="Restricted access"
-   >
+   <AdminLayout title="Sales" subtitle="Restricted access">
     <ContentCard className="text-center py-16">
      <EmptyState
       icon={<Shield className="w-8 h-8" />}
@@ -169,61 +196,17 @@ export default function SalesPage() {
   );
  }
 
- const isReadOnly = CURRENT_USER.role === "POS_Cashier";
+ const isReadOnly = auth.role === "POS_Cashier";
 
- // --- Filtering ----------------------------------------------------------
+ // Filtering
  const filtered = useMemo(() => {
-  return mockSales.filter((s) => {
-  if (!inRange(s, activeRange, customFrom, customTo)) return false;
-  if (cashierId !== "all" && s.cashierId !== cashierId) return false;
-  if (method !== "all" && s.paymentMethod !== method) return false;
-  if (search) {
-   const q = search.toLowerCase();
-   const cashier = mockUsers.find((u) => u.id === s.cashierId)?.name ?? "";
-   if (
-    !s.order.order_id.toLowerCase().includes(q) &&
-    !s.order.customer_name.toLowerCase().includes(q) &&
-    !cashier.toLowerCase().includes(q)
-   )
-    return false;
-  }
-  return true;
-  });
- }, [activeRange, customFrom, customTo, cashierId, method, search]);
-
- // --- KPI numbers --------------------------------------------------------
- const revenue = useMemo(
-  () => filtered.reduce((sum, s) => sum + s.order.payment_amount, 0),
-  [filtered],
- );
- const txnCount = filtered.length;
- const avgTxn =
-  txnCount > 0 ? Math.round(revenue / txnCount) : 0;
-
- // Top cashier = the one whose sum of payment_amount is highest in the
- // current filter. With a single cashier today, that's just them.
- const topCashier = useMemo(() => {
-  if (filtered.length === 0) return null;
-  const totals: Record<string, number> = {};
-  for (const s of filtered) {
-   totals[s.cashierId] = (totals[s.cashierId] ?? 0) + s.order.payment_amount;
-  }
-  const winnerId = Object.entries(totals).sort((a, b) => b[1] - a[1])[0][0];
-  const winner = mockUsers.find((u) => u.id === winnerId);
-  return { id: winnerId, name: winner?.name ?? winnerId, total: totals[winnerId] };
- }, [filtered]);
-
- // --- Tabs with counts (recomputed for the current cashier/method filter
- // but ignoring the date range, so the tabs show what each window would
- // return — same trick reports/page.tsx uses for its time-range tabs).
- const tabCounts = useMemo(() => {
-  const f = (range: string) => {
-   return mockSales.filter((s) => {
+  return sales.filter((s) => {
+   if (!inRange(orderDate(s.order), activeRange, customFrom, customTo)) return false;
    if (cashierId !== "all" && s.cashierId !== cashierId) return false;
    if (method !== "all" && s.paymentMethod !== method) return false;
    if (search) {
     const q = search.toLowerCase();
-    const cashier = mockUsers.find((u) => u.id === s.cashierId)?.name ?? "";
+    const cashier = users.find((u) => u.id === s.cashierId)?.name ?? "";
     if (
      !s.order.order_id.toLowerCase().includes(q) &&
      !s.order.customer_name.toLowerCase().includes(q) &&
@@ -231,7 +214,100 @@ export default function SalesPage() {
     )
      return false;
    }
-   return inRange(s, range, customFrom, customTo);
+   return true;
+  });
+ }, [sales, activeRange, customFrom, customTo, cashierId, method, search, users]);
+
+ // KPIs
+ const revenue = useMemo(
+  () => filtered.reduce((sum, s) => sum + s.order.payment_amount, 0),
+  [filtered],
+ );
+ const txnCount = filtered.length;
+ const avgTxn = txnCount > 0 ? Math.round(revenue / txnCount) : 0;
+
+ // Live sparkline series — last 7 days, local TZ.
+ // Revenue series sums payment_amount per day; others count transactions.
+ const revenueSeries = useMemo(() => {
+  const keys: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+   const d = new Date(now);
+   d.setDate(d.getDate() - i);
+   keys.push(d.toISOString().slice(0, 10));
+  }
+  return keys.map((k) =>
+   sales
+    .filter((s) => (s.order.created_at ?? "").slice(0, 10) === k)
+    .reduce((sum, s) => sum + s.order.payment_amount, 0),
+  );
+ }, [sales]);
+ const txnsSeries = useSparkSeries(sales as unknown as { created_at?: string }[], orderCreatedAtKey, 7);
+ const avgSeries = useMemo(() => {
+  const keys: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+   const d = new Date(now);
+   d.setDate(d.getDate() - i);
+   keys.push(d.toISOString().slice(0, 10));
+  }
+  return keys.map((k) => {
+   const day = sales.filter(
+    (s) => (s.order.created_at ?? "").slice(0, 10) === k,
+   );
+   if (day.length === 0) return 0;
+   return Math.round(
+    day.reduce((sum, s) => sum + s.order.payment_amount, 0) / day.length,
+   );
+  });
+ }, [sales]);
+ const topCashierSeries = useMemo(() => {
+  const keys: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+   const d = new Date(now);
+   d.setDate(d.getDate() - i);
+   keys.push(d.toISOString().slice(0, 10));
+  }
+  return keys.map((k) => {
+   const totals: Record<string, number> = {};
+   for (const s of sales) {
+    if ((s.order.created_at ?? "").slice(0, 10) !== k) continue;
+    totals[s.cashierId] = (totals[s.cashierId] ?? 0) + s.order.payment_amount;
+   }
+   const top = Object.values(totals).sort((a, b) => b - a)[0] ?? 0;
+   return top;
+  });
+ }, [sales]);
+
+ const topCashier = useMemo(() => {
+  if (filtered.length === 0) return null;
+  const totals: Record<string, number> = {};
+  for (const s of filtered) {
+   totals[s.cashierId] = (totals[s.cashierId] ?? 0) + s.order.payment_amount;
+  }
+  const winnerId = Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!winnerId) return null;
+  const winner = users.find((u) => u.id === winnerId);
+  return { id: winnerId, name: winner?.name ?? winnerId, total: totals[winnerId] };
+ }, [filtered, users]);
+
+ const tabCounts = useMemo(() => {
+  const f = (range: string) => {
+   return sales.filter((s) => {
+    if (cashierId !== "all" && s.cashierId !== cashierId) return false;
+    if (method !== "all" && s.paymentMethod !== method) return false;
+    if (search) {
+     const q = search.toLowerCase();
+     const cashier = users.find((u) => u.id === s.cashierId)?.name ?? "";
+     if (
+      !s.order.order_id.toLowerCase().includes(q) &&
+      !s.order.customer_name.toLowerCase().includes(q) &&
+      !cashier.toLowerCase().includes(q)
+     )
+      return false;
+    }
+    return inRange(orderDate(s.order), range, customFrom, customTo);
    }).length;
   };
   return {
@@ -241,7 +317,7 @@ export default function SalesPage() {
    quarter: f("quarter"),
    custom: f("custom"),
   };
- }, [cashierId, method, search, customFrom, customTo]);
+ }, [sales, cashierId, method, search, customFrom, customTo, users]);
 
  const rangeTabs = TIME_RANGES.map((r) => ({
   id: r.id,
@@ -249,9 +325,6 @@ export default function SalesPage() {
   count: tabCounts[r.id as keyof typeof tabCounts],
  }));
 
- // --- Chart data ---------------------------------------------------------
- // Revenue trend: 7 buckets for week, 4 for month, 6 for quarter, 30 for
- // custom. Last bucket forced to equal filtered total so chart & KPI agree.
  const revenueTrend = useMemo(() => {
   const buckets: { n: number; label: string }[] = (() => {
    if (activeRange === "today") return [{ n: 1, label: "Today" }];
@@ -272,18 +345,14 @@ export default function SalesPage() {
   })();
   const out = buckets.map((b) => ({ name: b.label, revenue: 0 }));
   for (const s of filtered) {
-   // Spread sales across buckets deterministically by index modulo. Real
-   // backend would bucket by date; the mock is uniform so the chart line
-   // ends at the KPI value.
-   out[hashIndex(s.order.order_id, out.length)].revenue +=
-    s.order.payment_amount;
+   const h =
+   s.order.order_id.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
+   out[Math.abs(h) % out.length].revenue += s.order.payment_amount;
   }
-  // Last bucket absorbs any rounding so the curve endpoint matches the KPI.
   if (out.length > 0) out[out.length - 1].revenue = revenue;
   return out;
  }, [activeRange, customFrom, customTo, filtered, revenue]);
 
- // By-method totals for the pie.
  const byMethod = useMemo(() => {
   const totals: Record<PaymentMethod, number> = {
    Cash: 0,
@@ -299,9 +368,9 @@ export default function SalesPage() {
   }));
  }, [filtered]);
 
- // --- Handlers -----------------------------------------------------------
  const handleExportCSV = () => {
-  exportSalesToCSV(filtered);
+  if (filtered.length === 0) return;
+  exportSalesToCSV(filtered, users);
   toast.success(`Exported ${filtered.length} sales to CSV`);
  };
  const handleDownloadPDF = () => {
@@ -324,15 +393,12 @@ export default function SalesPage() {
  };
  const handleReset = () => {
   setActiveRange("month");
-  setCustomFrom("2026-08-01");
-  setCustomTo("2026-08-20");
   setCashierId("all");
   setMethod("all");
   setSearch("");
   toast.info("Filters reset");
  };
 
- // --- Table columns ------------------------------------------------------
  const saleColumns: {
   key: string;
   header: string;
@@ -342,9 +408,7 @@ export default function SalesPage() {
   {
    key: "date",
    header: "Date",
-   render: (s) => (
-    <span className="text-sm">{dateOfSale(s)}</span>
-   ),
+   render: (s) => <span className="text-sm">{orderDate(s.order)}</span>,
   },
   {
    key: "order_id",
@@ -403,17 +467,15 @@ export default function SalesPage() {
    header: "Cashier",
    render: (s) => (
     <span className="text-sm">
-     {mockUsers.find((u) => u.id === s.cashierId)?.name ?? "—"}
+     {users.find((u) => u.id === s.cashierId)?.name ?? "—"}
     </span>
    ),
   },
  ];
 
- // --- KPI drill-down subsets --------------------------------------------
  const drillDown = useMemo(() => {
   if (kpiModal === "revenue" || kpiModal === "txns") return filtered;
   if (kpiModal === "avg") {
-   // Surface the rows closest to the average for context.
    if (filtered.length === 0) return [];
    return [...filtered].sort(
     (a, b) =>
@@ -464,7 +526,6 @@ export default function SalesPage() {
    title="Sales"
    subtitle="Revenue and transaction overview from cashier activity"
   >
-   {/* Read-only banner for non-admins */}
    {isReadOnly && (
     <div className="mb-6 p-3.5 rounded-xl border border-printflow-primary-fixed/40 bg-printflow-primary-fixed/10 flex items-center gap-3">
      <Eye className="w-4 h-4 text-printflow-primary shrink-0" />
@@ -477,15 +538,14 @@ export default function SalesPage() {
    )}
 
    <div className="space-y-8">
-    {/* KPI strip */}
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
      <KpiCard
       label="Total Revenue"
       value={txnCount > 0 ? formatPHP(revenue) : "—"}
       icon="OrdersIcon"
-      sparkline={sparklineData(revenue, "rising", "sales-revenue")}
+      sparkline={revenueSeries}
       sparklineTone="primary"
-      lastUpdated={kpiUpdatedLabel("sales-revenue")}
+      lastUpdated="Live"
       onClick={() => setKpiModal("revenue")}
      />
      <KpiCard
@@ -494,9 +554,9 @@ export default function SalesPage() {
       icon="Clock"
       change={txnCount > 0 ? `${formatPHP(avgTxn)} avg` : "no sales"}
       changeType={txnCount > 0 ? "positive" : "neutral"}
-      sparkline={sparklineData(txnCount, "rising", "sales-txns")}
+      sparkline={txnsSeries}
       sparklineTone="success"
-      lastUpdated={kpiUpdatedLabel("sales-txns")}
+      lastUpdated="Live"
       onClick={() => setKpiModal("txns")}
      />
      <KpiCard
@@ -505,9 +565,9 @@ export default function SalesPage() {
       icon={<Wallet className="w-5 h-5" />}
       change={txnCount > 0 ? "per sale" : "—"}
       changeType="neutral"
-      sparkline={sparklineData(avgTxn, "stable", "sales-avg")}
+      sparkline={avgSeries}
       sparklineTone="primary"
-      lastUpdated={kpiUpdatedLabel("sales-avg")}
+      lastUpdated="Live"
       onClick={() => setKpiModal("avg")}
      />
      <KpiCard
@@ -516,18 +576,13 @@ export default function SalesPage() {
       icon="Users"
       change={topCashier ? formatPHP(topCashier.total) : "no sales"}
       changeType="positive"
-      sparkline={sparklineData(
-       topCashier?.total ?? 0,
-       "rising",
-       "sales-cashier",
-      )}
+      sparkline={topCashierSeries}
       sparklineTone="warning"
-      lastUpdated={kpiUpdatedLabel("sales-cashier")}
+      lastUpdated="Live"
       onClick={() => setKpiModal("topCashier")}
      />
     </div>
 
-    {/* Filters */}
     <ContentCard title="Filters">
      <FilterToolbar
       tabs={rangeTabs}
@@ -589,12 +644,12 @@ export default function SalesPage() {
          className="w-full pl-10 pr-4 py-2.5 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary appearance-none"
         >
          <option value="all">All cashiers</option>
-         {mockCashiers.length === 0 ? (
+         {cashiers.length === 0 ? (
           <option value="none" disabled>
            No cashiers available
           </option>
          ) : (
-          mockCashiers.map((c) => (
+          cashiers.map((c) => (
            <option key={c.id} value={c.id}>
             {c.name}
            </option>
@@ -630,7 +685,6 @@ export default function SalesPage() {
      )}
     </ContentCard>
 
-    {/* Charts row */}
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
      <ContentCard
       title="Revenue Trend"
@@ -673,7 +727,6 @@ export default function SalesPage() {
      </ContentCard>
     </div>
 
-    {/* Transactions table */}
     <ContentCard
      title="Transactions"
      subtitle={`${filtered.length} sales`}
@@ -693,7 +746,7 @@ export default function SalesPage() {
           <FileText className="w-4 h-4" />
           Download PDF
          </Button>
-         <Button variant="primary" onClick={handleExportCSV}>
+         <Button variant="primary" onClick={handleExportCSV} disabled={filtered.length === 0}>
           <Download className="w-4 h-4" />
           Export CSV
          </Button>
@@ -707,17 +760,24 @@ export default function SalesPage() {
       }
      />
      <div className="mt-5 overflow-x-auto -mx-6 px-6">
-      <DataTable
-       columns={saleColumns as any}
-       data={filtered}
-       keyExtractor={(s) => s.order.order_id}
-       emptyMessage="No sales in this range"
-       onRowClick={(s) => setSelSale(s)}
-      />
+      {filtered.length === 0 ? (
+       <EmptyState
+        icon={<Inbox className="w-7 h-7" />}
+        title="No sales in this range"
+        description="Create an order in the Cashier POS to see revenue here."
+       />
+      ) : (
+       <DataTable
+        columns={saleColumns as any}
+        data={filtered}
+        keyExtractor={(s) => s.order.order_id}
+        emptyMessage="No sales in this range"
+        onRowClick={(s) => setSelSale(s)}
+       />
+      )}
      </div>
     </ContentCard>
 
-    {/* KPI drill-down modal */}
     <Modal
      isOpen={kpiModal !== null}
      onClose={() => setKpiModal(null)}
@@ -766,7 +826,6 @@ export default function SalesPage() {
      )}
     </Modal>
 
-    {/* Row-click summary modal */}
     <Modal
      isOpen={selSale !== null}
      onClose={() => setSelSale(null)}
@@ -791,7 +850,7 @@ export default function SalesPage() {
          <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant">
           DATE
          </p>
-         <p className="text-sm font-medium mt-1">{dateOfSale(selSale)}</p>
+         <p className="text-sm font-medium mt-1">{orderDate(selSale.order)}</p>
         </div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
          <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant">
@@ -843,7 +902,7 @@ export default function SalesPage() {
           CASHIER
          </p>
          <p className="text-sm font-medium mt-1">
-          {mockUsers.find((u) => u.id === selSale.cashierId)?.name ?? "—"}
+          {users.find((u) => u.id === selSale.cashierId)?.name ?? "—"}
           <span className="type-mono text-xs text-printflow-on-surface-variant ml-2">
             {selSale.cashierId}
           </span>

@@ -5,9 +5,10 @@ import '../../app_router.dart';
 import '../../design/tokens.dart';
 import '../../models/inventory_item.dart';
 import '../../models/order.dart';
+import '../../services/firebase_inventory.dart' as fb_inventory;
+import '../../services/firebase_orders.dart' as fb_orders;
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
-import '../../utils/mock_data.dart';
 
 enum _NotificationKind { overdueOrder, urgentOrder, lowStock, insufficientStock, staleSensor, readyForPickup }
 
@@ -64,18 +65,22 @@ class _Notification {
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key});
 
-  /// Build the notification list from current mock data so the screen
-  /// always reflects the latest state.
-  List<_Notification> _buildNotifications() {
+  /// Build the notification list from the live orders + inventory snapshots
+  /// so the screen always reflects the latest state in Firestore.
+  List<_Notification> _buildNotifications(
+    List<Order> orders,
+    List<InventoryItem> inventory,
+  ) {
     final now = DateTime.now();
     final notifs = <_Notification>[];
 
-    for (final Order o in mockOrders) {
+    for (final Order o in orders) {
       if (o.priority == 'Overdue' && o.status != 'Completed') {
         notifs.add(_Notification(
           kind: _NotificationKind.overdueOrder,
           title: 'Order ${o.orderId} is overdue',
-          message: '${o.customerName} • ${o.itemType} • target was ${_fmt(o.targetDate)}',
+          message:
+              '${o.customerName} • ${o.itemType} • target was ${_fmt(o.targetDate)}',
           timestamp: o.targetDate,
           orderId: o.orderId,
         ));
@@ -99,7 +104,7 @@ class NotificationsScreen extends StatelessWidget {
       }
     }
 
-    for (final InventoryItem item in mockInventory) {
+    for (final InventoryItem item in inventory) {
       if (item.status == 'Insufficient Stock') {
         notifs.add(_Notification(
           kind: _NotificationKind.insufficientStock,
@@ -112,7 +117,8 @@ class NotificationsScreen extends StatelessWidget {
         notifs.add(_Notification(
           kind: _NotificationKind.lowStock,
           title: '${item.materialVariantId} is running low',
-          message: '${item.itemType} • ${item.currentStock} units left (reorder at ${item.reorderPoint})',
+          message:
+              '${item.itemType} • ${item.currentStock} units left (reorder at ${item.reorderPoint})',
           timestamp: item.lastUpdated,
           materialVariantId: item.materialVariantId,
         ));
@@ -121,7 +127,8 @@ class NotificationsScreen extends StatelessWidget {
         notifs.add(_Notification(
           kind: _NotificationKind.staleSensor,
           title: '${item.materialVariantId} sensor is delayed',
-          message: 'Last update ${_ago(item.lastUpdated)} — check ${item.sensorId ?? "sensor"}',
+          message:
+              'Last update ${_ago(item.lastUpdated)} — check ${item.sensorId ?? "sensor"}',
           timestamp: item.lastUpdated,
           materialVariantId: item.materialVariantId,
         ));
@@ -150,7 +157,6 @@ class NotificationsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final notifications = _buildNotifications();
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -164,33 +170,46 @@ class NotificationsScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: notifications.isEmpty
-          ? _EmptyState()
-          : SafeArea(
-              top: false,
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  AppSpacing.xxl,
+      body: StreamBuilder<List<Order>>(
+        stream: fb_orders.subscribeOrdersStream(),
+        builder: (context, ordersSnap) {
+          return StreamBuilder<List<InventoryItem>>(
+            stream: fb_inventory.subscribeInventoryStream(),
+            builder: (context, invSnap) {
+              final orders = ordersSnap.data ?? const <Order>[];
+              final inventory = invSnap.data ?? const <InventoryItem>[];
+              final notifications = _buildNotifications(orders, inventory);
+              if (notifications.isEmpty) return _EmptyState();
+              return SafeArea(
+                top: false,
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    AppSpacing.xxl,
+                  ),
+                  itemCount: notifications.length,
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(height: AppSpacing.md),
+                  itemBuilder: (context, index) {
+                    final n = notifications[index];
+                    return StaggeredFadeIn(
+                      delay: Duration(milliseconds: 40 * index),
+                      children: [
+                        _NotificationCard(
+                          notification: n,
+                          onTap: () => _handleTap(context, n),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-                itemCount: notifications.length,
-                separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-                itemBuilder: (context, index) {
-                  final n = notifications[index];
-                  return StaggeredFadeIn(
-                    delay: Duration(milliseconds: 40 * index),
-                    children: [
-                      _NotificationCard(
-                        notification: n,
-                        onTap: () => _handleTap(context, n),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

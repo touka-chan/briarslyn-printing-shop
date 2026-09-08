@@ -14,8 +14,13 @@ import {
  AlertTriangle,
  ShoppingBag,
 } from "lucide-react";
-import { Button } from "@/components/ui";
-import { mockUsers, mockOrders, mockInventory } from "@/lib/mockData";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Button, Modal } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
+import { subscribeOrders } from "@/lib/services/orders";
+import { subscribeInventory } from "@/lib/services/inventory";
+import type { Order, InventoryItem } from "@/types";
 
 interface HeaderProps {
  title: string;
@@ -54,9 +59,12 @@ function applyTheme(theme: Theme) {
  } catch {}
 }
 
-function timeAgo(iso: string, now: Date = new Date("2026-08-20T12:00:00Z")): string {
+function timeAgo(iso: string, now: Date = new Date()): string {
+ if (!iso) return "";
  const then = new Date(iso);
+ if (isNaN(then.getTime())) return "";
  const ms = now.getTime() - then.getTime();
+ if (ms < 0) return "just now";
  const mins = Math.round(ms / 60000);
  if (mins < 1) return "just now";
  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
@@ -78,10 +86,25 @@ export function Header({
  const [searchValue, setSearchValue] = useState("");
  const [theme, setTheme] = useState<Theme>("light");
  const [mounted, setMounted] = useState(false);
+ const [orders, setOrders] = useState<Order[]>([]);
+ const [inventory, setInventory] = useState<InventoryItem[]>([]);
+ const [signOutOpen, setSignOutOpen] = useState(false);
+ const [signingOut, setSigningOut] = useState(false);
+ const { user, signOut } = useAuth();
+ const router = useRouter();
 
  useEffect(() => {
   setMounted(true);
   setTheme(readStoredTheme());
+ }, []);
+
+ useEffect(() => {
+  const unsubOrders = subscribeOrders(setOrders);
+  const unsubInv = subscribeInventory(setInventory);
+  return () => {
+   unsubOrders();
+   unsubInv();
+  };
  }, []);
 
  const toggleTheme = () => {
@@ -95,17 +118,46 @@ export function Header({
   onSearch?.(value);
  };
 
- const adminUser = mockUsers.find((u) => u.role === "Admin") ?? mockUsers[0];
+ const requestSignOut = () => {
+  setUserMenuOpen(false);
+  setSignOutOpen(true);
+ };
+
+ const cancelSignOut = () => {
+  if (signingOut) return;
+  setSignOutOpen(false);
+ };
+
+ const handleSignOut = async () => {
+  setSigningOut(true);
+  try {
+   await signOut();
+  } catch (err) {
+   // Log so future "sign-out does nothing" reports have something to
+   // chase in the browser console. The user still gets redirected —
+   // we never leave them stuck on this modal.
+   console.error("[Header] signOut() failed:", err);
+  } finally {
+   setSigningOut(false);
+   setSignOutOpen(false);
+   // Force-navigate to /login. AuthGate *should* pick up the
+   // onAuthStateChanged event on its own, but relying on it alone
+   // leaves a window where the user sees a half-rendered page
+   // (loading state + stale data). Replace, not push, so the
+   // protected URL doesn't end up in browser history.
+   router.replace("/login");
+  }
+ };
 
  // Derive three live notifications from real data
- const latestReady = mockOrders.find((o) => o.status === "Ready for Pickup");
- const lowStockItem = [...mockInventory]
+ const latestReady = orders.find((o) => o.status === "Ready for Pickup");
+ const lowStockItem = [...inventory]
   .sort((a, b) => a.current_stock - b.current_stock)
   .find((i) => i.current_stock <= i.reorder_point);
- const newestOrder = [...mockOrders].sort(
+ const newestOrder = [...orders].sort(
   (a, b) =>
-   new Date(b.createdAt ?? b.target_date).getTime() -
-   new Date(a.createdAt ?? a.target_date).getTime(),
+   new Date(b.created_at ?? b.target_date).getTime() -
+   new Date(a.created_at ?? a.target_date).getTime(),
  )[0];
 
  const notifications = [
@@ -131,7 +183,7 @@ export function Header({
    accent: "text-printflow-primary",
    title: "New order received",
    detail: `Order ${newestOrder.order_id} from ${newestOrder.customer_name}`,
-   meta: timeAgo(newestOrder.createdAt ?? newestOrder.target_date),
+   meta: timeAgo(newestOrder.created_at ?? newestOrder.target_date),
   },
  ].filter(Boolean) as Array<{
   id: string;
@@ -142,8 +194,13 @@ export function Header({
   meta: string;
  }>;
 
+ const displayName = user?.name ?? "Signed in";
+ const displayEmail = user?.email ?? "";
+ const displayRole = user?.role ?? "";
+
  return (
-  <header className="sticky top-0 z-30 bg-printflow-surface/80 backdrop-blur-sm border-b border-printflow-outline-variant">
+  <>
+   <header className="sticky top-0 z-30 bg-printflow-surface/80 backdrop-blur-sm border-b border-printflow-outline-variant">
    <div className="flex items-center justify-between h-16 px-6 gap-4">
     {/* Left: Title */}
     <div className="flex-1 min-w-0">
@@ -273,10 +330,10 @@ export function Header({
        </div>
        <div className="hidden sm:block text-left">
         <p className="text-sm font-medium text-printflow-on-surface leading-tight">
-         {adminUser.name}
+         {displayName}
         </p>
         <p className="text-xs text-printflow-on-surface-variant leading-tight">
-         {adminUser.role}
+         {displayRole}
         </p>
        </div>
        <ChevronDown className="w-4 h-4 text-printflow-on-surface-variant" />
@@ -289,23 +346,28 @@ export function Header({
        >
         <div className="px-4 py-3 border-b border-printflow-outline-variant">
          <p className="font-medium text-printflow-on-surface truncate">
-          {adminUser.name}
+          {displayName}
          </p>
          <p className="text-xs text-printflow-on-surface-variant truncate">
-          {adminUser.email}
+          {displayEmail}
          </p>
-         <p className="text-xs text-printflow-success mt-1">{adminUser.role}</p>
+         {displayRole && (
+          <p className="text-xs text-printflow-success mt-1">{displayRole}</p>
+         )}
         </div>
-        <button className="dropdown-item w-full">
+        <Link href="/settings" className="dropdown-item flex items-center gap-3 w-full">
          <User className="w-4 h-4" />
          Profile
-        </button>
-        <button className="dropdown-item w-full">
+        </Link>
+        <Link href="/settings" className="dropdown-item flex items-center gap-3 w-full">
          <Settings className="w-4 h-4" />
          Settings
-        </button>
+        </Link>
         <hr className="my-2 border-printflow-outline-variant" />
-        <button className="dropdown-item w-full text-printflow-error flex items-center gap-3">
+        <button
+         onClick={requestSignOut}
+         className="dropdown-item w-full text-printflow-error flex items-center gap-3"
+        >
          <LogOut className="w-4 h-4" />
          Sign out
         </button>
@@ -315,5 +377,45 @@ export function Header({
     </div>
    </div>
   </header>
+
+  {/* Sign-out confirmation — non-dismissible: must click a button to close. */}
+  <Modal
+   isOpen={signOutOpen}
+   onClose={cancelSignOut}
+   title="Sign out of PrintFlow?"
+   description="You'll need to sign in again to access orders, inventory, and the rest of the workspace."
+   icon={<LogOut className="w-5 h-5" />}
+   size="sm"
+   closeOnOverlayClick={!signingOut}
+   dismissible={!signingOut}
+   footer={
+    <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+     <Button
+      variant="secondary"
+      onClick={cancelSignOut}
+      className="flex-1 sm:flex-none"
+      disabled={signingOut}
+     >
+      Cancel
+     </Button>
+     <Button
+      variant="danger"
+      onClick={handleSignOut}
+      className="flex-1 sm:flex-none shadow-sm"
+      loading={signingOut}
+      disabled={signingOut}
+     >
+      Sign out
+     </Button>
+    </div>
+   }
+  >
+   {displayEmail && (
+    <div className="px-3 py-2 rounded-lg bg-printflow-surface-container/50 border border-printflow-outline-variant/40 text-[12px] text-printflow-on-surface-variant">
+     Signed in as <span className="font-medium text-printflow-on-surface">{displayEmail}</span>
+    </div>
+   )}
+  </Modal>
+  </>
  );
 }

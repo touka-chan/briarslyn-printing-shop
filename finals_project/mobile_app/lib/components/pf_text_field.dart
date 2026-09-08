@@ -54,6 +54,7 @@ class PfTextField extends StatelessWidget {
     this.hintText,
     this.inputFormatters,
     this.focusNode,
+    this.onFieldSubmitted,
   });
 
   /// Optional field label displayed above the input.
@@ -114,6 +115,9 @@ class PfTextField extends StatelessWidget {
   /// Optional focus node.
   final FocusNode? focusNode;
 
+  /// Called when the user submits the field (e.g. taps the "done" key).
+  final ValueChanged<String>? onFieldSubmitted;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -153,6 +157,7 @@ class PfTextField extends StatelessWidget {
           maxLines: obscureText ? 1 : maxLines,
           minLines: minLines,
           inputFormatters: inputFormatters,
+          onFieldSubmitted: onFieldSubmitted,
           style: inputStyle,
           cursorColor: AppTheme.primary,
           decoration: InputDecoration(

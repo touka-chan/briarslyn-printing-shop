@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/no_profile_screen.dart';
+import 'screens/admin/admin_shell.dart';
 import 'screens/cashier/cashier_shell.dart';
 import 'screens/cashier/cashier_new_order.dart';
 import 'screens/cashier/cashier_orders.dart';
@@ -10,14 +12,20 @@ import 'screens/production/production_shell.dart';
 
 /// A simple centralized list of named routes for the app.
 ///
-/// We intentionally avoid GoRouter because the app is small (two roles, ~10
-/// screens). A static route table keeps the routing surface obvious and easy
-/// to scan. Use [AppRouter.of] from any widget to push a named route.
+/// We intentionally avoid GoRouter because the app is small (~12 screens
+/// across 3 roles). A static route table keeps the routing surface obvious
+/// and easy to scan. Use [AppRouter.of] from any widget to push a named
+/// route.
 class AppRoutes {
   AppRoutes._();
 
   // Auth
   static const String login = '/login';
+  static const String loginKey = '/login';
+  static const String noProfile = '/auth/no-profile';
+
+  // Admin / Owner
+  static const String adminHome = '/admin/home';
 
   // Cashier
   static const String cashierHome = '/cashier/home';
@@ -47,6 +55,12 @@ class AppRouter {
     switch (settings.name) {
       case AppRoutes.login:
         return _pageRoute(settings, (_) => const LoginScreen());
+      case AppRoutes.noProfile:
+        return _pageRoute(settings, (_) => const NoProfileScreen());
+
+      // Admin / Owner
+      case AppRoutes.adminHome:
+        return _pageRoute(settings, (_) => const AdminShellScreen());
 
       // Cashier — single shell with bottom nav, plus standalone deep-links
       case AppRoutes.cashierHome:

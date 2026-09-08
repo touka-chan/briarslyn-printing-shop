@@ -117,7 +117,7 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
                       fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                     ),
                     side: BorderSide(
-                      color: isSelected ? AppTheme.primary : Theme.of(context).colorScheme.outlineVariant,
+                      color: isSelected ? AppTheme.primary : AppTheme.surfaceContainer,
                     ),
                     shape: RoundedRectangleBorder(borderRadius: AppRadius.rMd),
                     backgroundColor: AppTheme.surface,
@@ -202,7 +202,7 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
               ),
               const SizedBox(width: AppSpacing.sm),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
                   borderRadius: AppRadius.rSm,
@@ -210,7 +210,7 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
                 child: Text(
                   '${orders.length}',
                   style: TextStyle(
-                    fontSize: AppTypography.label,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: color,
                   ),
@@ -252,7 +252,7 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
                 color: AppTheme.statusCompleted.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.task_alt_rounded, size: AppIconSize.xl, color: AppTheme.statusCompleted),
+              child: Icon(Icons.task_alt_rounded, size: 48, color: AppTheme.statusCompleted),
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
@@ -405,7 +405,7 @@ class _KpiTile extends StatelessWidget {
         color: AppTheme.surface,
         borderRadius: AppRadius.rLg,
         border: Border.all(
-          color: isActive ? color : Theme.of(context).colorScheme.outlineVariant,
+          color: isActive ? color : AppTheme.surfaceContainer,
           width: isActive ? 1.5 : 1,
         ),
         boxShadow: [
@@ -435,7 +435,7 @@ class _KpiTile extends StatelessWidget {
                 Text(
                   label.toUpperCase(),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontSize: AppTypography.caption,
+                        fontSize: 10,
                         letterSpacing: 0.6,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.onSurfaceVariant,
@@ -443,11 +443,11 @@ class _KpiTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: AppSpacing.xxs),
+                const SizedBox(height: 2),
                 Text(
                   value,
                   style: AppTheme.monoStyle(
-                    fontSize: AppTypography.titleLg,
+                    fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.onSurface,
                   ),

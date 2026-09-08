@@ -3,7 +3,6 @@
 import { useState, ReactNode } from "react";
 import { Sidebar, MobileSidebarTrigger, MobileSidebarOverlay } from "./Sidebar";
 import { Header } from "./Header";
-import { ToastProvider } from "@/components/ui";
 
 interface AdminLayoutProps {
  children: ReactNode;
@@ -17,35 +16,33 @@ export function AdminLayout({ children, title, subtitle, headerActions, onSearch
  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
  return (
-  <ToastProvider>
-   <div className="min-h-screen bg-printflow-bg flex">
-    {/* Mobile Sidebar Overlay */}
-    <MobileSidebarOverlay isOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)}>
-     <Sidebar />
-    </MobileSidebarOverlay>
-
-    {/* Desktop Sidebar */}
+  <div className="min-h-screen bg-printflow-bg flex">
+   {/* Mobile Sidebar Overlay */}
+   <MobileSidebarOverlay isOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)}>
     <Sidebar />
+   </MobileSidebarOverlay>
 
-    {/* Main Content */}
-    <main className="main-content lg:relative">
-     {/* Mobile Header Trigger */}
-     <MobileSidebarTrigger onClick={() => setMobileSidebarOpen(true)} />
+   {/* Desktop Sidebar */}
+   <Sidebar />
 
-     {/* Header */}
-     <Header
-      title={title}
-      subtitle={subtitle}
-      actions={headerActions}
-      onSearch={onSearch}
-     />
+   {/* Main Content */}
+   <main className="main-content lg:relative">
+    {/* Mobile Header Trigger */}
+    <MobileSidebarTrigger onClick={() => setMobileSidebarOpen(true)} />
 
-     {/* Page Content */}
-     <div className="p-4 md:p-6 lg:p-8">
-      {children}
-     </div>
-    </main>
-   </div>
-  </ToastProvider>
+    {/* Header */}
+    <Header
+     title={title}
+     subtitle={subtitle}
+     actions={headerActions}
+     onSearch={onSearch}
+    />
+
+    {/* Page Content */}
+    <div className="p-6">
+     {children}
+    </div>
+   </main>
+  </div>
  );
 }

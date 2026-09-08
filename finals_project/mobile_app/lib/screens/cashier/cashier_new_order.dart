@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,10 +9,11 @@ import '../../design/tokens.dart';
 import '../../models/inventory_item.dart';
 import '../../models/order.dart';
 import '../../models/user_address.dart';
+import '../../services/firebase_inventory.dart' as fb_inventory;
+import '../../services/firebase_orders.dart' as fb_orders;
 import '../../services/order_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
-import '../../utils/mock_data.dart';
 import '../../widgets/address_cascade.dart';
 import 'cashier_order_confirmed.dart';
 
@@ -65,8 +68,29 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     'Custom',
   ];
 
+  // Live inventory snapshot, subscribed in initState. Empty until the first
+  // snapshot arrives. The availability check + customer picker both read
+  // from this list.
+  List<InventoryItem> _inventory = const <InventoryItem>[];
+  StreamSubscription<List<InventoryItem>>? _inventorySub;
+  List<Map<String, dynamic>> _derivedCustomers = const <Map<String, dynamic>>[];
+  StreamSubscription<List<Order>>? _ordersSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _inventorySub = fb_inventory.subscribeInventoryStream().listen((items) {
+      if (mounted) setState(() => _inventory = items);
+    });
+    _ordersSub = fb_orders.subscribeOrdersStream().listen((orders) {
+      if (mounted) setState(() => _derivedCustomers = _buildCustomers(orders));
+    });
+  }
+
   @override
   void dispose() {
+    _inventorySub?.cancel();
+    _ordersSub?.cancel();
     _customerNameCtrl.dispose();
     _customerEmailCtrl.dispose();
     _customerPhoneCtrl.dispose();
@@ -75,6 +99,45 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     _paymentAmountCtrl.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  /// Derives a customer list from live orders (grouped by `customerName`).
+  /// Mirrors the cashier_customers derivation so the picker matches what the
+  /// customer list screen shows.
+  List<Map<String, dynamic>> _buildCustomers(List<Order> orders) {
+    final byName = <String, Map<String, dynamic>>{};
+    for (final o in orders) {
+      final name = o.customerName.trim();
+      if (name.isEmpty) continue;
+      final existing = byName[name];
+      if (existing == null) {
+        byName[name] = {
+          'name': name,
+          'email': o.customerEmail ?? '',
+          'phone': o.customerPhone ?? '',
+          'region': o.customerRegion,
+          'province': o.customerProvince,
+          'city': o.customerCity,
+          'barangay': o.customerBarangay,
+          'zip': o.customerZip,
+        };
+      } else {
+        if ((existing['email'] as String).isEmpty &&
+            (o.customerEmail ?? '').isNotEmpty) {
+          existing['email'] = o.customerEmail;
+        }
+        if ((existing['phone'] as String).isEmpty &&
+            (o.customerPhone ?? '').isNotEmpty) {
+          existing['phone'] = o.customerPhone;
+        }
+      }
+    }
+    final list = byName.values.toList()
+      ..sort((a, b) =>
+          (a['name'] as String).toLowerCase().compareTo(
+            (b['name'] as String).toLowerCase(),
+          ));
+    return list;
   }
 
   bool _isSubmitting = false;
@@ -90,9 +153,11 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
     final auth = AuthProvider.of(context);
 
     try {
-      // Create order via service layer (enforces permissions)
-      final order = Order(
-        orderId: 'ORD-${DateTime.now().millisecondsSinceEpoch.remainder(10000).toString().padLeft(4, '0')}',
+      // Create order via service layer (enforces permissions). The
+      // Firestore-write path assigns the real doc id; we read it back
+      // from the service return value to surface in the success screen.
+      final draft = Order(
+        orderId: '',
         customerName: _customerNameCtrl.text.trim(),
         customerEmail: _customerEmailCtrl.text.trim().isEmpty ? null : _customerEmailCtrl.text.trim(),
         customerPhone: _customerPhoneCtrl.text.trim().isEmpty ? null : _customerPhoneCtrl.text.trim(),
@@ -111,10 +176,34 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         priority: _computePriority(_selectedTargetDate!),
         estimatedCompletion: _selectedTargetDate!.add(const Duration(days: 2)),
         basedOn: ['Manual entry'],
+        cashierId: auth.currentUser?.id,
         createdAt: DateTime.now(),
       );
 
-      await OrderService.createOrder(order: order, auth: auth);
+      final newOrderId = await OrderService.createOrder(order: draft, auth: auth);
+      final order = Order(
+        orderId: newOrderId,
+        customerName: draft.customerName,
+        customerEmail: draft.customerEmail,
+        customerPhone: draft.customerPhone,
+        customerRegion: draft.customerRegion,
+        customerProvince: draft.customerProvince,
+        customerCity: draft.customerCity,
+        customerBarangay: draft.customerBarangay,
+        customerZip: draft.customerZip,
+        itemType: draft.itemType,
+        quantity: draft.quantity,
+        layoutFile: draft.layoutFile,
+        targetDate: draft.targetDate,
+        paymentAmount: draft.paymentAmount,
+        paymentStatus: draft.paymentStatus,
+        status: draft.status,
+        priority: draft.priority,
+        estimatedCompletion: draft.estimatedCompletion,
+        basedOn: draft.basedOn,
+        cashierId: draft.cashierId,
+        createdAt: draft.createdAt,
+      );
 
       if (!mounted) return;
 
@@ -210,12 +299,13 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
   /// Finds the best matching inventory variant for the chosen item type.
   ///
   /// Mirrors the proposal §VII rule: a variant matches if the item_type is
-  /// contained in the inventory item_type (case-insensitive). Returns null
-  /// when the chosen item type has no corresponding inventory variant (the
+  /// contained in the inventory item_type (case-insensitive). Reads from the
+  /// live inventory subscription populated in [initState]. Returns null when
+  /// the chosen item type has no corresponding inventory variant (the
   /// cashier can still create the order — it simply has no inventory check).
   InventoryItem? _findInventoryVariant(String itemType) {
     final needle = itemType.toLowerCase().trim();
-    for (final item in mockInventory) {
+    for (final item in _inventory) {
       final haystack = item.itemType.toLowerCase();
       if (haystack.contains(needle) || needle.contains(haystack)) {
         return item;
@@ -333,7 +423,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _CustomerPickerSheet(
-        customers: mockCustomers,
+        customers: _derivedCustomers,
         onSelect: (customer) {
           setState(() {
             _customerNameCtrl.text = customer['name'] as String;
@@ -1354,58 +1444,90 @@ class _CustomerPickerSheet extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          // Customer list
+          // Customer list (or empty state when no orders exist yet)
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              itemCount: customers.length,
-              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final customer = customers[index];
-                return PressScale(
-                  onTap: () => onSelect(customer),
-                  child: PfCard(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Row(
-                      children: [
-                        PfAvatar(name: customer['name'] as String),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+            child: customers.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xl),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.people_alt_outlined,
+                            size: 40,
+                            color: AppTheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            'No saved customers yet',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            'Customers are added automatically when you create an order in their name.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    itemCount: customers.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+                    itemBuilder: (context, index) {
+                      final customer = customers[index];
+                      return PressScale(
+                        onTap: () => onSelect(customer),
+                        child: PfCard(
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          child: Row(
                             children: [
-                              Text(
-                                customer['name'] as String,
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                              PfAvatar(name: customer['name'] as String),
+                              const SizedBox(width: AppSpacing.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      customer['name'] as String,
+                                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: AppSpacing.xxs),
+                                    Text(
+                                      (customer['email'] as String?) ?? '',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppTheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    Text(
+                                      (customer['phone'] as String?) ?? '',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppTheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: AppSpacing.xxs),
-                              Text(
-                                customer['email'] as String,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppTheme.onSurfaceVariant,
-                                ),
-                              ),
-                              Text(
-                                customer['phone'] as String,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppTheme.onSurfaceVariant,
-                                ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppTheme.onSurfaceVariant,
                               ),
                             ],
                           ),
                         ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppTheme.onSurfaceVariant,
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),

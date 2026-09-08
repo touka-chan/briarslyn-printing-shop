@@ -1,0 +1,89 @@
+// PrintFlow Mobile — Firestore service for the `users` collection.
+//
+// Mirrors the web `web/src/lib/services/users.ts` contract. The mobile
+// `AuthService` (see `auth_service.dart`) does its own single-doc
+// subscription on `users/{uid}` for the signed-in user, so this file is
+// a defensive read-only helper used by future screens that need the full
+// roster (e.g., a future "team" tab). It is exported from the services
+// barrel so any screen can `import '../../services/services.dart'` and
+// pick it up.
+//
+// Field shape (snake_case ↔ Dart `AppUser`):
+//   email       ↔ AppUser.email
+//   name        ↔ AppUser.name
+//   role        ↔ AppUser.role   ('Owner' | 'Admin' | 'POS_Cashier' | 'Production Staff')
+//   status      ↔ AppUser.status ('active' | 'inactive')
+//   region      ↔ AppUser.region
+//   province    ↔ AppUser.province
+//   city        ↔ AppUser.city
+//   barangay    ↔ AppUser.barangay
+//   zip         ↔ AppUser.zip
+//   last_login_at ↔ AppUser.lastLogin (ISO string after format)
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/app_user.dart';
+
+const String _kUsersCollection = 'users';
+
+/// Normalises a Firestore `users/{uid}` doc to match the keys
+/// `AppUser.fromJson` expects.
+///
+/// The web `web/src/lib/services/users.ts` writes the address as a
+/// nested `address` sub-object (`{ region, province, city, barangay,
+/// zip }`) and the last-login timestamp as a `Timestamp` under
+/// `last_login_at`. The mobile `AppUser` model reads the address
+/// fields at the top level and the last-login as an ISO string under
+/// `lastLogin`. This helper performs the field-level translation so
+/// both the collection subscription and the single-user auth bootstrap
+/// see the same shape.
+///
+/// Mutates the input map in place and returns it for chaining.
+Map<String, dynamic> normaliseUserDoc(Map<String, dynamic> raw) {
+  // Flatten nested `address` to top-level fields.
+  final nested = raw['address'];
+  if (nested is Map) {
+    for (final key in const [
+      'region',
+      'province',
+      'city',
+      'barangay',
+      'zip',
+    ]) {
+      if (raw[key] == null && nested[key] != null) {
+        raw[key] = nested[key];
+      }
+    }
+  }
+  // Translate `last_login_at` (Timestamp) to `lastLogin` (ISO string).
+  if (raw['last_login_at'] != null && raw['lastLogin'] == null) {
+    final v = raw['last_login_at'];
+    if (v is Timestamp) {
+      raw['lastLogin'] = v.toDate().toIso8601String();
+    } else if (v is String) {
+      raw['lastLogin'] = v;
+    }
+  }
+  return raw;
+}
+
+/// Subscribes to the live `users` collection.
+///
+/// Emits an empty list until the first snapshot arrives. Note: the
+/// Owner row is included — callers that want to filter the Owner out
+/// (e.g., the employees roster on the web admin) should drop
+/// `role == 'Owner'` themselves.
+Stream<List<AppUser>> subscribeUsersStream() {
+  return FirebaseFirestore.instance
+      .collection(_kUsersCollection)
+      .snapshots()
+      .map(
+        (snap) => snap.docs
+            .map(
+              (doc) => AppUser.fromJson(<String, dynamic>{
+                ...normaliseUserDoc(doc.data()),
+                'id': doc.id,
+              }),
+            )
+            .toList(growable: false),
+      );
+}

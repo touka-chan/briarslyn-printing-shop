@@ -1,12 +1,42 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Download, FileText, Factory, Package, Check, ShoppingCart, Clock, AlertTriangle } from "lucide-react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
+import {
+ Download,
+ FileText,
+ Factory,
+ Package,
+ Check,
+ ShoppingCart,
+ Clock,
+ AlertTriangle,
+ Inbox,
+} from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, Button, ChartCard, KpiCard, useToast, Modal, DataTable, StatusBadge, PriorityBadge, PaymentBadge } from "@/components/ui";
+import {
+ ContentCard,
+ FilterToolbar,
+ Button,
+ ChartCard,
+ KpiCard,
+ useToast,
+ Modal,
+ DataTable,
+ StatusBadge,
+ PriorityBadge,
+ PaymentBadge,
+ EmptyState,
+} from "@/components/ui";
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
-import { chartData, mockInventory, mockOrders, sparklineData, kpiUpdatedLabel } from "@/lib/mockData";
-import { Order, InventoryItem } from "@/types";
+import { subscribeOrders } from "@/lib/services/orders";
+import { subscribeInventory } from "@/lib/services/inventory";
+import {
+  useSparkSeries,
+  orderCreatedAtKey,
+  inventoryCheckoutKey,
+} from "@/lib/hooks/useSparkSeries";
+import { getInventoryStatus } from "@/lib/derived";
+import type { Order, InventoryItem } from "@/types";
 
 const timeRanges = [
  { id: "week", label: "This Week" },
@@ -14,18 +44,81 @@ const timeRanges = [
  { id: "quarter", label: "This Quarter" },
 ];
 
+function todayIso(): string {
+ return new Date().toISOString().slice(0, 10);
+}
+
+function rangeStart(range: string): string {
+ const t = new Date();
+ if (range === "week") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 6);
+  return d.toISOString().slice(0, 10);
+ }
+ if (range === "month") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 29);
+  return d.toISOString().slice(0, 10);
+ }
+ if (range === "quarter") {
+  const d = new Date(t);
+  d.setDate(t.getDate() - 89);
+  return d.toISOString().slice(0, 10);
+ }
+ return "0000-00-00";
+}
+
 export default function ReportsPage() {
  const [activeRange, setActiveRange] = useState("month");
- const [customFrom, setCustomFrom] = useState("2026-08-01");
- const [customTo, setCustomTo] = useState("2026-08-20");
+ const [customFrom, setCustomFrom] = useState(() => {
+  const d = new Date();
+  d.setDate(d.getDate() - 19);
+  return d.toISOString().slice(0, 10);
+ });
+ const [customTo, setCustomTo] = useState(todayIso());
+ const [orders, setOrders] = useState<Order[]>([]);
+ const [inventory, setInventory] = useState<InventoryItem[]>([]);
  const toast = useToast();
 
- const lowStock = mockInventory.filter((i) => i.status !== "In Stock").length;
- const pending = mockOrders.filter((o) => o.status === "Pending").length;
- const completed = mockOrders.filter((o) => o.status === "Completed").length;
- const inProduction = mockOrders.filter(
+ useEffect(() => {
+  const unsubOrders = subscribeOrders(setOrders);
+  const unsubInv = subscribeInventory(setInventory);
+  return () => {
+   unsubOrders();
+   unsubInv();
+  };
+ }, []);
+
+ const lowStock = useMemo(
+  () =>
+   inventory.filter(
+    (i) =>
+     getInventoryStatus(i) === "Low Stock" ||
+     getInventoryStatus(i) === "Insufficient Stock",
+   ).length,
+  [inventory],
+ );
+ const pending = orders.filter((o) => o.status === "Pending").length;
+ const completed = orders.filter((o) => o.status === "Completed").length;
+ const inProduction = orders.filter(
   (o) => o.status === "In Production" || o.status === "Ready for Pickup",
  ).length;
+
+ // Live sparkline series — last 7 days, local TZ.
+ const ordersSpark = useSparkSeries(orders, orderCreatedAtKey, 7);
+ const pendingSpark = useSparkSeries(
+  orders.filter((o) =>
+   ["Pending", "In Production", "Ready for Pickup"].includes(o.status),
+  ),
+  orderCreatedAtKey,
+  7,
+ );
+ const completedSpark = useSparkSeries(
+  orders.filter((o) => o.status === "Completed"),
+  orderCreatedAtKey,
+  7,
+ );
+ const lowStockSpark = useSparkSeries(inventory, inventoryCheckoutKey, 7);
 
  const productionSummary = useMemo(
   () => [
@@ -36,8 +129,118 @@ export default function ReportsPage() {
   [pending, inProduction, completed],
  );
 
- const handleDownload = (label: string, format: "PDF" | "CSV") => {
-  toast.success(`Generating ${label} (${format}) — download will start shortly`);
+ const priorityBreakdown = useMemo(() => {
+  const counts: Record<string, number> = { Overdue: 0, Urgent: 0, Upcoming: 0 };
+  for (const o of orders) {
+   const p = o.priority ?? "Upcoming";
+   counts[p] = (counts[p] ?? 0) + 1;
+  }
+  return [
+   { name: "Overdue", value: counts.Overdue },
+   { name: "Urgent", value: counts.Urgent },
+   { name: "Upcoming", value: counts.Upcoming },
+  ];
+ }, [orders]);
+
+ const inventoryByStatus = useMemo(() => {
+  const counts: Record<string, number> = {
+   "In Stock": 0,
+   "Low Stock": 0,
+   "Insufficient Stock": 0,
+  };
+  for (const i of inventory) {
+   const s = getInventoryStatus(i);
+   counts[s] = (counts[s] ?? 0) + 1;
+  }
+  return Object.entries(counts).map(([name, value]) => ({ name, value }));
+ }, [inventory]);
+
+ const [kpiModal, setKpiModal] = useState<
+ null | "total" | "pending" | "completed" | "lowStock"
+ >(null);
+
+ const rangeFilter = (iso: string) => {
+  const start = rangeStart(activeRange);
+  return iso >= start && iso <= todayIso();
+ };
+
+ const ordersInRange = useMemo(
+  () => orders.filter((o) => rangeFilter(o.target_date)),
+  [orders, activeRange],
+ );
+ const inventoryInRange = useMemo(
+  () =>
+   inventory.filter(
+    (i) =>
+     getInventoryStatus(i) === "Low Stock" ||
+     getInventoryStatus(i) === "Insufficient Stock",
+   ),
+  [inventory],
+ );
+
+ const drillDown = useMemo(() => {
+  if (kpiModal === "total") return ordersInRange;
+  if (kpiModal === "pending")
+   return ordersInRange.filter((o) => o.status === "Pending");
+  if (kpiModal === "completed")
+   return ordersInRange.filter((o) => o.status === "Completed");
+  if (kpiModal === "lowStock") return inventoryInRange;
+  return [] as (Order | InventoryItem)[];
+ }, [kpiModal, ordersInRange, inventoryInRange]);
+
+ const handleDownloadCSV = (rows: (Order | InventoryItem)[], label: string) => {
+  if (rows.length === 0) {
+   toast.error("No data to export");
+   return;
+  }
+  const sample = rows[0] as any;
+  const isOrder = "order_id" in sample;
+  const headers = isOrder
+   ? [
+   "order_id",
+   "customer_name",
+   "item_type",
+   "quantity",
+   "target_date",
+   "priority",
+   "status",
+   "payment_status",
+   "payment_amount",
+   ]
+   : [
+   "material_variant_id",
+   "item_type",
+   "category",
+   "current_stock",
+   "reorder_point",
+   "forecasted_demand_next_7_days",
+   "status",
+   ];
+  const lines = [
+  headers.join(","),
+  ...rows.map((r: any) => headers.map((h) => `"${r[h] ?? ""}"`).join(",")),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${todayIso()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast.success(`Exported ${rows.length} rows`);
+ };
+
+ const handleDownloadPDF = (label: string) => {
+  document.body.classList.add("print-mode");
+  const cleanup = () => {
+   document.body.classList.remove("print-mode");
+   window.removeEventListener("afterprint", cleanup);
+  };
+  window.addEventListener("afterprint", cleanup);
+  window.print();
+  toast.success(`Generating ${label} (PDF) — use the browser print dialog`);
  };
 
  const handleCustomRangeApply = () => {
@@ -48,52 +251,23 @@ export default function ReportsPage() {
   toast.success(`Custom range applied: ${customFrom} → ${customTo}`);
  };
 
- // --- Drill-down modal ----------------------------------------------------
- // Click a Key Metrics card → modal opens with a filtered list of the rows
- // that contribute to that number. Filter is composed with the active time
- // range so the modal and the headline value stay in sync.
- const [kpiModal, setKpiModal] = useState<null | "total" | "pending" | "completed" | "lowStock">(null);
-
- // Map each KPI to the subset of mock data it represents, filtered by the
- // active time range (week / month / quarter). In a real backend this becomes
- // a server-side query — the shape stays the same.
- const rangeFilter = (iso: string) => {
-  const d = new Date(iso);
-  if (activeRange === "week") {
-   return d >= new Date("2026-08-14");
-  }
-  if (activeRange === "month") {
-   return d >= new Date("2026-07-20");
-  }
-  // quarter
-  return d >= new Date("2026-05-20");
- };
-
- const ordersInRange = useMemo(
-  () => mockOrders.filter((o) => rangeFilter(o.target_date)),
-  [activeRange],
- );
- const inventoryInRange = useMemo(
-  () => mockInventory.filter((i) => rangeFilter("2026-08-20")),
-  [activeRange],
- );
-
- const drillDown = useMemo(() => {
-  if (kpiModal === "total") return ordersInRange;
-  if (kpiModal === "pending")
-   return ordersInRange.filter((o) => o.status === "Pending");
-  if (kpiModal === "completed")
-   return ordersInRange.filter((o) => o.status === "Completed");
-  if (kpiModal === "lowStock")
-   return inventoryInRange.filter((i) => i.status !== "In Stock");
-  return [] as (Order | InventoryItem)[];
- }, [kpiModal, ordersInRange, inventoryInRange]);
-
- const orderColumns: { key: keyof Order | "view"; header: string; render?: (r: Order) => React.ReactNode }[] = [
-  { key: "order_id", header: "Order", render: (r) => <span className="type-mono">{r.order_id}</span> },
+ const orderColumns: {
+  key: string;
+  header: string;
+  render?: (r: Order) => ReactNode;
+ }[] = [
+  {
+   key: "order_id",
+   header: "Order",
+   render: (r) => <span className="type-mono">{r.order_id}</span>,
+  },
   { key: "customer_name", header: "Customer" },
   { key: "item_type", header: "Item" },
-  { key: "quantity", header: "Qty", render: (r) => r.quantity.toLocaleString() },
+  {
+   key: "quantity",
+   header: "Qty",
+   render: (r) => r.quantity.toLocaleString(),
+  },
   { key: "target_date", header: "Target" },
   {
    key: "priority",
@@ -117,16 +291,18 @@ export default function ReportsPage() {
   {
    key: "view",
    header: "Payment",
-   render: (r) => (
-    <PaymentBadge
-     status={toPaymentStatus(r.payment_status)}
-    />
-   ),
+   render: (r) => <PaymentBadge status={toPaymentStatus(r.payment_status)} />,
   },
  ];
 
  const inventoryColumns = [
-  { key: "material_variant_id", header: "Variant", render: (r: InventoryItem) => <span className="type-mono">{r.material_variant_id}</span> },
+  {
+   key: "material_variant_id",
+   header: "Variant",
+   render: (r: InventoryItem) => (
+    <span className="type-mono">{r.material_variant_id}</span>
+   ),
+  },
   { key: "item_type", header: "Item" },
   { key: "category", header: "Category" },
   { key: "current_stock", header: "Stock" },
@@ -137,14 +313,17 @@ export default function ReportsPage() {
    header: "Status",
    render: (r: InventoryItem) => (
     <StatusBadge
-     status={r.status.toLowerCase().replace(/\s+/g, "-") as any}
-     customLabel={r.status}
+     status={getInventoryStatus(r).toLowerCase().replace(/\s+/g, "-") as any}
+     customLabel={getInventoryStatus(r)}
     />
    ),
   },
  ];
 
- const kpiMeta: Record<NonNullable<typeof kpiModal>, { title: string; desc: string; icon: React.ReactNode; count: number }> = {
+ const kpiMeta: Record<
+  NonNullable<typeof kpiModal>,
+  { title: string; desc: string; icon: ReactNode; count: number }
+ > = {
   total: {
    title: "Total Orders",
    desc: `${drillDown.length} orders in selected range`,
@@ -224,21 +403,21 @@ export default function ReportsPage() {
        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Button
          variant="primary"
-         onClick={() => handleDownload("Orders Report", "PDF")}
+         onClick={() => handleDownloadPDF("Orders Report")}
         >
          <FileText className="w-4 h-4" />
          Orders
         </Button>
         <Button
          variant="primary"
-         onClick={() => handleDownload("Inventory Report", "CSV")}
+         onClick={() => handleDownloadCSV(inventory, "Inventory Report")}
         >
          <Package className="w-4 h-4" />
          Inventory
         </Button>
         <Button
          variant="primary"
-         onClick={() => handleDownload("Production Report", "PDF")}
+         onClick={() => handleDownloadPDF("Production Report")}
         >
          <Factory className="w-4 h-4" />
          Production
@@ -255,24 +434,28 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       <ChartCard
-        title=""
-        type="bar"
-        data={chartData.productionByPriority}
-        xKey="name"
-        yKeys={["value"]}
-        colors={["#00535b"]}
-        height={260}
-        showLegend={false}
-       />
+       {orders.length === 0 ? (
+        <EmptyChart />
+       ) : (
+        <ChartCard
+         title=""
+         type="bar"
+         data={priorityBreakdown}
+         xKey="name"
+         yKeys={["value"]}
+         colors={["#00535b"]}
+         height={260}
+         showLegend={false}
+        />
+       )}
       </div>
       <Button
        variant="secondary"
        className="mt-6 w-full"
-       onClick={() => handleDownload("Orders PDF", "PDF")}
+       onClick={() => handleDownloadCSV(orders, "Orders PDF")}
       >
        <Download className="w-4 h-4" />
-       Download Orders PDF
+       Download Orders CSV
       </Button>
      </ContentCard>
      <ContentCard
@@ -281,19 +464,23 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       <ChartCard
-        title=""
-        type="pie"
-        data={chartData.inventoryByStatus}
-        xKey="name"
-        yKeys={["value"]}
-        height={260}
-       />
+       {inventory.length === 0 ? (
+        <EmptyChart />
+       ) : (
+        <ChartCard
+         title=""
+         type="pie"
+         data={inventoryByStatus}
+         xKey="name"
+         yKeys={["value"]}
+         height={260}
+        />
+       )}
       </div>
       <Button
        variant="secondary"
        className="mt-6 w-full"
-       onClick={() => handleDownload("Inventory CSV", "CSV")}
+       onClick={() => handleDownloadCSV(inventory, "Inventory CSV")}
       >
        <Download className="w-4 h-4" />
        Download Inventory CSV
@@ -305,20 +492,24 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       <ChartCard
-        title=""
-        type="pie"
-        data={productionSummary}
-        xKey="name"
-        yKeys={["value"]}
-        colors={["#ed6c02", "#00535b", "#2e7d32"]}
-        height={260}
-       />
+       {orders.length === 0 ? (
+        <EmptyChart />
+       ) : (
+        <ChartCard
+         title=""
+         type="pie"
+         data={productionSummary}
+         xKey="name"
+         yKeys={["value"]}
+         colors={["#ed6c02", "#00535b", "#2e7d32"]}
+         height={260}
+        />
+       )}
       </div>
       <Button
        variant="secondary"
        className="mt-6 w-full"
-       onClick={() => handleDownload("Production PDF", "PDF")}
+       onClick={() => handleDownloadPDF("Production PDF")}
       >
        <Download className="w-4 h-4" />
        Download Production PDF
@@ -330,29 +521,29 @@ export default function ReportsPage() {
      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       <KpiCard
        label="Total Orders"
-       value={mockOrders.length}
+       value={orders.length}
        icon="ShoppingCart"
-       sparkline={sparklineData(mockOrders.length, "rising", "rep-total")}
+       sparkline={ordersSpark}
        sparklineTone="primary"
-       lastUpdated={kpiUpdatedLabel("rep-total")}
+       lastUpdated="Live"
        onClick={() => setKpiModal("total")}
       />
       <KpiCard
        label="Pending"
        value={pending}
        icon="Clock"
-       sparkline={sparklineData(pending, "wave", "rep-pending")}
+       sparkline={pendingSpark}
        sparklineTone="warning"
-       lastUpdated={kpiUpdatedLabel("rep-pending")}
+       lastUpdated="Live"
        onClick={() => setKpiModal("pending")}
       />
       <KpiCard
        label="Completed"
        value={completed}
        icon="Check"
-       sparkline={sparklineData(completed, "rising", "rep-completed")}
+       sparkline={completedSpark}
        sparklineTone="success"
-       lastUpdated={kpiUpdatedLabel("rep-completed")}
+       lastUpdated="Live"
        onClick={() => setKpiModal("completed")}
       />
       <KpiCard
@@ -361,9 +552,9 @@ export default function ReportsPage() {
        icon="AlertTriangle"
        change={lowStock > 0 ? "needs attention" : "all stocked"}
        changeType={lowStock > 0 ? "negative" : "positive"}
-       sparkline={sparklineData(lowStock, "spike", "rep-lowstock")}
+       sparkline={lowStockSpark}
        sparklineTone="error"
-       lastUpdated={kpiUpdatedLabel("rep-lowstock")}
+       lastUpdated="Live"
        onClick={() => setKpiModal("lowStock")}
       />
      </div>
@@ -372,9 +563,9 @@ export default function ReportsPage() {
     <ContentCard title="Recent Generated Reports">
      <div className="space-y-3 text-sm">
       {[
-       { name: "Orders 2026-08-01 to 2026-08-14", type: "Orders", format: "PDF" },
-       { name: "Inventory 2026-08-01 to 2026-08-14", type: "Inventory", format: "CSV" },
-       { name: "Production 2026-08-01 to 2026-08-14", type: "Production", format: "PDF" },
+       { name: `Orders ${rangeStart(activeRange)} to ${todayIso()}`, type: "Orders", format: "PDF" },
+       { name: `Inventory ${rangeStart(activeRange)} to ${todayIso()}`, type: "Inventory", format: "CSV" },
+       { name: `Production ${rangeStart(activeRange)} to ${todayIso()}`, type: "Production", format: "PDF" },
       ].map((r) => (
        <div
         key={r.name}
@@ -415,19 +606,31 @@ export default function ReportsPage() {
         <Button
          variant="primary"
          onClick={() => {
-          handleDownload(kpiMeta[kpiModal].title, "PDF");
+          if (kpiModal === "lowStock") {
+           handleDownloadCSV(drillDown as InventoryItem[], "Low Stock Report");
+          } else {
+           handleDownloadPDF(kpiMeta[kpiModal].title);
+          }
           setKpiModal(null);
          }}
          className="flex-1 sm:flex-none"
         >
          <Download className="w-4 h-4" />
-         Download as PDF
+         {kpiModal === "lowStock" ? "Export CSV" : "Download PDF"}
         </Button>
        )}
       </div>
      }
     >
-     {kpiModal === "lowStock" ? (
+     {drillDown.length === 0 ? (
+      <div className="py-10 text-center">
+       <EmptyState
+        icon={<Inbox className="w-7 h-7" />}
+        title="No data in this range"
+        description="Try a wider range, or check back once orders come in."
+       />
+      </div>
+     ) : kpiModal === "lowStock" ? (
       <DataTable
        columns={inventoryColumns as any}
        data={drillDown as InventoryItem[]}
@@ -445,5 +648,17 @@ export default function ReportsPage() {
     </Modal>
    </div>
   </AdminLayout>
+ );
+}
+
+function EmptyChart() {
+ return (
+  <div className="h-[260px] flex items-center justify-center">
+   <EmptyState
+    icon={<Inbox className="w-7 h-7" />}
+    title="No data yet"
+    description="This chart will populate once data lands."
+   />
+  </div>
  );
 }

@@ -16,11 +16,7 @@ import {
   loadProvinces,
   loadCities,
   loadBarangays,
-  loadZips,
-  getProvincesForRegion,
-  getCitiesForProvince,
-  getBarangaysForCity,
-  findZip,
+  findZipByCode,
   findRegionByName,
   findProvinceByName,
   findCityByName,
@@ -48,6 +44,18 @@ const inputBase =
 const labelCls =
   "text-[12px] font-medium tracking-wide text-printflow-on-surface-variant";
 
+/**
+ * Address cascade for the Philippine address hierarchy
+ * (region → province → city → barangay → zip).
+ *
+ * The component is fully controlled: every selection is reported back to
+ * the parent via `onChange`, and the parent passes the canonical address
+ * back in via `value`. Whenever `value` changes (e.g. the parent opens a
+ * different row's edit modal) the cascade re-resolves the full chain in
+ * a single async pass and re-derives the zip from the city code, so the
+ * form always shows the correct selection — including when switching
+ * between two rows.
+ */
 export function AddressCascade({
   value,
   onChange,
@@ -55,15 +63,18 @@ export function AddressCascade({
   disabled = false,
 }: AddressCascadeProps) {
   // --- state --------------------------------------------------------------
+  // The codes are the source of truth for the <select> values. The parent
+  // only knows display names, so we resolve names → codes on every change
+  // of `value` (see the resolver effect below).
   const [regionCode, setRegionCode] = useState<string>("");
   const [provinceCode, setProvinceCode] = useState<string>("");
   const [cityCode, setCityCode] = useState<string>("");
   const [barangayCode, setBarangayCode] = useState<string>("");
   const [zip, setZip] = useState<string>("");
 
-  // Loaded datasets (top-level only — regions, all provinces, all cities,
-  // all barangays, all zips). The whole files are small enough except for
-  // barangay.json (4.6 MB); we still load it once and keep it cached.
+  // Loaded datasets (regions, all provinces, all cities, all barangays,
+  // all zips). The whole files are small except for barangay.json (4.6 MB);
+  // we still load each once and keep it cached for the session.
   const [regions, setRegions] = useState<Region[]>([]);
   const [provincesAll, setProvincesAll] = useState<Province[]>([]);
   const [citiesAll, setCitiesAll] = useState<City[]>([]);
@@ -75,25 +86,10 @@ export function AddressCascade({
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingBarangays, setLoadingBarangays] = useState(false);
 
-  // Reset / re-seed from `value` whenever the address prop changes (e.g.,
-  // when the user opens a different row's edit modal).
-  const valueKeyRef = useRef<string>("");
-  useEffect(() => {
-    const v = value ?? {};
-    const key = `${v.region ?? ""}|${v.province ?? ""}|${v.city ?? ""}|${v.barangay ?? ""}|${v.zip ?? ""}`;
-    if (key === valueKeyRef.current) return;
-    valueKeyRef.current = key;
-    setRegionCode("");
-    setProvinceCode("");
-    setCityCode("");
-    setBarangayCode("");
-    setZip(v.zip ?? "");
-  }, [value]);
-
-  // --- lazy dataset loads ------------------------------------------------
-  // We always load all regions at mount (it's tiny). Provinces / cities /
-  // barangays are loaded on demand the first time the user opens that
-  // dropdown. Zips are loaded on demand when a city is selected.
+  // Eagerly load all four datasets on mount so the resolver effect can
+  // run as soon as `value` arrives (instead of waiting for the user to
+  // focus a dropdown). This is the timing fix for the "form doesn't
+  // update when I click a different row" bug.
   useEffect(() => {
     let cancelled = false;
     setLoadingRegions(true);
@@ -115,86 +111,164 @@ export function AddressCascade({
     };
   }, []);
 
-  const ensureProvincesLoaded = useCallback(async () => {
-    if (provincesAll.length > 0) return;
+  useEffect(() => {
+    let cancelled = false;
     setLoadingProvinces(true);
-    try {
-      const data = await loadProvinces();
-      setProvincesAll(data);
-    } catch {
-      setProvincesAll([]);
-    } finally {
-      setLoadingProvinces(false);
-    }
-  }, [provincesAll.length]);
+    loadProvinces()
+      .then((data) => {
+        if (cancelled) return;
+        setProvincesAll(data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProvincesAll([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingProvinces(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const ensureCitiesLoaded = useCallback(async () => {
-    if (citiesAll.length > 0) return;
+  useEffect(() => {
+    let cancelled = false;
     setLoadingCities(true);
-    try {
-      const data = await loadCities();
-      setCitiesAll(data);
-    } catch {
-      setCitiesAll([]);
-    } finally {
-      setLoadingCities(false);
-    }
-  }, [citiesAll.length]);
+    loadCities()
+      .then((data) => {
+        if (cancelled) return;
+        setCitiesAll(data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCitiesAll([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingCities(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const ensureBarangaysLoaded = useCallback(async () => {
-    if (barangaysAll.length > 0) return;
+  useEffect(() => {
+    let cancelled = false;
     setLoadingBarangays(true);
-    try {
-      const data = await loadBarangays();
-      setBarangaysAll(data);
-    } catch {
-      setBarangaysAll([]);
-    } finally {
-      setLoadingBarangays(false);
-    }
-  }, [barangaysAll.length]);
+    loadBarangays()
+      .then((data) => {
+        if (cancelled) return;
+        setBarangaysAll(data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBarangaysAll([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingBarangays(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // When the address prop gives us display names but the codes are unknown,
-  // resolve them once (lazy) so the cascade pre-selects the right values.
+  // --- resolver -----------------------------------------------------------
+  // Single async resolver. Re-runs whenever `value` changes OR any
+  // dataset finally loads. Resolves region → province → city → barangay
+  // in sequence, and re-derives the zip from the resolved city code
+  // (the value's stored zip is overridden — the city_zip_map is the
+  // authoritative source keyed by city_code, not by name).
+  //
+  // This replaces the four separate resolver effects which were racy:
+  // each one only fired when its sibling state updated, so on a fresh
+  // edit the order would be wrong and the selections would land on
+  // stale data.
+  const lastValueKeyRef = useRef<string>("");
   useEffect(() => {
     const v = value ?? {};
-    if (v.region && !regionCode && regions.length > 0) {
-      findRegionByName(v.region).then((r) => {
-        if (r) setRegionCode(r.region_code);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regions, value]);
+    // Key off the canonical display names only. The zip is intentionally
+    // not in the key — we re-derive it from the city code every time,
+    // so a stale or wrong zip in the database gets corrected on every
+    // open. The `__` reset is so an empty address still re-runs.
+    const key = `${v.region ?? ""}|${v.province ?? ""}|${v.city ?? ""}|${v.barangay ?? ""}`;
+    // If the parent's value object is a fresh reference but the key
+    // matches the last one, skip — but allow explicit resets (empty
+    // value when we previously had content).
+    const hadContent = !!lastValueKeyRef.current;
+    const hasContent = !!key;
+    if (key === lastValueKeyRef.current) return;
+    if (!hasContent && !hadContent) return;
+    lastValueKeyRef.current = key;
 
-  useEffect(() => {
-    const v = value ?? {};
-    if (v.province && !provinceCode && provincesAll.length > 0 && regionCode) {
-      findProvinceByName(v.province, regionCode).then((p) => {
-        if (p) setProvinceCode(p.province_code);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provincesAll, regionCode, value]);
+    let cancelled = false;
+    const run = async () => {
+      // Region first (no parent dependency).
+      let resolvedRegionCode = "";
+      if (v.region) {
+        const r = await findRegionByName(v.region);
+        if (cancelled) return;
+        if (r) resolvedRegionCode = r.region_code;
+      }
+      setRegionCode(resolvedRegionCode);
 
-  useEffect(() => {
-    const v = value ?? {};
-    if (v.city && !cityCode && citiesAll.length > 0 && provinceCode) {
-      findCityByName(v.city, provinceCode).then((c) => {
-        if (c) setCityCode(c.city_code);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [citiesAll, provinceCode, value]);
+      // Province — needs the resolved region code to disambiguate.
+      let resolvedProvinceCode = "";
+      if (v.region && resolvedRegionCode) {
+        const p = await findProvinceByName(v.province ?? "", resolvedRegionCode);
+        if (cancelled) return;
+        if (p) resolvedProvinceCode = p.province_code;
+      }
+      setProvinceCode(resolvedProvinceCode);
 
-  useEffect(() => {
-    const v = value ?? {};
-    if (v.barangay && !barangayCode && barangaysAll.length > 0 && cityCode) {
-      findBarangayByName(v.barangay, cityCode).then((b) => {
-        if (b) setBarangayCode(b.brgy_code);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barangaysAll, cityCode, value]);
+      // City — needs the resolved province code to disambiguate.
+      let resolvedCityCode = "";
+      let derivedZip = "";
+      if (v.region && v.province && v.city && resolvedProvinceCode) {
+        const c = await findCityByName(v.city, resolvedProvinceCode);
+        if (cancelled) return;
+        if (c) {
+          resolvedCityCode = c.city_code;
+          // Re-derive the zip from the city code. The value's stored
+          // zip is intentionally overridden — the city_zip_map is the
+          // authoritative source and is keyed by city_code, not name.
+          try {
+            derivedZip = (await findZipByCode(c.city_code)) ?? "";
+          } catch {
+            derivedZip = "";
+          }
+        }
+      }
+      setCityCode(resolvedCityCode);
+      // If we resolved a city, use the derived zip; otherwise preserve
+      // whatever the user already had (typed or stored).
+      setZip(resolvedCityCode ? derivedZip : v.zip ?? "");
+
+      // Barangay — needs the resolved city code.
+      let resolvedBarangayCode = "";
+      if (v.region && v.province && v.city && v.barangay && resolvedCityCode) {
+        const b = await findBarangayByName(v.barangay, resolvedCityCode);
+        if (cancelled) return;
+        if (b) resolvedBarangayCode = b.brgy_code;
+      }
+      setBarangayCode(resolvedBarangayCode);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    value,
+    // Re-run if any dataset finally loads so a deferred address can
+    // still resolve. The key guard above prevents wasted work when
+    // value hasn't changed.
+    regions,
+    provincesAll,
+    citiesAll,
+    barangaysAll,
+  ]);
 
   // --- derived options ---------------------------------------------------
   const provinces = useMemo<Province[]>(
@@ -225,7 +299,14 @@ export function AddressCascade({
     setCityCode("");
     setBarangayCode("");
     const region = regions.find((r) => r.region_code === next);
-    emit({ region: region?.region_name });
+    // Reset downstream fields in the value so a stale province/city
+    // doesn't survive the region change.
+    emit({
+      region: region?.region_name,
+      province: undefined,
+      city: undefined,
+      barangay: undefined,
+    });
   };
 
   const onProvinceChange = (next: string) => {
@@ -233,24 +314,33 @@ export function AddressCascade({
     setCityCode("");
     setBarangayCode("");
     const province = provincesAll.find((p) => p.province_code === next);
-    emit({ province: province?.province_name });
+    emit({
+      province: province?.province_name,
+      city: undefined,
+      barangay: undefined,
+    });
   };
 
   const onCityChange = async (next: string) => {
     setCityCode(next);
     setBarangayCode("");
     const city = citiesAll.find((c) => c.city_code === next);
-    const province = provincesAll.find((p) => p.province_code === provinceCode);
+    // Always re-derive the zip from the city code. This is the single
+    // source of truth — never trust a stored zip once we know the city.
     let nextZip = "";
-    if (city && province) {
+    if (city) {
       try {
-        nextZip = (await findZip(city.city_name, province.province_name)) ?? "";
+        nextZip = (await findZipByCode(city.city_code)) ?? "";
       } catch {
         nextZip = "";
       }
     }
     setZip(nextZip);
-    emit({ city: city?.city_name, zip: nextZip });
+    emit({
+      city: city?.city_name,
+      zip: nextZip,
+      barangay: undefined,
+    });
   };
 
   const onBarangayChange = (next: string) => {
@@ -280,7 +370,6 @@ export function AddressCascade({
           <select
             value={regionCode}
             onChange={(e) => onRegionChange(e.target.value)}
-            onFocus={ensureProvincesLoaded}
             disabled={disabled || loadingRegions}
             className={inputBase}
           >
@@ -307,7 +396,6 @@ export function AddressCascade({
           <select
             value={provinceCode}
             onChange={(e) => onProvinceChange(e.target.value)}
-            onFocus={ensureProvincesLoaded}
             disabled={disabled || !regionCode || loadingProvinces}
             className={inputBase}
           >
@@ -334,7 +422,6 @@ export function AddressCascade({
           <select
             value={cityCode}
             onChange={(e) => onCityChange(e.target.value)}
-            onFocus={ensureCitiesLoaded}
             disabled={disabled || !provinceCode || loadingCities}
             className={inputBase}
           >
@@ -361,7 +448,6 @@ export function AddressCascade({
           <select
             value={barangayCode}
             onChange={(e) => onBarangayChange(e.target.value)}
-            onFocus={ensureBarangaysLoaded}
             disabled={disabled || !cityCode || loadingBarangays}
             className={inputBase}
           >

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import { ContentCard, Button, useToast } from "@/components/ui";
-import { mockUsers } from "@/lib/mockData";
+import { useAuth } from "@/lib/auth";
 
 const settingsSections = [
  { id: "general", label: "General", icon: <Settings className="w-5 h-5" /> },
@@ -56,12 +56,33 @@ const DEFAULTS: StoredSettings = {
  sessionTimeout: "30",
 };
 
+function formatSettingsDate(v: unknown): string {
+ if (!v) return "";
+ const d =
+  v instanceof Date
+   ? v
+   : typeof v === "string"
+   ? new Date(v)
+   : typeof v === "object" && v && "toDate" in v
+   ? (v as { toDate: () => Date }).toDate()
+   : null;
+ if (!d || isNaN(d.getTime())) return "";
+ return d.toLocaleString("en-US", {
+  month: "short",
+  day: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+ });
+}
+
 export default function SettingsPage() {
  const [activeSection, setActiveSection] = useState("general");
  const [s, setS] = useState<StoredSettings>(DEFAULTS);
  const [hydrated, setHydrated] = useState(false);
  const toast = useToast();
- const adminUser = mockUsers.find((u) => u.role === "Admin");
+ const { user: currentUser } = useAuth();
+ const adminUser = currentUser;
 
  // Hydrate from localStorage
  useEffect(() => {
@@ -168,7 +189,10 @@ export default function SettingsPage() {
            {adminUser?.email}
           </p>
           <p className="text-xs text-printflow-on-surface-variant/80 mt-0.5">
-           {adminUser?.role} • Last login {adminUser?.lastLogin}
+           {adminUser?.role}
+           {adminUser?.lastLogin
+            ? ` • Last login ${formatSettingsDate(adminUser.lastLogin)}`
+            : ""}
           </p>
          </div>
         </div>
