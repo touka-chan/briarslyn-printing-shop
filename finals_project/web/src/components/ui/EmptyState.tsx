@@ -21,7 +21,7 @@ export function EmptyState({ icon, title, description, action, className = "" }:
      </svg>
     )}
    </div>
-   <h3 className="empty-state-title">{title}</h3>
+    <h3 className="empty-state-title font-display">{title}</h3>
    {description && <p className="empty-state-description">{description}</p>}
    {action && <div className="mt-6">{action}</div>}
   </div>

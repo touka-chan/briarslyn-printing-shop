@@ -41,8 +41,8 @@ export default function NotFound() {
             margin: "8px 0 20px",
           }}
         >
-          That route doesn&apos;t exist in PrintFlow. Head back to the
-          dashboard.
+          That route doesn&apos;t exist in the Brialyns Art Sign panel. Head
+          back to the dashboard.
         </p>
         <a
           href="/"
@@ -50,7 +50,7 @@ export default function NotFound() {
             display: "inline-block",
             padding: "10px 16px",
             borderRadius: 999,
-            background: "#00535b",
+            background: "#17171c",
             color: "#ffffff",
             fontWeight: 600,
             fontSize: 14,

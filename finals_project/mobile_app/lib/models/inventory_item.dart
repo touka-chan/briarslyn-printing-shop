@@ -8,7 +8,9 @@ class InventoryItem {
   final String? tagUid;
   final String? sensorId;
   final int currentStock;
-  final int threshold;
+  // NOTE: no `threshold` field — it was write-only display data, never
+  // evaluated by any rule (status derives from reorderPoint). Removed so
+  // a missing key can't crash parsing.
   final int reorderPoint;
   final int forecastedDemandNext7Days;
   final String? model; // 'Holt-Winters' | 'Exponential Smoothing'
@@ -24,7 +26,6 @@ class InventoryItem {
     this.tagUid,
     this.sensorId,
     required this.currentStock,
-    required this.threshold,
     required this.reorderPoint,
     required this.forecastedDemandNext7Days,
     this.model,
@@ -41,7 +42,6 @@ class InventoryItem {
         tagUid: json['tag_uid'] as String?,
         sensorId: json['sensor_id'] as String?,
         currentStock: json['current_stock'] as int,
-        threshold: json['threshold'] as int,
         reorderPoint: json['reorder_point'] as int,
         forecastedDemandNext7Days: json['forecasted_demand_next_7_days'] as int,
         model: json['model'] as String?,
@@ -58,7 +58,6 @@ class InventoryItem {
         'tag_uid': tagUid,
         'sensor_id': sensorId,
         'current_stock': currentStock,
-        'threshold': threshold,
         'reorder_point': reorderPoint,
         'forecasted_demand_next_7_days': forecastedDemandNext7Days,
         'model': model,

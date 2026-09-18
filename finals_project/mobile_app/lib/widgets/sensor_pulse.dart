@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// IoT sensor indicator with pulse animation — mirrors the web "Sensor (IoT)"
+/// IoT sensor indicator with pulse animation - mirrors the web "Sensor (IoT)"
 /// column with active/stale pulse dot. Title 1 Section X (ESP32 RFID).
 class SensorPulse extends StatefulWidget {
   final String sensorId;

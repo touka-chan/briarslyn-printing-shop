@@ -6,6 +6,7 @@ import '../../app_router.dart';
 import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../services/firebase_users.dart' as fb_users;
 import '../../theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -91,6 +92,17 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     if (!mounted) return;
+
+    // The profile snapshot (or auto-provision write+read) trails the Auth
+    // sign-in by a moment. Routing immediately would misroute a valid
+    // user to no-profile on every fresh sign-in - wait for it first
+    // (bounded; a genuinely missing profile still lands on noProfile).
+    // _loading stays true so the button shows progress meanwhile.
+    for (var i = 0; i < 50 && auth.currentUser == null && mounted; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    if (!mounted) return;
     setState(() => _loading = false);
 
     // If the auth user has no profile doc, the AuthService has not flipped
@@ -161,17 +173,30 @@ class _LoginScreenState extends State<LoginScreen>
                                 end: Offset.zero,
                               ).animate(_staggeredAnimations[0]),
                         child: Center(
-                          child: Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              color: AppTheme.primary,
-                              borderRadius: AppRadius.rLg,
-                            ),
-                            child: const Icon(
-                              Icons.print_rounded,
-                              color: AppTheme.onPrimary,
-                              size: AppIconSize.xl,
+                          // Official shop badge - displayed exactly as
+                          // supplied (contain fit: no stretch, no tint,
+                          // no recolor). Asset: assets/images/logo.jpg
+                          // (same file as web/public/logo.jpg).
+                          child: ClipRRect(
+                            borderRadius: AppRadius.rLg,
+                            child: Image.asset(
+                              'assets/images/logo.jpg',
+                              width: 88,
+                              height: 88,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, _, _) => Container(
+                                width: 88,
+                                height: 88,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary,
+                                  borderRadius: AppRadius.rLg,
+                                ),
+                                child: const Icon(
+                                  Icons.print_rounded,
+                                  color: AppTheme.onPrimary,
+                                  size: AppIconSize.xl,
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -192,12 +217,13 @@ class _LoginScreenState extends State<LoginScreen>
                               ).animate(_staggeredAnimations[1]),
                         child: Center(
                           child: Text(
-                            'PrintFlow',
+                            'Brialyns Art Sign',
+                            textAlign: TextAlign.center,
                             style: Theme.of(context)
                                 .textTheme
                                 .displayLarge
                                 ?.copyWith(
-                                  color: AppTheme.primary,
+                                  color: AppTheme.onSurface,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: -0.5,
                                 ),
@@ -220,7 +246,7 @@ class _LoginScreenState extends State<LoginScreen>
                               ).animate(_staggeredAnimations[1]),
                         child: Center(
                           child: Text(
-                            'Brialyns Art Sign — Integrated POS, RFID & Forecasting',
+                            'Brialyns Art Sign - Integrated POS, RFID & Forecasting',
                             textAlign: TextAlign.center,
                             style: Theme.of(context)
                                 .textTheme
@@ -280,7 +306,7 @@ class _LoginScreenState extends State<LoginScreen>
                         child: PfTextField(
                           controller: _passCtrl,
                           label: 'Password',
-                          hintText: '••••••••',
+                          hintText: '********',
                           prefixIcon: Icons.lock_outline_rounded,
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.done,
@@ -291,10 +317,12 @@ class _LoginScreenState extends State<LoginScreen>
                             return null;
                           },
                           suffixIcon: IconButton(
+                            // Icon mirrors state: closed eye = hidden,
+                            // open eye = visible.
                             icon: Icon(
                               _obscurePassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
                               color: AppTheme.onSurfaceVariant,
                               size: AppIconSize.md,
                             ),
@@ -368,7 +396,7 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    // Forgot password — opens the password-reset sheet.
+                    // Forgot password - opens the password-reset sheet.
                     Center(
                       child: TextButton(
                         onPressed: _loading
@@ -441,7 +469,14 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     final auth = AuthProvider.of(context);
     String? errorMessage;
     try {
-      await auth.sendPasswordResetEmail(email);
+      // Existence check first: our users collection is the source of
+      // truth (Firebase itself never confirms addresses).
+      final uid = await fb_users.findUserByEmail(email);
+      if (uid == null) {
+        errorMessage = 'No account found for that email.';
+      } else {
+        await auth.sendPasswordResetEmail(email);
+      }
     } on fb.FirebaseAuthException catch (e) {
       switch (e.code) {
         case 'invalid-email':
@@ -556,7 +591,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: PfButton.filled(
-                    label: _sending ? 'Sending…' : 'Send reset link',
+                    label: _sending ? 'Sending...' : 'Send reset link',
                     icon: Icons.send_rounded,
                     fullWidth: true,
                     loading: _sending,

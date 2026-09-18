@@ -4,7 +4,7 @@
 ///
 /// `customerRegion` / `customerProvince` / `customerCity` / `customerBarangay`
 /// / `customerZip` carry the PSGC cascade output captured at order entry on
-/// the POS Cashier's New Order screen. All five are optional so legacy mock
+/// the POS Cashier's New Order screen. All five are optional so legacy
 /// orders and orders entered without an address still round-trip cleanly.
 class Order {
   final String orderId;
@@ -21,13 +21,21 @@ class Order {
   final String layoutFile;
   final DateTime targetDate;
   final double paymentAmount;
-  final String? paymentStatus; // 'Paid' | 'Full Paid' | 'Unpaid' | 'Incomplete'
+  /// Canonical POS terms: 'Unpaid' | 'Partially Paid' | 'Paid'.
+  /// Legacy values ('Full Paid', 'Incomplete', 'Partial') still parse.
+  final String? paymentStatus;
+  final String? paymentMethod; // 'Cash' | 'E-Wallets' | 'Bank Transfer'
   final String status; // 'Pending' | 'In Production' | 'Ready for Pickup' | 'Completed'
   final String priority; // 'Overdue' | 'Urgent' | 'Upcoming'
   final DateTime estimatedCompletion;
   final List<String>? basedOn; // 'backlog' | 'job_complexity' | 'capacity'
   final String? cashierId; // Firebase Auth uid of the cashier who created the order
   final DateTime? createdAt;
+  /// True once the recipe was auto-deducted (order entered production).
+  final bool stockDeducted;
+  /// Stamped when the order enters production / completes (ETA throughput).
+  final DateTime? startedAt;
+  final DateTime? completedAt;
 
   const Order({
     required this.orderId,
@@ -45,15 +53,19 @@ class Order {
     required this.targetDate,
     required this.paymentAmount,
     this.paymentStatus,
+    this.paymentMethod,
     required this.status,
     required this.priority,
     required this.estimatedCompletion,
     this.basedOn,
     this.cashierId,
     this.createdAt,
+    this.stockDeducted = false,
+    this.startedAt,
+    this.completedAt,
   });
 
-  /// Sample/mock data — matches `web/src/lib/mockData.ts` for parity.
+  /// Reads the shared Firestore order shape (snake_case, Timestamps).
   factory Order.fromJson(Map<String, dynamic> json) => Order(
         orderId: json['order_id'] as String,
         customerName: json['customer_name'] as String,
@@ -70,6 +82,7 @@ class Order {
         targetDate: _requireDate(json['target_date'], 'target_date'),
         paymentAmount: (json['payment_amount'] as num).toDouble(),
         paymentStatus: json['payment_status'] as String?,
+        paymentMethod: json['payment_method'] as String?,
         status: json['status'] as String,
         priority: json['priority'] as String,
         estimatedCompletion:
@@ -77,6 +90,9 @@ class Order {
         basedOn: (json['based_on'] as List?)?.cast<String>(),
         cashierId: json['cashier_id'] as String?,
         createdAt: _parseDate(json['created_at']),
+        stockDeducted: json['stock_deducted'] as bool? ?? false,
+        startedAt: _parseDate(json['started_at']),
+        completedAt: _parseDate(json['completed_at']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -95,12 +111,16 @@ class Order {
         'target_date': targetDate.toIso8601String().split('T').first,
         'payment_amount': paymentAmount,
         'payment_status': paymentStatus,
+        'payment_method': paymentMethod,
         'status': status,
         'priority': priority,
         'estimated_completion': estimatedCompletion.toIso8601String().split('T').first,
         'based_on': basedOn,
         'cashier_id': cashierId,
         'created_at': createdAt?.toIso8601String().split('T').first,
+        'stock_deducted': stockDeducted,
+        'started_at': startedAt?.toIso8601String(),
+        'completed_at': completedAt?.toIso8601String(),
       };
 }
 

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/app_user.dart';
+import '../services/audit_service.dart';
 import '../services/firebase_users.dart' as fb_users;
 import 'role.dart';
 
@@ -146,7 +147,7 @@ class RolePermissions {
 /// FirebaseAuth-backed authentication/session service.
 ///
 /// Public API (preserved from the in-memory version):
-///   - `currentRole`         (Role? — null when signed out or no profile)
+///   - `currentRole`         (Role? - null when signed out or no profile)
 ///   - `isLoggedIn`          (true iff Firebase user is signed in AND the
 ///                            Firestore `users/{uid}` doc exists with
 ///                            `status: 'active'`)
@@ -167,6 +168,10 @@ class AuthService extends ChangeNotifier {
 
   /// The currently logged-in user, or null if not signed in.
   AppUser? get currentUser => _profile;
+
+  /// Firebase Auth uid even when no profile doc exists (shown on the
+  /// blocked screens so the Owner can identify the account in-app).
+  String? get currentUid => _user?.uid;
 
   /// The currently logged-in role, or null if not signed in.
   Role? get currentRole {
@@ -216,10 +221,33 @@ class AuthService extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _profileSub = _db.collection('users').doc(user.uid).snapshots().listen((doc) {
+      _profileSub = _db.collection('users').doc(user.uid).snapshots().listen((doc) async {
         if (!doc.exists) {
-          _profile = null;
-          notifyListeners();
+          // Self-healing onboarding: console-created or orphaned Auth
+          // accounts get a minimal ACTIVE profile so sign-in just
+          // works - no console UID hunting. Safe because Auth accounts
+          // only exist when an admin creates them (no public sign-up);
+          // the Owner can still deactivate anyone from the Users page.
+          // Rules allow self-create of your own doc. Falls back to
+          // null (existing "profile not found" behavior) on failure.
+          try {
+            final email = user.email ?? '';
+            final prefix = email.contains('@') ? email.split('@').first : '';
+            await _db.collection('users').doc(user.uid).set({
+              'email': email,
+              'name': (user.displayName?.trim().isNotEmpty ?? false)
+                  ? user.displayName!.trim()
+                  : (prefix.isNotEmpty ? prefix : 'Staff'),
+              'role': 'POS_Cashier',
+              'status': 'active',
+              'created_at': FieldValue.serverTimestamp(),
+              'updated_at': FieldValue.serverTimestamp(),
+              'last_login_at': null,
+            });
+          } catch (_) {
+            _profile = null;
+            notifyListeners();
+          }
           return;
         }
         final data = doc.data() as Map<String, dynamic>;
@@ -229,7 +257,13 @@ class AuthService extends ChangeNotifier {
         // the mobile `AppUser.fromJson` can parse the doc the same
         // way it does in `subscribeUsersStream`.
         fb_users.normaliseUserDoc(data);
-        _profile = AppUser.fromJson(data);
+        try {
+          _profile = AppUser.fromJson(data);
+        } catch (e) {
+          // A malformed profile must not crash auth - treat as missing.
+          debugPrint('[auth] Skipping malformed profile ${doc.id}: $e');
+          _profile = null;
+        }
         notifyListeners();
       }, onError: (_) {
         _profile = null;
@@ -243,16 +277,63 @@ class AuthService extends ChangeNotifier {
   Future<void> signIn(String email, String password) async {
     HapticFeedback.mediumImpact();
     await _auth.signInWithEmailAndPassword(email: email, password: password);
+    // Audit in the background: the profile snapshot trails sign-in by a
+    // moment, so wait briefly (bounded) to attribute the role correctly.
+    // Never blocks, never throws.
+    () async {
+      try {
+        for (var i = 0; i < 20 && _profile == null; i++) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+        AuditService.log(
+          actor: _profile ??
+              AppUser(
+                id: _user?.uid ?? '',
+                name: '',
+                email: email,
+                role: 'unknown',
+              ),
+          action: 'user_login',
+          module: 'auth',
+          recordId: _user?.uid ?? email,
+          recordLabel: 'Login $email',
+          newValue: 'signed in',
+        );
+      } catch (_) {}
+    }();
   }
 
-  /// Send a password reset email.
+  /// Send a password reset email. The link opens the shared web
+  /// reset page (works for mobile users too — tap in Gmail, set the
+  /// new password in the browser, sign back in on the app).
+  static const String passwordResetUrl =
+      'https://brialyns-art-sign-services.web.app/reset-password';
+
   Future<void> sendPasswordResetEmail(String email) async {
-    await _auth.sendPasswordResetEmail(email: email);
+    await _auth.sendPasswordResetEmail(
+      email: email,
+      actionCodeSettings: fb.ActionCodeSettings(
+        url: passwordResetUrl,
+        handleCodeInApp: false,
+      ),
+    );
   }
 
   /// Sign out and clear profile.
   Future<void> signOut() async {
     HapticFeedback.selectionClick();
+    // Log BEFORE signing out - afterwards there is no user to attribute.
+    final who = _profile;
+    if (who != null) {
+      AuditService.log(
+        actor: who,
+        action: 'user_logout',
+        module: 'auth',
+        recordId: who.id,
+        recordLabel: 'Logout ${who.email}',
+        oldValue: 'signed in',
+      );
+    }
     await _auth.signOut();
   }
 

@@ -67,9 +67,9 @@ export function Modal({
    >
     <div className="modal-header">
      <div className="flex gap-3 min-w-0 flex-1">
-      {icon && <div className="w-9 h-9 rounded-lg bg-printflow-primary-fixed/20 text-printflow-primary flex items-center justify-center shrink-0">{icon}</div>}
-      <div className="min-w-0 flex-1">
-       <h2 id="modal-title" className="text-[17px] font-semibold tracking-tight text-printflow-on-surface leading-5">{title}</h2>
+      {icon && <div className="w-9 h-9 rounded-lg bg-[#17171c] text-white dark:bg-white dark:text-black flex items-center justify-center shrink-0">{icon}</div>}
+       <div className="min-w-0 flex-1">
+        <h2 id="modal-title" className="font-display text-[17px] font-semibold tracking-tight text-printflow-on-surface leading-5">{title}</h2>
        {description && <p className="text-[13px] leading-4 text-printflow-on-surface-variant mt-1">{description}</p>}
       </div>
      </div>

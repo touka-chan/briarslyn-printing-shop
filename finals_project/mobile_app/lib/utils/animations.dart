@@ -7,9 +7,9 @@ import '../design/tokens.dart';
 /// first build) to [value] over [duration] using an `easeOutCubic` curve.
 ///
 /// Supports `int`, `double`, and `String` values:
-///   * `int`   — rendered without decimals.
-///   * `double` — rendered with up to 2 decimal places.
-///   * `String` — rendered as-is.
+///   * `int`   - rendered without decimals.
+///   * `double` - rendered with up to 2 decimal places.
+///   * `String` - rendered as-is.
 ///
 /// Respects [MediaQuery.disableAnimationsOf]; when accessibility animations
 /// are disabled the final value is shown immediately without animating.

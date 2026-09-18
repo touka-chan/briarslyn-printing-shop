@@ -1,23 +1,23 @@
 "use client";
 
 /**
- * SessionTimeoutModal — warning dialog shown when the application-level
+ * SessionTimeoutModal - warning dialog shown when the application-level
  * session is about to expire. Re-uses the existing `<Modal>` so the
  * visual language matches every other confirmation in the app.
  *
  * Behavior:
- *  - "Stay signed in" → tells the parent to extend the session.
+ *  - "Stay signed in" - tells the parent to extend the session.
  *    The parent writes a new expiry to localStorage and re-arms
  *    its timers, which causes this modal to unmount because the
  *    warning state flips back to false.
- *  - "Sign out now" → tells the parent to log the user out
+ *  - "Sign out now" - tells the parent to log the user out
  *    immediately, bypassing the countdown.
  *  - The countdown text re-renders every second so the user can
  *    see exactly how long they have.
  *
  * The modal itself is non-dismissible: pressing Escape, clicking
  * the overlay, or hitting the X button does nothing. The user has
- * to make a choice (extend or leave). This is intentional — an
+ * to make a choice (extend or leave). This is intentional - an
  * auto-dismissing warning defeats the point of the warning.
  */
 
@@ -50,7 +50,7 @@ export function SessionTimeoutModal({
 }: SessionTimeoutModalProps) {
  // The countdown is computed on a 1s interval so the user can see
  // the time shrinking. We re-derive the label from `expiresAt` on
- // every tick rather than decrementing state — the source of truth
+ // every tick rather than decrementing state - the source of truth
  // is the absolute expiry, not a local counter.
  const [now, setNow] = useState<number>(() => Date.now());
 
@@ -66,10 +66,10 @@ export function SessionTimeoutModal({
   <Modal
    isOpen={isOpen}
    onClose={() => {
-   /* Non-dismissible — user must click a footer button. */
+   /* Non-dismissible - user must click a footer button. */
    }}
    title="Session expiring soon"
-   description="For your security, PrintFlow signs you out after a period of inactivity."
+    description="For your security, you'll be signed out after a period of inactivity."
    icon={<Clock className="w-5 h-5" />}
    size="sm"
    closeOnOverlayClick={false}

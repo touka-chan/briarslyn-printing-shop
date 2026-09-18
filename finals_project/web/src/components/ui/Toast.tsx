@@ -28,21 +28,36 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-const VARIANT_STYLES: Record<ToastVariant, { icon: typeof CheckCircle2; ring: string; iconClass: string }> = {
+const VARIANT_STYLES: Record<
+ ToastVariant,
+ {
+  icon: typeof CheckCircle2;
+  title: string;
+  badge: string;
+  iconClass: string;
+  bar: string;
+ }
+> = {
  success: {
   icon: CheckCircle2,
-  ring: "border-printflow-success/30",
+  title: "Success",
+  badge: "bg-printflow-success-container text-printflow-success",
   iconClass: "text-printflow-success",
+  bar: "bg-printflow-success",
  },
  error: {
   icon: AlertTriangle,
-  ring: "border-printflow-error/30",
-  iconClass: "text-printflow-error",
+  title: "Something went wrong",
+  badge: "bg-printflow-error-container text-printflow-on-error-container",
+  iconClass: "text-printflow-on-error-container",
+  bar: "bg-printflow-on-error-container",
  },
  info: {
   icon: Info,
-  ring: "border-printflow-primary/30",
-  iconClass: "text-printflow-primary",
+  title: "Heads up",
+  badge: "bg-printflow-primary-fixed text-printflow-on-primary-fixed",
+  iconClass: "text-printflow-on-primary-fixed",
+  bar: "bg-printflow-on-primary-fixed",
  },
 };
 
@@ -101,21 +116,41 @@ export function ToastProvider({ children }: { children: ReactNode }) {
    return (
     <div
      key={t.id}
-     className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl border ${style.ring} bg-printflow-surface shadow-lg`}
-     style={{ animation: "slide-in-right 220ms ease-out" }}
+     className="pointer-events-auto relative overflow-hidden rounded-2xl border border-printflow-outline-variant/50 bg-printflow-surface shadow-[0_16px_40px_rgba(0,0,0,0.16),0_4px_12px_rgba(0,0,0,0.08)]"
+     style={{ animation: "toast-in 260ms cubic-bezier(0.21, 1.02, 0.73, 1)" }}
      role="status"
     >
-     <Icon className={`w-5 h-5 shrink-0 ${style.iconClass}`} />
-     <p className="flex-1 text-sm text-printflow-on-surface leading-snug">
-      {t.message}
-     </p>
-     <button
-      onClick={() => dismiss(t.id)}
-      className="text-printflow-on-surface-variant hover:text-printflow-on-surface transition-colors"
-      aria-label="Dismiss notification"
-     >
-      <X className="w-4 h-4" />
-     </button>
+     <div className="flex items-start gap-3 px-4 pt-3.5 pb-4">
+      <span
+       className={`flex items-center justify-center w-9 h-9 rounded-full shrink-0 ${style.badge}`}
+      >
+       <Icon className="w-5 h-5" />
+      </span>
+      <div className="flex-1 min-w-0">
+       <p className="text-[13px] font-bold text-printflow-on-surface leading-tight">
+        {style.title}
+       </p>
+       <p className="mt-0.5 text-sm text-printflow-on-surface-variant leading-snug">
+        {t.message}
+       </p>
+      </div>
+      <button
+       onClick={() => dismiss(t.id)}
+       className="p-1 -m-1 rounded-full text-printflow-on-surface-variant/70 hover:text-printflow-on-surface hover:bg-printflow-surface-container transition-colors shrink-0"
+       aria-label="Dismiss notification"
+      >
+       <X className="w-4 h-4" />
+      </button>
+     </div>
+     {/* Lifetime progress bar */}
+     <div className="h-1 w-full bg-printflow-surface-container">
+      <div
+       className={`h-full ${style.bar} opacity-70`}
+       style={{
+        animation: `toast-progress ${DEFAULT_DURATION}ms linear forwards`,
+       }}
+      />
+     </div>
     </div>
    );
    })}

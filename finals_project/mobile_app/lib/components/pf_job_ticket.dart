@@ -5,13 +5,13 @@ import '../design/tokens.dart';
 import '../models/order.dart';
 import '../theme/app_theme.dart';
 import '../utils/animations.dart';
-import '../widgets/status_badge.dart';
+import 'pf_status_badge.dart';
 
-/// The signature PrintFlow job ticket widget — renders an [Order] as a
+/// The signature PrintFlow job ticket widget - renders an [Order] as a
 /// perforated print shop job ticket card with dashed top border, monospace
 /// order ID, status/priority badges, ETA, and payment chip.
 ///
-/// This is the visual identity of the app — designed to look like a physical
+/// This is the visual identity of the app - designed to look like a physical
 /// production queue ticket from a real print shop.
 ///
 /// Features:
@@ -135,8 +135,10 @@ class PfJobTicket extends StatelessWidget {
                     spacing: AppSpacing.xs,
                     runSpacing: AppSpacing.xs,
                     children: [
-                      StatusBadge.orderStatus(order.status, dense: true),
-                      StatusBadge.priority(order.priority, dense: true),
+                      PfStatusBadge.orderStatus(order.status,
+                          size: PfBadgeSize.small),
+                      PfStatusBadge.priority(order.priority,
+                          size: PfBadgeSize.small),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -146,8 +148,8 @@ class PfJobTicket extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // ETA with calendar icon — labels so the API contract
-                      // link (§IX /api/orders/{id}/eta) is obvious to a panel.
+                      // ETA with calendar icon - labels so the API contract
+                      // link (Sec.IX /api/orders/{id}/eta) is obvious to a panel.
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -222,7 +224,7 @@ class PfJobTicket extends StatelessWidget {
 
   /// Color-codes the ETA based on the gap to the target completion date so
   /// overdue / at-risk tickets are visible at a glance. Mirrors the queue's
-  /// priority palette — no new colors introduced.
+  /// priority palette - no new colors introduced.
   Color _etaColor(Order order) {
     final daysUntilTarget =
         order.targetDate.difference(DateTime.now()).inDays;

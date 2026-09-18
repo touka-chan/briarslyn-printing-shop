@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// KPI card — mirrors the web `KpiCard.tsx`. Used on dashboard summaries.
+/// KPI card - mirrors the web `KpiCard.tsx`. Used on dashboard summaries.
 class KpiCard extends StatelessWidget {
   final String label;
   final String value;

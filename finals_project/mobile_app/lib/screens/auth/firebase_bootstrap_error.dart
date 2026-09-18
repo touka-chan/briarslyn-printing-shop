@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 
-/// A simple error screen shown when Firebase initialization fails — usually
+/// A simple error screen shown when Firebase initialization fails - usually
 /// because the placeholder `firebase_options.dart` has not yet been replaced
 /// by `flutterfire configure`. Tells the user the exact next step.
 class FirebaseBootstrapErrorApp extends StatelessWidget {

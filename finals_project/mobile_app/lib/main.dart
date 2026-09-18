@@ -8,7 +8,7 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/firebase_bootstrap_error.dart';
 import 'theme/app_theme.dart';
 
-/// Top-level singleton — constructed once after Firebase initializes, then
+/// Top-level singleton - constructed once after Firebase initializes, then
 /// passed into [AuthProvider]. Anywhere in the app, [AuthProvider.of]
 /// retrieves the same instance.
 final AuthService _auth = AuthService();
@@ -40,7 +40,7 @@ class PrintFlowApp extends StatelessWidget {
     return AuthProvider(
       authService: _auth,
       child: MaterialApp(
-        title: 'PrintFlow Mobile',
+        title: 'Brialyns Art Sign',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         initialRoute: AppRoutes.login,

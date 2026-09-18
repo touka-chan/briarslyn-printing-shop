@@ -15,26 +15,47 @@ import 'production_sensor.dart';
 /// Wraps the [RoleHomeShell] with the three main bottom-nav destinations:
 /// Queue, Inventory, and Sensor.
 ///
-/// This shell enforces that the current user is a production staff. If a cashier
-/// somehow lands here, they are redirected to the login screen.
-class ProductionShellScreen extends StatelessWidget {
+/// This shell enforces that the current user is a production staff. If a
+/// cashier somehow lands here, they are redirected to their own home.
+class ProductionShellScreen extends StatefulWidget {
   const ProductionShellScreen({super.key});
+
+  @override
+  State<ProductionShellScreen> createState() => _ProductionShellScreenState();
+}
+
+class _ProductionShellScreenState extends State<ProductionShellScreen> {
+  /// Fires at most once per shell instance. Without this, every rebuild
+  /// while signed out schedules another post-frame push (each one calling
+  /// logout again, which notifies again) and the login screen stacks /
+  /// replays its transition nonstop.
+  bool _redirectScheduled = false;
 
   @override
   Widget build(BuildContext context) {
     final auth = AuthProvider.of(context);
 
-    // Server-side gate: enforce that only production staff can access this shell
-    if (!auth.isProduction) {
+    // Gate only on definitive states. A transient null profile (offline
+    // blip while the Firebase session is alive) shows a spinner instead
+    // of bouncing a signed-in user to login. The gate never mutates auth
+    // (no logout() here) - navigation only.
+    final signedOut = auth.currentUid == null;
+    final wrongRole = auth.currentUser != null && !auth.isProduction;
+    if ((signedOut || wrongRole) && !_redirectScheduled) {
+      _redirectScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          auth.logout();
-          Navigator.pushNamedAndRemoveUntil(
-            context,
-            AppRoutes.login,
-            (route) => false,
-          );
-        }
+        if (!mounted) return;
+        // A wrong-role session belongs on its own home, not login
+        // (login has no auto-advance for signed-in users).
+        final target = wrongRole && auth.currentRole != null
+            ? auth.currentRole!.homeRoute
+            : AppRoutes.login;
+        if (ModalRoute.of(context)?.settings.name == target) return;
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          target,
+          (route) => false,
+        );
       });
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),

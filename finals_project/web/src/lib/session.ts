@@ -1,10 +1,10 @@
 /**
- * Session timer — pure utility (no React, no Firebase).
+ * Session timer - pure utility (no React, no Firebase).
  *
  * Owns three things only:
  *  1. The two localStorage keys that hold the expiry and the "keep me
  *     signed in" preference.
- *  2. Two `setTimeout` handles — one for the warning modal, one for the
+ *  2. Two `setTimeout` handles - one for the warning modal, one for the
  *     hard auto-logout.
  *  3. The `storage` event listener that keeps multiple open tabs in
  *     sync (signing out in one tab should immediately sign out the
@@ -54,7 +54,7 @@ export interface SessionTimersCallbacks {
 }
 
 /* ------------------------------------------------------------------ *
- *  localStorage helpers — every read/write is wrapped because
+ *  localStorage helpers - every read/write is wrapped because
  *  `localStorage` can throw (Safari private mode, Storage disabled,
  *  SSR), and we never want the timer subsystem to crash the app.
  * ------------------------------------------------------------------ */
@@ -87,7 +87,7 @@ function safeRemove(key: string): void {
 }
 
 /* ------------------------------------------------------------------ *
- *  Public API — read / write the session state.
+ *  Public API - read / write the session state.
  * ------------------------------------------------------------------ */
 
 /**
@@ -171,7 +171,7 @@ export function startTimers(
 
   const msUntilWarning = msUntilExpire - WARNING_BEFORE_MS;
   if (msUntilWarning <= 0) {
-   // Already inside the warning window — fire on the next tick so
+   // Already inside the warning window - fire on the next tick so
    // the caller's state-setter runs in a fresh event-loop turn.
    warningHandle = setTimeout(() => {
     warningHandle = null;
@@ -199,7 +199,7 @@ export function startTimers(
   *
   * We only extend (never shorten) in response to another tab's
   * write, because the watcher's `onExpire` callback would fire
-  * and sign the user out — and that would race with the other
+  * and sign the user out - and that would race with the other
   * tab's "just hit Stay" intent. If the new value is the same
   * as ours, no-op. If the new value is missing/invalid/already
   * past, let our existing timer handle it.

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app_router.dart';
+import '../../auth/auth.dart';
+import '../../components/components.dart';
 import '../../design/tokens.dart';
 import '../../models/inventory_item.dart';
 import '../../models/order.dart';
@@ -62,8 +64,15 @@ class _Notification {
   }
 }
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  int _feedNonce = 0;
 
   /// Build the notification list from the live orders + inventory snapshots
   /// so the screen always reflects the latest state in Firestore.
@@ -71,7 +80,6 @@ class NotificationsScreen extends StatelessWidget {
     List<Order> orders,
     List<InventoryItem> inventory,
   ) {
-    final now = DateTime.now();
     final notifs = <_Notification>[];
 
     for (final Order o in orders) {
@@ -80,7 +88,7 @@ class NotificationsScreen extends StatelessWidget {
           kind: _NotificationKind.overdueOrder,
           title: 'Order ${o.orderId} is overdue',
           message:
-              '${o.customerName} • ${o.itemType} • target was ${_fmt(o.targetDate)}',
+              '${o.customerName} - ${o.itemType} - target was ${_fmt(o.targetDate)}',
           timestamp: o.targetDate,
           orderId: o.orderId,
         ));
@@ -88,8 +96,9 @@ class NotificationsScreen extends StatelessWidget {
         notifs.add(_Notification(
           kind: _NotificationKind.urgentOrder,
           title: 'Urgent: ${o.itemType}',
-          message: '${o.customerName} • target ${_fmt(o.targetDate)}',
-          timestamp: o.targetDate.subtract(const Duration(days: 1)),
+          message: '${o.customerName} - target ${_fmt(o.targetDate)}',
+          // Real event: when the urgent order was raised (no synthetic -1d).
+          timestamp: o.createdAt ?? o.targetDate,
           orderId: o.orderId,
         ));
       }
@@ -97,8 +106,10 @@ class NotificationsScreen extends StatelessWidget {
         notifs.add(_Notification(
           kind: _NotificationKind.readyForPickup,
           title: '${o.orderId} is ready for pickup',
-          message: '${o.customerName} • ${o.itemType}',
-          timestamp: now.subtract(const Duration(hours: 1)),
+          message: '${o.customerName} - ${o.itemType}',
+          // No ready-for-pickup timestamp exists on the order doc - use
+          // the latest real lifecycle event instead of a fake "1h ago".
+          timestamp: o.startedAt ?? o.createdAt ?? o.targetDate,
           orderId: o.orderId,
         ));
       }
@@ -109,7 +120,7 @@ class NotificationsScreen extends StatelessWidget {
         notifs.add(_Notification(
           kind: _NotificationKind.insufficientStock,
           title: '${item.materialVariantId} out of stock',
-          message: '${item.itemType} • ${item.currentStock} left',
+          message: '${item.itemType} - ${item.currentStock} left',
           timestamp: item.lastUpdated,
           materialVariantId: item.materialVariantId,
         ));
@@ -118,7 +129,7 @@ class NotificationsScreen extends StatelessWidget {
           kind: _NotificationKind.lowStock,
           title: '${item.materialVariantId} is running low',
           message:
-              '${item.itemType} • ${item.currentStock} units left (reorder at ${item.reorderPoint})',
+              '${item.itemType} - ${item.currentStock} units left (reorder at ${item.reorderPoint})',
           timestamp: item.lastUpdated,
           materialVariantId: item.materialVariantId,
         ));
@@ -128,7 +139,7 @@ class NotificationsScreen extends StatelessWidget {
           kind: _NotificationKind.staleSensor,
           title: '${item.materialVariantId} sensor is delayed',
           message:
-              'Last update ${_ago(item.lastUpdated)} — check ${item.sensorId ?? "sensor"}',
+              'Last update ${_ago(item.lastUpdated)} - check ${item.sensorId ?? "sensor"}',
           timestamp: item.lastUpdated,
           materialVariantId: item.materialVariantId,
         ));
@@ -151,7 +162,15 @@ class NotificationsScreen extends StatelessWidget {
   void _handleTap(BuildContext context, _Notification n) {
     HapticFeedback.selectionClick();
     if (n.orderId != null) {
-      Navigator.pushNamed(context, AppRoutes.productionOrderDetail(n.orderId!));
+      // Cashiers land on the cashier detail (same doc, cashier actions);
+      // everyone else gets the production detail.
+      final isCashier = AuthProvider.of(context).isCashier;
+      Navigator.pushNamed(
+        context,
+        isCashier
+            ? AppRoutes.cashierOrderDetail(n.orderId!)
+            : AppRoutes.productionOrderDetail(n.orderId!),
+      );
     }
   }
 
@@ -171,11 +190,34 @@ class NotificationsScreen extends StatelessWidget {
         ),
       ),
       body: StreamBuilder<List<Order>>(
+        key: ValueKey('orders-$_feedNonce'),
         stream: fb_orders.subscribeOrdersStream(),
         builder: (context, ordersSnap) {
           return StreamBuilder<List<InventoryItem>>(
+            key: ValueKey('inventory-$_feedNonce'),
             stream: fb_inventory.subscribeInventoryStream(),
             builder: (context, invSnap) {
+              // A failed feed must never masquerade as "all caught up".
+              if (ordersSnap.hasError || invSnap.hasError) {
+                return SafeArea(
+                  top: false,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.xxl,
+                    ),
+                    child: PfErrorCard(
+                      message:
+                          'Live alerts failed to load. Check your connection and permissions.',
+                      details:
+                          '${ordersSnap.error ?? invSnap.error}',
+                      onRetry: () => setState(() => _feedNonce++),
+                    ),
+                  ),
+                );
+              }
               final orders = ordersSnap.data ?? const <Order>[];
               final inventory = invSnap.data ?? const <InventoryItem>[];
               final notifications = _buildNotifications(orders, inventory);

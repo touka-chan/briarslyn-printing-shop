@@ -10,11 +10,11 @@ import '../../services/firebase_orders.dart' as fb_orders;
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
 
-/// The POS / Cashier home dashboard — the first tab in the Cashier shell.
+/// The POS / Cashier home dashboard - the first tab in the Cashier shell.
 ///
 /// Displays 4 KPI tiles with animated count-up, quick action buttons,
 /// and a "Recent Orders" list using the signature job ticket cards.
-/// All data is streamed live from Firestore — empty states render
+/// All data is streamed live from Firestore - empty states render
 /// honestly when no orders have been created yet.
 class CashierHomeScreen extends StatefulWidget {
   const CashierHomeScreen({super.key});
@@ -24,13 +24,36 @@ class CashierHomeScreen extends StatefulWidget {
 }
 
 class _CashierHomeScreenState extends State<CashierHomeScreen> {
-  late final Stream<List<Order>> _orders$ = fb_orders.subscribeOrdersStream();
+  int _feedNonce = 0;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Order>>(
-      stream: _orders$,
+      key: ValueKey('orders-$_feedNonce'),
+      stream: fb_orders.subscribeOrdersStream(),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
+            child: PfErrorCard(
+              message:
+                  'Live orders failed to load. Check your connection and permissions.',
+              details: '${snap.error}',
+              onRetry: () => setState(() => _feedNonce++),
+            ),
+          );
+        }
+        // First frame arrives with no data yet — show a loader, not a
+        // silent all-zero dashboard.
+        if (!snap.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
         final orders = snap.data ?? const <Order>[];
         final kpis = _computeKpis(orders);
         final isEmpty = orders.isEmpty;
@@ -59,22 +82,40 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
     );
   }
 
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   // KPI computation
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   _CashierKpis _computeKpis(List<Order> orders) {
     final now = DateTime.now();
     int todayOrders = 0;
     int pending = 0;
     int collectedToday = 0;
     double collectedAmount = 0;
+    double prepHoursTotal = 0;
+    int prepSamples = 0;
     for (final o in orders) {
       if (o.createdAt != null && _isToday(o.createdAt!, now)) todayOrders++;
       if (o.status == 'Pending') pending++;
-      if (o.status == 'Completed') {
-        if (o.createdAt != null && _isToday(o.createdAt!, now)) {
+      // Collected Today = completed AND actually paid, attributed by
+      // completion day (not creation day): created-yesterday but
+      // completed-and-paid-today counts today. Legacy docs without
+      // completedAt fall back to createdAt so they are not dropped.
+      if (o.status == 'Completed' &&
+          (o.paymentStatus == 'Paid' || o.paymentStatus == 'Full Paid')) {
+        final doneAt = o.completedAt ?? o.createdAt;
+        if (doneAt != null && _isToday(doneAt, now)) {
           collectedToday++;
           collectedAmount += o.paymentAmount;
+        }
+      }
+      // Avg prep time: start-to-finish hours over completed orders that
+      // carry both stamps (startedAt preferred, createdAt as fallback).
+      if (o.status == 'Completed' && o.completedAt != null) {
+        final start = o.startedAt ?? o.createdAt;
+        if (start != null && !o.completedAt!.isBefore(start)) {
+          prepHoursTotal +=
+              o.completedAt!.difference(start).inMinutes / 60.0;
+          prepSamples++;
         }
       }
     }
@@ -83,16 +124,16 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
       pending: pending,
       collectedTodayCount: collectedToday,
       collectedAmount: collectedAmount,
-      avgPrepHours: 0,
+      avgPrepHours: prepSamples == 0 ? 0 : prepHoursTotal / prepSamples,
     );
   }
 
   bool _isToday(DateTime d, DateTime now) =>
       d.year == now.year && d.month == now.month && d.day == now.day;
 
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   // Sections
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   Widget _buildWelcomeBanner(BuildContext context, List<Order> orders) {
     final auth = AuthProvider.of(context);
     final name = auth.currentUser?.name ?? 'there';
@@ -213,7 +254,7 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
           title: 'Overview',
           subtitle: hasData
               ? 'Key metrics for today'
-              : 'No orders yet — metrics will appear once you create one',
+              : 'No orders yet - metrics will appear once you create one',
         ),
         const SizedBox(height: AppSpacing.md),
         GridView.builder(
@@ -363,6 +404,12 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
   Widget _buildTopCustomers(BuildContext context, List<Order> orders) {
     final byName = <String, _CustomerStats>{};
     for (final order in orders) {
+      // Same rule as Collected Today: only actually-paid orders count
+      // toward spend. Unpaid tabs must not crown a "top customer".
+      if (order.paymentStatus != 'Paid' &&
+          order.paymentStatus != 'Full Paid') {
+        continue;
+      }
       final stats = byName.putIfAbsent(
         order.customerName,
         () => _CustomerStats(name: order.customerName),
@@ -397,9 +444,9 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
     );
   }
 
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   // Navigation
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   void _navigateToNewOrder(BuildContext context) {
     HapticFeedback.selectionClick();
     context.pushNamed(AppRoutes.cashierNewOrder);
@@ -416,7 +463,7 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
   }
 }
 
-/// Aggregated KPIs for the cashier home — computed from the live orders
+/// Aggregated KPIs for the cashier home - computed from the live orders
 /// snapshot, no hardcoded values.
 class _CashierKpis {
   const _CashierKpis({
@@ -491,7 +538,7 @@ class _CustomerTile extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
                   '${stats.orderCount} order${stats.orderCount == 1 ? '' : 's'}'
-                  '${stats.lastOrderDate != null ? ' • last ${_fmt(stats.lastOrderDate!)}' : ''}',
+                  '${stats.lastOrderDate != null ? ' - last ${_fmt(stats.lastOrderDate!)}' : ''}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppTheme.onSurfaceVariant,
                       ),

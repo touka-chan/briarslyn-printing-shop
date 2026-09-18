@@ -7,7 +7,7 @@ import '../theme/app_theme.dart';
 /// A semantic segmented control for mutually exclusive options.
 ///
 /// Use instead of `RadioListTile` or `DropdownButtonFormField` for short lists
-/// (2–4 items) where the options should be visible at once.
+/// (2-4 items) where the options should be visible at once.
 ///
 /// The control renders as a full-width row of equal-width capsules. The
 /// selected option is highlighted with a teal pill that slides smoothly
@@ -90,13 +90,13 @@ class _PfSegmentedControlState<T> extends State<PfSegmentedControl<T>> {
         builder: (context, constraints) {
           final totalWidth = constraints.maxWidth;
           final availableWidth = totalWidth - (inset * 2);
-          // Equal-width segments — never based on text width — so the
+          // Equal-width segments - never based on text width - so the
           // active pill aligns with the active tap target exactly.
           final segmentWidth = availableWidth / segmentCount;
 
           return Stack(
             children: [
-              // Animated selection pill — slides between segments.
+              // Animated selection pill - slides between segments.
               if (selectedIndex >= 0)
                 AnimatedPositioned(
                   duration: reducedMotion
@@ -121,7 +121,7 @@ class _PfSegmentedControlState<T> extends State<PfSegmentedControl<T>> {
                     ),
                   ),
                 ),
-              // Option labels — each fills its equal-width share.
+              // Option labels - each fills its equal-width share.
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: inset),
                 child: Row(

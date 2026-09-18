@@ -1,26 +1,26 @@
-// PrintFlow Mobile — Firestore service for the `inventory` collection.
+// PrintFlow Mobile - Firestore service for the `inventory` collection.
 //
 // Mirrors the web `web/src/lib/services/inventory.ts` contract exactly.
-// Field shape (snake_case ↔ Dart `InventoryItem`):
-//   material_variant_id          ↔ materialVariantId
-//   item_type                    ↔ itemType
-//   category                     ↔ category
-//   tag_uid                      ↔ tagUid
-//   sensor_id                    ↔ sensorId
-//   current_stock                ↔ currentStock
-//   threshold                    ↔ threshold
-//   reorder_point                ↔ reorderPoint
-//   forecasted_demand_next_7_days↔ forecastedDemandNext7Days
-//   model                        ↔ model
-//   status                       ↔ status
-//   last_updated                 ↔ lastUpdated (Timestamp)
-//   last_checkout_at             ↔ lastCheckoutAt (Timestamp, optional)
+// Field shape (snake_case <-> Dart `InventoryItem`):
+//   material_variant_id          <-> materialVariantId
+//   item_type                    <-> itemType
+//   category                     <-> category
+//   tag_uid                      <-> tagUid
+//   sensor_id                    <-> sensorId
+//   current_stock                <-> currentStock
+//   reorder_point                <-> reorderPoint
+//   forecasted_demand_next_7_days<-> forecastedDemandNext7Days
+//   model                        <-> model
+//   status                       <-> status
+//   last_updated                 <-> lastUpdated (Timestamp)
+//   last_checkout_at             <-> lastCheckoutAt (Timestamp, optional)
 //
-// Permission-gated writes belong in `InventoryService` — this file is the
+// Permission-gated writes belong in `InventoryService` - this file is the
 // raw Firestore transport only. RFID check-out events are written by the
 // ESP32 station directly to `rfid_events`; the mobile app does NOT call
 // `recordRfidEvent`.
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/inventory_item.dart';
 
@@ -48,14 +48,21 @@ Stream<List<InventoryItem>> subscribeInventoryStream() {
                     raw['lastCheckoutAt'] == null) {
                   raw['lastCheckoutAt'] = raw['last_checkout_at'];
                 }
-                return InventoryItem.fromJson(<String, dynamic>{
-                  ...raw,
-                  'id': doc.id,
-                  'material_variant_id':
-                      (raw['material_variant_id'] as String?) ?? doc.id,
-                });
+                try {
+                  return InventoryItem.fromJson(<String, dynamic>{
+                    ...raw,
+                    'id': doc.id,
+                    'material_variant_id':
+                        (raw['material_variant_id'] as String?) ?? doc.id,
+                  });
+                } catch (e) {
+                  // One malformed doc must not kill the whole list.
+                  debugPrint('[inventory] Skipping malformed doc ${doc.id}: $e');
+                  return null;
+                }
               },
             )
+            .whereType<InventoryItem>()
             .toList(growable: false),
       );
 }
@@ -76,7 +83,6 @@ Future<void> createVariant(InventoryItem item) async {
     'tag_uid': item.tagUid,
     'sensor_id': item.sensorId,
     'current_stock': item.currentStock,
-    'threshold': item.threshold,
     'reorder_point': item.reorderPoint,
     'forecasted_demand_next_7_days': item.forecastedDemandNext7Days,
     'model': item.model,
@@ -148,12 +154,14 @@ Future<void> deleteVariant(String materialVariantId) async {
 
 /// Recomputes the inventory status pill string from the new stock and ROP.
 ///
-/// Mirrors the web `getInventoryStatus` in `web/src/lib/derived.ts`:
-///   stock <= 0       → 'Insufficient Stock'
-///   stock <  ROP     → 'Low Stock'
-///   stock >= ROP     → 'In Stock'
+/// Mirrors the web `getInventoryStatus` in `web/src/lib/derived.ts` exactly:
+///   stock <= floor(ROP * 0.6) - 'Insufficient Stock'
+///   stock <= ROP              - 'Low Stock'
+///   else                      - 'In Stock'
+/// Both writers must agree or the same stock shows different pills
+/// depending on who wrote last.
 String _statusForStock(int stock, int reorderPoint) {
-  if (stock <= 0) return 'Insufficient Stock';
-  if (stock < reorderPoint) return 'Low Stock';
+  if (stock <= (reorderPoint * 0.6).floor()) return 'Insufficient Stock';
+  if (stock <= reorderPoint) return 'Low Stock';
   return 'In Stock';
 }

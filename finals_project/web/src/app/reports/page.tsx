@@ -19,6 +19,7 @@ import {
  Button,
  ChartCard,
  KpiCard,
+ FeedErrorBanner,
  useToast,
  Modal,
  DataTable,
@@ -30,15 +31,17 @@ import {
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
 import { subscribeOrders } from "@/lib/services/orders";
 import { subscribeInventory } from "@/lib/services/inventory";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import {
   useSparkSeries,
   orderCreatedAtKey,
   inventoryCheckoutKey,
 } from "@/lib/hooks/useSparkSeries";
 import { getInventoryStatus } from "@/lib/derived";
+import { csvRow, downloadCsv } from "@/lib/csv";
 import type { Order, InventoryItem } from "@/types";
 
-const timeRanges = [
+const baseTimeRanges = [
  { id: "week", label: "This Week" },
  { id: "month", label: "This Month" },
  { id: "quarter", label: "This Quarter" },
@@ -75,19 +78,35 @@ export default function ReportsPage() {
   d.setDate(d.getDate() - 19);
   return d.toISOString().slice(0, 10);
  });
- const [customTo, setCustomTo] = useState(todayIso());
- const [orders, setOrders] = useState<Order[]>([]);
- const [inventory, setInventory] = useState<InventoryItem[]>([]);
- const toast = useToast();
+  const [customTo, setCustomTo] = useState(todayIso());
+  const [customOn, setCustomOn] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const toast = useToast();
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsubOrders = subscribeOrders(setOrders);
-  const unsubInv = subscribeInventory(setInventory);
-  return () => {
-   unsubOrders();
-   unsubInv();
-  };
- }, []);
+  const timeRanges = useMemo(
+   () => [
+    ...baseTimeRanges,
+    ...(customOn ? [{ id: "custom", label: "Custom" }] : []),
+   ],
+   [customOn],
+  );
+
+  // Display bounds for the active range (custom uses the picked dates).
+  const rangeLabel = () =>
+   activeRange === "custom"
+    ? `${customFrom} to ${customTo}`
+    : `${rangeStart(activeRange)} to ${todayIso()}`;
+
+  useEffect(() => {
+   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubInv = subscribeInventory(setInventory, onFeedError);
+   return () => {
+    unsubOrders();
+    unsubInv();
+   };
+  }, [feedNonce, onFeedError]);
 
  const lowStock = useMemo(
   () =>
@@ -104,7 +123,7 @@ export default function ReportsPage() {
   (o) => o.status === "In Production" || o.status === "Ready for Pickup",
  ).length;
 
- // Live sparkline series — last 7 days, local TZ.
+ // Live sparkline series - last 7 days, local TZ.
  const ordersSpark = useSparkSeries(orders, orderCreatedAtKey, 7);
  const pendingSpark = useSparkSeries(
   orders.filter((o) =>
@@ -159,15 +178,19 @@ export default function ReportsPage() {
  null | "total" | "pending" | "completed" | "lowStock"
  >(null);
 
- const rangeFilter = (iso: string) => {
-  const start = rangeStart(activeRange);
-  return iso >= start && iso <= todayIso();
- };
+  const rangeFilter = (iso: string) => {
+   if (activeRange === "custom") {
+    return iso >= customFrom && iso <= customTo;
+   }
+   const start = rangeStart(activeRange);
+   return iso >= start && iso <= todayIso();
+  };
 
- const ordersInRange = useMemo(
-  () => orders.filter((o) => rangeFilter(o.target_date)),
-  [orders, activeRange],
- );
+  const ordersInRange = useMemo(
+   () => orders.filter((o) => rangeFilter(o.target_date)),
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   [orders, activeRange, customOn, customFrom, customTo],
+  );
  const inventoryInRange = useMemo(
   () =>
    inventory.filter(
@@ -217,18 +240,10 @@ export default function ReportsPage() {
    "status",
    ];
   const lines = [
-  headers.join(","),
-  ...rows.map((r: any) => headers.map((h) => `"${r[h] ?? ""}"`).join(",")),
+   headers.join(","),
+   ...rows.map((r: any) => csvRow(headers.map((h) => r[h] ?? ""))),
   ];
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${todayIso()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  downloadCsv(`${label.toLowerCase().replace(/\s+/g, "-")}-${todayIso()}.csv`, lines);
   toast.success(`Exported ${rows.length} rows`);
  };
 
@@ -240,16 +255,20 @@ export default function ReportsPage() {
   };
   window.addEventListener("afterprint", cleanup);
   window.print();
-  toast.success(`Generating ${label} (PDF) — use the browser print dialog`);
+  toast.success(`Generating ${label} (PDF) - use the browser print dialog`);
  };
 
- const handleCustomRangeApply = () => {
-  if (!customFrom || !customTo || customFrom > customTo) {
-   toast.error("Invalid date range");
-   return;
-  }
-  toast.success(`Custom range applied: ${customFrom} → ${customTo}`);
- };
+  const handleCustomRangeApply = () => {
+   if (!customFrom || !customTo || customFrom > customTo) {
+    toast.error("Invalid date range");
+    return;
+   }
+   // Actually switch the page onto the custom window (previously this
+   // only toasted while every filter kept using the preset range).
+   setCustomOn(true);
+   setActiveRange("custom");
+   toast.success(`Custom range applied: ${customFrom} - ${customTo}`);
+  };
 
  const orderColumns: {
   key: string;
@@ -350,12 +369,19 @@ export default function ReportsPage() {
   },
  };
 
- return (
-  <AdminLayout
-   title="Reports"
-   subtitle="Generate and download operational reports"
-  >
-   <div className="space-y-8">
+  return (
+   <AdminLayout
+    title="Reports"
+    subtitle="Generate and download operational reports"
+   >
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={orders.length > 0 || inventory.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <div className="space-y-8">
     <ContentCard title="Generate Report">
      <FilterToolbar
       tabs={timeRanges}
@@ -443,7 +469,7 @@ export default function ReportsPage() {
          data={priorityBreakdown}
          xKey="name"
          yKeys={["value"]}
-         colors={["#00535b"]}
+         colors={["var(--color-printflow-on-surface)"]}
          height={260}
          showLegend={false}
         />
@@ -501,7 +527,7 @@ export default function ReportsPage() {
          data={productionSummary}
          xKey="name"
          yKeys={["value"]}
-         colors={["#ed6c02", "#00535b", "#2e7d32"]}
+         colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)", "var(--color-printflow-outline)"]}
          height={260}
         />
        )}
@@ -562,11 +588,25 @@ export default function ReportsPage() {
 
     <ContentCard title="Recent Generated Reports">
      <div className="space-y-3 text-sm">
-      {[
-       { name: `Orders ${rangeStart(activeRange)} to ${todayIso()}`, type: "Orders", format: "PDF" },
-       { name: `Inventory ${rangeStart(activeRange)} to ${todayIso()}`, type: "Inventory", format: "CSV" },
-       { name: `Production ${rangeStart(activeRange)} to ${todayIso()}`, type: "Production", format: "PDF" },
-      ].map((r) => (
+      {(
+       [
+        {
+         name: `Orders ${rangeLabel()}`,
+         format: "PDF",
+         run: () => handleDownloadPDF("Orders Report"),
+        },
+        {
+         name: `Inventory ${rangeLabel()}`,
+         format: "CSV",
+         run: () => handleDownloadCSV(inventoryInRange, "Inventory Report"),
+        },
+        {
+         name: `Production ${rangeLabel()}`,
+         format: "PDF",
+         run: () => handleDownloadPDF("Production Report"),
+        },
+       ]
+      ).map((r) => (
        <div
         key={r.name}
         className="flex items-center justify-between gap-3 p-3.5 bg-printflow-surface-container rounded-xl border border-printflow-outline-variant/30"
@@ -577,7 +617,8 @@ export default function ReportsPage() {
         <Button
          variant="ghost"
          size="sm"
-         onClick={() => toast.success(`Downloading ${r.name}`)}
+         onClick={r.run}
+         aria-label={`Download ${r.name}`}
         >
          <Download className="w-4 h-4" />
         </Button>
@@ -622,29 +663,31 @@ export default function ReportsPage() {
       </div>
      }
     >
-     {drillDown.length === 0 ? (
-      <div className="py-10 text-center">
-       <EmptyState
-        icon={<Inbox className="w-7 h-7" />}
-        title="No data in this range"
-        description="Try a wider range, or check back once orders come in."
+      {drillDown.length === 0 ? (
+       <div className="py-10 text-center">
+        <EmptyState
+         icon={<Inbox className="w-7 h-7" />}
+         title="No data in this range"
+         description="Try a wider range, or check back once orders come in."
+        />
+       </div>
+      ) : kpiModal === "lowStock" ? (
+       <DataTable
+        columns={inventoryColumns as any}
+        data={drillDown as InventoryItem[]}
+        keyExtractor={(r) => r.material_variant_id}
+        emptyMessage="No low stock items in range"
+        pageSize={10}
        />
-      </div>
-     ) : kpiModal === "lowStock" ? (
-      <DataTable
-       columns={inventoryColumns as any}
-       data={drillDown as InventoryItem[]}
-       keyExtractor={(r) => r.material_variant_id}
-       emptyMessage="No low stock items in range"
-      />
-     ) : (
-      <DataTable
-       columns={orderColumns as any}
-       data={drillDown as Order[]}
-       keyExtractor={(r) => r.order_id}
-       emptyMessage="No orders in range"
-      />
-     )}
+      ) : (
+       <DataTable
+        columns={orderColumns as any}
+        data={drillDown as Order[]}
+        keyExtractor={(r) => r.order_id}
+        emptyMessage="No orders in range"
+        pageSize={10}
+       />
+      )}
     </Modal>
    </div>
   </AdminLayout>

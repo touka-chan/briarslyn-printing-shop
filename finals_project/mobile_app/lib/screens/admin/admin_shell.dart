@@ -12,26 +12,44 @@ import 'admin_dashboard.dart';
 /// management) lives in the web app. On mobile we show a single
 /// [AdminDashboard] panel plus a profile tab, behind the standard
 /// [RoleHomeShell] chrome.
-class AdminShellScreen extends StatelessWidget {
+class AdminShellScreen extends StatefulWidget {
   const AdminShellScreen({super.key});
+
+  @override
+  State<AdminShellScreen> createState() => _AdminShellScreenState();
+}
+
+class _AdminShellScreenState extends State<AdminShellScreen> {
+  /// Fires at most once per shell instance. Without this, every rebuild
+  /// while signed out schedules another post-frame push (each one calling
+  /// logout again, which notifies again) and the login screen stacks /
+  /// replays its transition nonstop.
+  bool _redirectScheduled = false;
 
   @override
   Widget build(BuildContext context) {
     final auth = AuthProvider.of(context);
 
-    if (!auth.isAdminOrOwner) {
-      // Mismatched role — bounce back to login. Should not happen in
-      // practice because login routes to the role's homeRoute, but guards
-      // against deep links.
+    // Mismatched role - bounce to the session's own home (or login when
+    // signed out). Should not happen in practice because login routes to
+    // the role's homeRoute, but guards against deep links. Only acts on
+    // definitive states so a transient null profile never bounces a
+    // signed-in user, and never mutates auth - navigation only.
+    final signedOut = auth.currentUid == null;
+    final wrongRole = auth.currentUser != null && !auth.isAdminOrOwner;
+    if ((signedOut || wrongRole) && !_redirectScheduled) {
+      _redirectScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          auth.logout();
-          Navigator.pushNamedAndRemoveUntil(
-            context,
-            AppRoutes.login,
-            (route) => false,
-          );
-        }
+        if (!mounted) return;
+        final target = wrongRole && auth.currentRole != null
+            ? auth.currentRole!.homeRoute
+            : AppRoutes.login;
+        if (ModalRoute.of(context)?.settings.name == target) return;
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          target,
+          (route) => false,
+        );
       });
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),

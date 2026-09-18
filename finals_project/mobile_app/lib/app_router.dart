@@ -21,7 +21,6 @@ class AppRoutes {
 
   // Auth
   static const String login = '/login';
-  static const String loginKey = '/login';
   static const String noProfile = '/auth/no-profile';
 
   // Admin / Owner
@@ -62,7 +61,7 @@ class AppRouter {
       case AppRoutes.adminHome:
         return _pageRoute(settings, (_) => const AdminShellScreen());
 
-      // Cashier — single shell with bottom nav, plus standalone deep-links
+      // Cashier - single shell with bottom nav, plus standalone deep-links
       case AppRoutes.cashierHome:
         return _pageRoute(settings, (_) => const CashierShellScreen());
       case AppRoutes.cashierNewOrder:
@@ -72,7 +71,7 @@ class AppRouter {
       case AppRoutes.cashierCustomers:
         return _pageRoute(settings, (_) => const CashierCustomersScreen());
 
-      // Production — single shell with bottom nav
+      // Production - single shell with bottom nav
       case AppRoutes.productionHome:
       case AppRoutes.productionQueue:
       case AppRoutes.productionInventory:

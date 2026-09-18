@@ -17,16 +17,24 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
- ContentCard,
- Button,
- StatusBadge,
- EmptyState,
- PriorityBadge,
- PaymentBadge,
- useToast,
+  ContentCard,
+  Button,
+  StatusBadge,
+  EmptyState,
+  PriorityBadge,
+  PaymentBadge,
+  FeedErrorBanner,
+  LayoutPreview,
+  useToast,
 } from "@/components/ui";
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
-import { subscribeOrder, updateOrderStatus } from "@/lib/services/orders";
+import {
+ subscribeOrder,
+ subscribeOrders,
+ updateOrderStatus,
+} from "@/lib/services/orders";
+import { useFeedStatus } from "@/lib/useFeedStatus";
+import { isActiveStatus } from "@/lib/derived";
 import { Order } from "@/types";
 
 const STEPS = [
@@ -50,29 +58,68 @@ export default function OrderDetailPage() {
  const id = params.id as string;
  const toast = useToast();
 
- const [order, setOrder] = useState<Order | null | undefined>(undefined);
- const [status, setStatus] = useState<Step | undefined>(undefined);
- const [saving, setSaving] = useState(false);
+  const [order, setOrder] = useState<Order | null | undefined>(undefined);
+  const [queue, setQueue] = useState<Order[]>([]);
+  const [status, setStatus] = useState<Step | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsub = subscribeOrder(id, (row) => {
-   setOrder(row);
-   if (row) setStatus(row.status as Step);
-  });
-  return () => unsub();
- }, [id]);
+  useEffect(() => {
+   const unsub = subscribeOrder(id, (row) => {
+    setOrder(row);
+    if (row) setStatus(row.status as Step);
+   }, onFeedError);
+   return () => unsub();
+  }, [id, feedNonce, onFeedError]);
 
- if (order === undefined) {
-  return (
-   <AdminLayout title="Loading…" subtitle={`Order ${id}`}>
-    <div className="flex items-center justify-center py-20">
-     <Loader2 className="w-8 h-8 text-printflow-primary animate-spin" />
-    </div>
-   </AdminLayout>
-  );
- }
+  // Full-queue subscription so the ETA shown here is the SAME queue-aware
+  // value the lists show. subscribeOrder derives ETA against a standalone
+  // (rank-0, cold-start) context, which disagrees whenever backlog or
+  // completion history exists.
+  useEffect(() => {
+   const unsubQueue = subscribeOrders(setQueue, onFeedError);
+   return () => unsubQueue();
+  }, [feedNonce, onFeedError]);
 
- if (order === null) {
+  // Single undefined guard (a split `=== undefined && !feedError` /
+  // `=== undefined && feedError` pair does not narrow for TS) - the error
+  // branch renders inside when the feed failed.
+  if (order === undefined) {
+   if (feedError) {
+    return (
+     <AdminLayout title="Couldn't load order" subtitle={`Order ${id}`}>
+      <FeedErrorBanner
+       message={feedError}
+       onRetry={retryFeed}
+      />
+      <ContentCard className="text-center py-16">
+       <EmptyState
+        icon={<AlertTriangle className="w-8 h-8" />}
+        title="Couldn't load this order"
+        description="Check your connection and permissions, then retry."
+        action={
+         <Link href="/orders">
+          <Button variant="secondary">
+           <ArrowLeft className="w-4 h-4 mr-2" />
+           Back to Orders
+          </Button>
+         </Link>
+        }
+       />
+      </ContentCard>
+     </AdminLayout>
+    );
+   }
+   return (
+    <AdminLayout title="Loading..." subtitle={`Order ${id}`}>
+     <div className="flex items-center justify-center py-20">
+      <Loader2 className="w-8 h-8 text-printflow-primary animate-spin" />
+     </div>
+    </AdminLayout>
+   );
+  }
+
+  if (order === null) {
   return (
    <AdminLayout title="Order Not Found" subtitle={`No order ${id}`}>
     <ContentCard className="text-center py-16">
@@ -94,29 +141,53 @@ export default function OrderDetailPage() {
   );
  }
 
- const currentIdx = status ? STEPS.indexOf(status) : -1;
+  // Prefer the queue-computed ETA (identical to list views) over the
+  // standalone estimate whenever this order is active in the queue. The
+  // merged `shown` order feeds EVERYTHING below (ETA card + timeline), so
+  // no two dates on this page can disagree.
+  const queued =
+   queue.find((o) => o.order_id === order?.order_id) ??
+   queue.find((o) => o.id === id);
+  const shown: Order =
+   queued && isActiveStatus(queued.status)
+    ? {
+       ...order,
+       estimated_completion: queued.estimated_completion,
+       based_on: queued.based_on,
+      }
+    : order;
+  const shownEta = shown.estimated_completion;
+  const shownBasedOn = shown.based_on;
 
- const advance = async () => {
-  if (!status) return;
-  const idx = STEPS.indexOf(status);
-  if (idx < 0 || idx >= STEPS.length - 1) return;
-  const next = STEPS[idx + 1];
-  setStatus(next);
-  setSaving(true);
-  try {
-   await updateOrderStatus(order.order_id, next);
-   toast.success(`Order ${order.order_id} moved to ${next}`);
-  } catch (e) {
-   toast.error("Failed to update status — please try again.");
-  } finally {
-   setSaving(false);
-  }
- };
+  const currentIdx = status ? STEPS.indexOf(status) : -1;
+
+  const advance = async () => {
+   if (!status) return;
+   const idx = STEPS.indexOf(status);
+   if (idx < 0 || idx >= STEPS.length - 1) return;
+   const next = STEPS[idx + 1];
+   setStatus(next);
+   setSaving(true);
+   try {
+    await updateOrderStatus(order.order_id, next);
+    toast.success(`Order ${order.order_id} moved to ${next}`);
+   } catch (e) {
+    // Roll back the optimistic stepper so the UI matches the server.
+    setStatus(order.status as Step);
+    toast.error(
+     e instanceof Error && e.message
+      ? `Failed to update status: ${e.message}`
+      : "Failed to update status - please try again.",
+    );
+   } finally {
+    setSaving(false);
+   }
+  };
 
  return (
   <AdminLayout
    title={`${order.order_id}`}
-   subtitle={`${order.customer_name} • ${order.item_type}`}
+   subtitle={`${order.customer_name} - ${order.item_type}`}
   >
    <Link
     href="/orders"
@@ -157,13 +228,15 @@ export default function OrderDetailPage() {
         <p>{order.quantity}</p>
        </div>
       </div>
-      <div className="flex gap-2">
-       <FileText className="w-4 h-4 text-printflow-primary mt-0.5" />
-       <div>
-        <p className="text-xs text-printflow-on-surface-variant">Layout File</p>
-        <p className="underline decoration-dotted">{order.layout_file}</p>
+       <div className="flex gap-2">
+        <FileText className="w-4 h-4 text-printflow-primary mt-0.5" />
+        <div className="min-w-0">
+         <p className="text-xs text-printflow-on-surface-variant">Layout File</p>
+         <div className="mt-1">
+          <LayoutPreview value={order.layout_file} size={96} />
+         </div>
+        </div>
        </div>
-      </div>
      </div>
     </ContentCard>
 
@@ -197,14 +270,14 @@ export default function OrderDetailPage() {
        <p className="text-xs text-printflow-on-surface-variant">
         Estimated Completion
        </p>
-       <p className="text-lg font-bold text-printflow-primary">
-        {order.estimated_completion}
-       </p>
-       {order.based_on && order.based_on.length > 0 && (
-        <p className="text-[10px] text-printflow-on-surface-variant mt-1">
-         Based on: {order.based_on.join(", ")}
+        <p className="text-lg font-bold text-printflow-primary">
+         {shownEta}
         </p>
-       )}
+        {shownBasedOn && shownBasedOn.length > 0 && (
+         <p className="text-[10px] text-printflow-on-surface-variant mt-1">
+          Based on: {shownBasedOn.join(", ")}
+         </p>
+        )}
       </div>
       <div>
        <p className="text-xs text-printflow-on-surface-variant">Payment</p>
@@ -249,7 +322,7 @@ export default function OrderDetailPage() {
     </ContentCard>
    </div>
 
-   <ContentCard title="Status Timeline" subtitle="Workflow IV — Order lifecycle">
+   <ContentCard title="Status Timeline" subtitle="Workflow IV - Order lifecycle">
     <ol className="space-y-2" role="list">
      {STEPS.map((s, i) => {
       const done = i <= currentIdx;
@@ -287,11 +360,11 @@ export default function OrderDetailPage() {
          >
           {s}
          </p>
-         {done && (
-          <p className="text-xs text-printflow-on-surface-variant">
-           {STEP_DATES[s](order)}
-          </p>
-         )}
+          {done && (
+           <p className="text-xs text-printflow-on-surface-variant">
+            {STEP_DATES[s](shown)}
+           </p>
+          )}
         </div>
         {isCurrent && (
          <span className="text-[10px] px-2 py-0.5 rounded-full bg-printflow-primary text-printflow-on-primary font-semibold">

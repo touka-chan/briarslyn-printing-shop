@@ -11,7 +11,7 @@ import '../../utils/animations.dart';
 
 /// The Customers list screen for the POS Cashier.
 ///
-/// In the Firestore schema, there is no dedicated `customers/` collection —
+/// In the Firestore schema, there is no dedicated `customers/` collection -
 /// customer profiles are captured per-order at order-entry time. So this
 /// screen derives the customer list live by grouping the `orders/` collection
 /// on `customerName`. An "Add Customer" action is intentionally not provided
@@ -26,6 +26,7 @@ class CashierCustomersScreen extends StatefulWidget {
 
 class _CashierCustomersScreenState extends State<CashierCustomersScreen> {
   String _searchQuery = '';
+  int _feedNonce = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -34,8 +35,27 @@ class _CashierCustomersScreenState extends State<CashierCustomersScreen> {
       body: SafeArea(
         bottom: false,
         child: StreamBuilder<List<Order>>(
+          key: ValueKey('orders-$_feedNonce'),
           stream: fb_orders.subscribeOrdersStream(),
           builder: (context, snap) {
+            if (snap.hasError) {
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                  AppSpacing.xxl,
+                ),
+                children: [
+                  PfErrorCard(
+                    message:
+                        'Live customers failed to load. Check your connection and permissions.',
+                    details: '${snap.error}',
+                    onRetry: () => setState(() => _feedNonce++),
+                  ),
+                ],
+              );
+            }
             final orders = snap.data ?? const <Order>[];
             final customers = _buildCustomers(orders);
             final filtered = _filter(customers);
@@ -77,9 +97,9 @@ class _CashierCustomersScreenState extends State<CashierCustomersScreen> {
     );
   }
 
-  // ──────────────────────────────────────────────
-  // Derivation: orders → customers
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
+  // Derivation: orders - customers
+  // ----------------------------------------------
   List<_Customer> _buildCustomers(List<Order> orders) {
     final byName = <String, _CustomerAcc>{};
     for (final o in orders) {
@@ -147,9 +167,9 @@ class _CashierCustomersScreenState extends State<CashierCustomersScreen> {
     }).toList();
   }
 
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   // Header / search / empty state
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
   Widget _buildHeader(BuildContext context, {required int customerCount}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -284,7 +304,7 @@ class _CashierCustomersScreenState extends State<CashierCustomersScreen> {
   }
 }
 
-/// A derived customer — not a stored entity, just an aggregation of orders.
+/// A derived customer - not a stored entity, just an aggregation of orders.
 class _Customer {
   const _Customer({
     required this.name,
@@ -342,7 +362,7 @@ class _CustomerListTile extends StatelessWidget {
     if (customer.lastOrderDate != null) {
       subtitleParts.add('last ${_fmt(customer.lastOrderDate!)}');
     }
-    final subtitle = subtitleParts.join(' • ');
+    final subtitle = subtitleParts.join(' - ');
 
     return PressScale(
       onTap: onTap,
@@ -378,7 +398,7 @@ class _CustomerListTile extends StatelessWidget {
                       [
                         if (customer.email != null) customer.email!,
                         if (customer.phone != null) customer.phone!,
-                      ].join(' • '),
+                      ].join(' - '),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: AppTheme.onSurfaceVariant,
                           ),

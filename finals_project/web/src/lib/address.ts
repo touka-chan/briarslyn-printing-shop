@@ -1,4 +1,4 @@
-// Address data loader — fetches the PSGC (Philippine Standard Geographic
+// Address data loader - fetches the PSGC (Philippine Standard Geographic
 // Code) JSON files from /public/Address at runtime. The files are not
 // imported into the bundle to keep the client small: barangay.json is 4.6 MB.
 //
@@ -38,7 +38,7 @@ export type Barangay = {
 
 // city_zip_map.json is a flat object keyed by PSGC city code, with the
 // Philippine zip code as the value (e.g. { "140101": "2800", ... }).
-// This is the authoritative source for the zip auto-fill — the old
+// This is the authoritative source for the zip auto-fill - the old
 // ph-zip-codes.json used free-text "area" strings that didn't match
 // the city code returned by city.json, so the lookup was unreliable.
 export type CityZipMap = Record<string, string>;
@@ -155,7 +155,7 @@ export async function loadCityZipMap(): Promise<CityZipMap> {
   return _cityZipsPromise;
 }
 
-// Filter helpers — pre-filter the cached list to the selected parent so the
+// Filter helpers - pre-filter the cached list to the selected parent so the
 // dropdown options stay small (e.g., only show provinces for the selected
 // region). Returns a fresh array so callers can sort/mutate without leaking
 // into the cache.
@@ -203,7 +203,7 @@ export async function findZip(
   const cn = cityName.trim().toLowerCase();
   // The map is keyed by PSGC code, so we need to find the city whose name
   // (case-insensitive) matches. For callers that have a city_code, use
-  // findZipByCode instead — it's exact and cheaper.
+  // findZipByCode instead - it's exact and cheaper.
   const cities = await loadCities();
   const match = cities.find((c) => c.city_name.toLowerCase() === cn);
   if (match) return map[match.city_code] ?? null;

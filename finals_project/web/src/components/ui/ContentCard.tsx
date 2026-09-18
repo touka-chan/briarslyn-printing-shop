@@ -17,7 +17,7 @@ export function ContentCard({ title, subtitle, action, children, className = "",
    {(title || action) && (
     <div className={`px-6 py-4 border-b border-printflow-outline-variant flex items-center justify-between ${headerClassName}`}>
      <div>
-      {title && <h3 className="text-lg font-semibold text-printflow-on-surface">{title}</h3>}
+      {title && <h3 className="font-display text-lg font-semibold text-printflow-on-surface">{title}</h3>}
       {subtitle && <p className="text-sm text-printflow-on-surface-variant mt-0.5">{subtitle}</p>}
      </div>
      {action && <div>{action}</div>}

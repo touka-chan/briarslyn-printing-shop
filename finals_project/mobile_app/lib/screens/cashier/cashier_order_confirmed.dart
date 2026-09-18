@@ -44,13 +44,13 @@ class _CashierOrderConfirmedScreenState
     super.initState();
     HapticFeedback.heavyImpact();
 
-    // Drives the checkmark stroke animation (0 → 1).
+    // Drives the checkmark stroke animation (0 - 1).
     _drawController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
 
-    // Drives the confetti burst (0 → 1, then restarts on a curve).
+    // Drives the confetti burst (0 - 1, then restarts on a curve).
     _burstController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -163,7 +163,7 @@ class _CashierOrderConfirmedScreenState
                             ),
                       ),
                       const SizedBox(height: AppSpacing.xl),
-                      // Inventory warning — proposal §VII "insufficient stock indicator"
+                      // Inventory warning - proposal Sec.VII "insufficient stock indicator"
                       // continues here so the cashier cannot forget to flag the order.
                       if (widget.insufficientStock) ...[
                         Container(
@@ -225,7 +225,7 @@ class _CashierOrderConfirmedScreenState
                         child: _NextStepsCard(),
                       ),
                       const SizedBox(height: AppSpacing.xl),
-                      // Manual "Done" button — auto-pops after a delay but
+                      // Manual "Done" button - auto-pops after a delay but
                       // user can dismiss earlier.
                       SizedBox(
                         width: double.infinity,
@@ -298,7 +298,7 @@ class _AnimatedCheckBadge extends StatelessWidget {
   }
 }
 
-/// Paints the checkmark stroke at [progress] (0.0 → 1.0).
+/// Paints the checkmark stroke at [progress] (0.0 - 1.0).
 class _CheckmarkPainter extends CustomPainter {
   _CheckmarkPainter({required this.progress});
 
@@ -308,7 +308,7 @@ class _CheckmarkPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (progress <= 0) return;
 
-    // Checkmark path: two strokes (down-left → mid → up-right).
+    // Checkmark path: two strokes (down-left - mid - up-right).
     final start = Offset(size.width * 0.28, size.height * 0.54);
     final mid = Offset(size.width * 0.46, size.height * 0.70);
     final end = Offset(size.width * 0.74, size.height * 0.38);
@@ -444,7 +444,7 @@ class _NextStepsCard extends StatelessWidget {
             icon: Icons.notifications_active_outlined,
             title: 'Status updates',
             subtitle:
-                'Track progress from Pending → In Production → Ready for Pickup.',
+                'Track progress from Pending - In Production - Ready for Pickup.',
           ),
         ],
       ),

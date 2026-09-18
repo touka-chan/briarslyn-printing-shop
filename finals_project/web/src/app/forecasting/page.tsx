@@ -3,93 +3,149 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, AlertTriangle, TrendingUp, Package } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, DataTable, ChartCard, Button, KpiCard, Modal, StatusBadge } from "@/components/ui";
+import { ContentCard, FilterToolbar, DataTable, ChartCard, Button, KpiCard, Modal, StatusBadge, FeedErrorBanner, useToast } from "@/components/ui";
+import { csvRow, downloadCsv } from "@/lib/csv";
 import { subscribeInventory } from "@/lib/services/inventory";
+import { subscribeRfidEvents } from "@/lib/services/rfid";
+import { subscribeUsageEvents } from "@/lib/services/usage";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import {
   useSparkSeries,
   inventoryCheckoutKey,
 } from "@/lib/hooks/useSparkSeries";
 import { getInventoryStatus } from "@/lib/derived";
+import { FORECAST_PARAMS, forecastVariantDemand } from "@/lib/forecast";
 import { InventoryItem } from "@/types";
+import type { RfidCheckoutEvent, UsageEvent } from "@/types";
 
 export default function ForecastingPage() {
  const [active, setActive] = useState("All");
  const [search, setSearch] = useState("");
  const [showSource, setShowSource] = useState(false);
  const [kpiModal, setKpiModal] = useState<string | null>(null);
- const [inventory, setInventory] = useState<InventoryItem[]>([]);
+   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+   const [events, setEvents] = useState<RfidCheckoutEvent[]>([]);
+   const [usage, setUsage] = useState<UsageEvent[]>([]);
+   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsub = subscribeInventory(setInventory);
-  return () => unsub();
- }, []);
+  useEffect(() => {
+   const unsub = subscribeInventory(setInventory, onFeedError);
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
 
- // Live sparkline series — checkout history per day for the last 7 days.
+  // Checkout history feeding the live forecast. Larger window than the
+  // sensor screen's 50-event cap - the model consumes up to 28 days.
+  useEffect(() => {
+   const unsub = subscribeRfidEvents(setEvents, 500, onFeedError);
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
+  useEffect(() => {
+   const unsub = subscribeUsageEvents(setUsage, 500, onFeedError);
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
+
+  // Demand signal: usage OUT movements (auto-deduct/manual/rfid) first;
+  // legacy RFID taps count only for variants with no usage history yet
+  // (afterwards taps are check-ins, not demand - no double count).
+  const demandEvents = useMemo(() => {
+   const out = usage.filter((u) => u.direction === "out");
+   const withUsage = new Set(out.map((u) => u.material_variant_id));
+   const mapped: RfidCheckoutEvent[] = out.map((u) => ({
+    id: u.id ?? `${u.material_variant_id}-${u.timestamp ?? ""}`,
+    material_variant_id: u.material_variant_id,
+    tag_uid: "",
+    sensor_id: "",
+    timestamp: u.timestamp ?? new Date().toISOString(),
+   }));
+   const taps = events.filter((e) => !withUsage.has(e.material_variant_id));
+   return [...mapped, ...taps];
+  }, [usage, events]);
+
+  // Live per-variant forecast computed from real consumption:
+  // Holt-Winters on >= 2 weeks of history, single exponential smoothing
+  // on thin history, stored planning values when a variant has no usage yet.
+  const liveInventory = useMemo(() => {
+   if (demandEvents.length === 0) return inventory;
+   return inventory.map((item) => {
+    const f = forecastVariantDemand(demandEvents, item.material_variant_id);
+    if (!f.hasHistory) return item;
+    return {
+     ...item,
+     reorder_point: f.rop,
+     forecasted_demand_next_7_days: f.forecast7d,
+     model: f.model,
+     };
+    });
+   }, [inventory, demandEvents]);
+
+ // Live sparkline series - checkout history per day for the last 7 days.
  const reorderSeries = useSparkSeries(
-  inventory.filter((i) => i.current_stock <= i.reorder_point),
+  liveInventory.filter((i) => i.current_stock <= i.reorder_point),
   inventoryCheckoutKey,
   7,
  );
  const insufficientSeries = useSparkSeries(
-  inventory.filter((i) => getInventoryStatus(i) === "Insufficient Stock"),
+  liveInventory.filter((i) => getInventoryStatus(i) === "Insufficient Stock"),
   inventoryCheckoutKey,
   7,
  );
- // Model coverage (count over time) — flatten to current size per day so the
- // sparkline shows variant coverage instead of bucketed events.
- const holtWintersSeries = inventory.filter((i) => i.model === "Holt-Winters")
-  .length
-  ? [1, 1, 1, 1, 1, 1, 1]
-  : [0, 0, 0, 0, 0, 0, 0];
+  // Model activity - real per-day checkout events for Holt-Winters
+  // variants over the last 7 days (a flat line now means no recent
+  // checkouts, not a placeholder).
+  const holtWintersSeries = useSparkSeries(
+   liveInventory.filter((i) => i.model === "Holt-Winters"),
+   inventoryCheckoutKey,
+   7,
+  );
  const forecastDemandTotal = useMemo(
   () =>
-   inventory.reduce(
+   liveInventory.reduce(
     (sum, i) => sum + (i.forecasted_demand_next_7_days ?? 0),
     0,
    ),
-  [inventory],
+  [liveInventory],
  );
- const forecast7dSeries = useSparkSeries(inventory, inventoryCheckoutKey, 7);
+ const forecast7dSeries = useSparkSeries(liveInventory, inventoryCheckoutKey, 7);
 
  const tabs = useMemo(
   () => [
-   { id: "All", label: "All", count: inventory.length },
+   { id: "All", label: "All", count: liveInventory.length },
    {
     id: "Tarpaulin",
     label: "Tarpaulin",
-    count: inventory.filter((i) => i.category === "Tarpaulin").length,
+    count: liveInventory.filter((i) => i.category === "Tarpaulin").length,
    },
    {
     id: "Ink",
     label: "Ink",
-    count: inventory.filter((i) => i.category === "Ink").length,
+    count: liveInventory.filter((i) => i.category === "Ink").length,
    },
    {
     id: "Paper",
     label: "Paper",
-    count: inventory.filter((i) => i.category === "Paper").length,
+    count: liveInventory.filter((i) => i.category === "Paper").length,
    },
    {
     id: "Mug",
     label: "Mug",
-    count: inventory.filter((i) => i.category === "Mug").length,
+    count: liveInventory.filter((i) => i.category === "Mug").length,
    },
    {
     id: "Shirt",
     label: "Shirt",
-    count: inventory.filter((i) => i.category === "Shirt").length,
-   },
-  ],
-  [inventory],
- );
+    count: liveInventory.filter((i) => i.category === "Shirt").length,
+    },
+   ],
+   [liveInventory],
+  );
 
- const filtered = useMemo(
-  () =>
-   active === "All"
-    ? inventory
-    : inventory.filter((i) => i.category === active),
-  [inventory, active],
- );
+  const filtered = useMemo(
+   () =>
+    active === "All"
+     ? liveInventory
+     : liveInventory.filter((i) => i.category === active),
+   [liveInventory, active],
+  );
  const searched = useMemo(
   () =>
    filtered.filter(
@@ -102,20 +158,20 @@ export default function ForecastingPage() {
   [filtered, search],
  );
  const atRisk = useMemo(
-  () => inventory.filter((i) => i.current_stock <= i.reorder_point),
-  [inventory],
+  () => liveInventory.filter((i) => i.current_stock <= i.reorder_point),
+  [liveInventory],
  );
  const critical = useMemo(
-  () => inventory.filter((i) => getInventoryStatus(i) === "Insufficient Stock"),
-  [inventory],
+  () => liveInventory.filter((i) => getInventoryStatus(i) === "Insufficient Stock"),
+  [liveInventory],
  );
  const holtWinters = useMemo(
-  () => inventory.filter((i) => i.model === "Holt-Winters"),
-  [inventory],
+  () => liveInventory.filter((i) => i.model === "Holt-Winters"),
+  [liveInventory],
  );
  const expSmooth = useMemo(
-  () => inventory.filter((i) => i.model === "Exponential Smoothing"),
-  [inventory],
+  () => liveInventory.filter((i) => i.model === "Exponential Smoothing"),
+  [liveInventory],
  );
 
  const cols = [
@@ -128,16 +184,56 @@ export default function ForecastingPage() {
   { key: "sensor_id", header: "Sensor" },
  ];
 
- const statusCols = [
-  { key: "material_variant_id", header: "Variant ID", render: (r:InventoryItem)=><span className="font-mono text-xs">{r.material_variant_id}</span> },
-  { key: "item_type", header: "Item Type" },
-  { key: "current_stock", header: "Stock" },
-  { key: "reorder_point", header: "ROP" },
-  { key: "status", header: "Status", render: (r:InventoryItem)=><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} /> },
- ];
+  const statusCols = [
+   { key: "material_variant_id", header: "Variant ID", render: (r:InventoryItem)=><span className="font-mono text-xs">{r.material_variant_id}</span> },
+   { key: "item_type", header: "Item Type" },
+   { key: "current_stock", header: "Stock" },
+   { key: "reorder_point", header: "ROP" },
+   { key: "status", header: "Status", render: (r:InventoryItem)=><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} /> },
+  ];
 
-  return (
-   <AdminLayout title="Forecasting" subtitle="Inventory forecasts and reorder planning" headerActions={<Button variant="secondary"><Download className="w-4 h-4" />Export</Button>} onSearch={setSearch}>
+  const toast = useToast();
+
+  const handleExport = () => {
+   if (searched.length === 0) return;
+   const headers = [
+    "material_variant_id",
+    "item_type",
+    "category",
+    "current_stock",
+    "reorder_point",
+    "forecast_7d",
+    "model",
+    "status",
+   ];
+   const lines = [
+    headers.join(","),
+    ...searched.map((i) =>
+     csvRow([
+      i.material_variant_id,
+      i.item_type,
+      i.category,
+      i.current_stock,
+      i.reorder_point,
+      i.forecasted_demand_next_7_days ?? "",
+      i.model ?? "",
+      getInventoryStatus(i),
+     ]),
+    ),
+   ];
+   downloadCsv(`forecast-${new Date().toISOString().slice(0, 10)}.csv`, lines);
+   toast.success(`Exported ${searched.length} forecast rows`);
+  };
+
+   return (
+    <AdminLayout title="Forecasting" subtitle="Inventory forecasts and reorder planning" headerActions={<Button variant="secondary" onClick={handleExport} disabled={searched.length === 0}><Download className="w-4 h-4" />Export</Button>} onSearch={setSearch}>
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={inventory.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
     <div className="grid grid-cols-4 gap-4 mb-6">
      <KpiCard
       label="Need Reorder"
@@ -189,40 +285,41 @@ export default function ForecastingPage() {
      />
     </div>
 
-    <Modal isOpen={kpiModal==="reorder"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${atRisk.length} items • stock ≤ ROP`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={statusCols} data={atRisk} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" />
+    <Modal isOpen={kpiModal==="reorder"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${atRisk.length} items - stock <= ROP`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={statusCols} data={atRisk} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" pageSize={10} />
     </Modal>
-    <Modal isOpen={kpiModal==="insufficient"} onClose={()=>setKpiModal(null)} title="Insufficient Stock" description={`${critical.length} items • GET /api/inventory`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={statusCols} data={critical} keyExtractor={r=>r.material_variant_id} emptyMessage="None" />
+    <Modal isOpen={kpiModal==="insufficient"} onClose={()=>setKpiModal(null)} title="Insufficient Stock" description={`${critical.length} items - GET /api/inventory`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={statusCols} data={critical} keyExtractor={r=>r.material_variant_id} emptyMessage="None" pageSize={10} />
     </Modal>
-    <Modal isOpen={kpiModal==="model"} onClose={()=>setKpiModal(null)} title="Forecast Model" description="Holt-Winters • GET /api/inventory/forecast" icon={<TrendingUp className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+    <Modal isOpen={kpiModal==="model"} onClose={()=>setKpiModal(null)} title="Forecast Model" description="Holt-Winters - GET /api/inventory/forecast" icon={<TrendingUp className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
      <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">HOLT WINTERS</p><p className="text-sm font-semibold mt-1">{holtWinters.length} variants</p><p className="text-xs text-printflow-on-surface-variant mt-1 truncate">{holtWinters.map(i=>i.material_variant_id).join(", ")}</p></div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">EXPONENTIAL SMOOTHING</p><p className="text-sm font-semibold mt-1">{expSmooth.length} variants</p><p className="text-xs text-printflow-on-surface-variant mt-1 truncate">{expSmooth.map(i=>i.material_variant_id).join(", ")}</p></div>
       </div>
-      <DataTable columns={cols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No data" />
+       <DataTable columns={cols} data={liveInventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No data" pageSize={10} />
      </div>
     </Modal>
     <Modal isOpen={kpiModal==="forecast"} onClose={()=>setKpiModal(null)} title="Forecast 7 Days" description="GET /api/inventory/forecast?days=7" icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={cols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" />
+       <DataTable columns={cols} data={liveInventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" pageSize={10} />
     </Modal>
 
    <div className="mb-6">
-    <ChartCard title="Forecast vs Reorder Point" type="bar" data={inventory.map(i=>({name:i.material_variant_id, stock:i.current_stock, rop:i.reorder_point, forecast:i.forecasted_demand_next_7_days}))} xKey="name" yKeys={["stock","rop","forecast"]} colors={["#00535b","#ed6c02","#ba1a1a"]} height={340} />
+    <ChartCard title="Forecast vs Reorder Point" type="bar" data={liveInventory.map(i=>({name:i.material_variant_id, stock:i.current_stock, rop:i.reorder_point, forecast:i.forecasted_demand_next_7_days}))} xKey="name" yKeys={["stock","rop","forecast"]} colors={["var(--color-printflow-on-surface)","var(--color-printflow-on-surface-variant)","var(--color-printflow-outline)"]} height={340} />
     <div className="mt-3">
      <button onClick={()=>setShowSource(!showSource)} className="text-xs px-3 py-1.5 rounded-full border border-printflow-outline-variant bg-printflow-surface hover:bg-printflow-surface-container">
-      {showSource ? "Collapse to Details ▼" : "Collapse to Details ▶"}
+      {showSource ? "Hide Details" : "Show Details"}
      </button>
     </div>
     {showSource && (
      <div className="mt-3 p-4 bg-printflow-surface-container rounded-lg border border-printflow-outline-variant text-sm space-y-2">
       <p className="font-semibold">RFID Checkout Source (POST /api/rfid/checkout)</p>
-      <p className="font-mono text-xs bg-printflow-surface p-2 rounded border">Each tap = {"{material_variant_id, tag_uid, sensor_id: ESP32-01, timestamp}"} → -1 unit, debounce prevents duplicate.</p>
-      <ul className="text-xs text-printflow-on-surface-variant list-disc pl-4 space-y-1">
-       <li>One tag per variant (TARP-MED, INK-BLACK, etc.), whole-unit only.</li>
+      <p className="font-mono text-xs bg-printflow-surface p-2 rounded border">Each tap = {"{material_variant_id, tag_uid, sensor_id: ESP32-01, timestamp}"} - -1 unit, debounce prevents duplicate.</p>
+       <ul className="text-xs text-printflow-on-surface-variant list-disc pl-4 space-y-1">
+        <li>ROP and 7-day demand on this page are computed live from usage movements (auto-deduct + manual logs + station entries; RFID taps where no usage exists yet). Variants with no movements yet show stored planning values.</li>
+        <li>One tag per variant (TARP-MED, INK-BLACK, etc.), whole-unit only.</li>
        <li>Offline cached syncs when ESP32 reconnects.</li>
-       <li>Example: TARP-MED → stock 2 • ROP 4 → reorder alert</li>
+       <li>Example: TARP-MED - stock 2 - ROP 4 - reorder alert</li>
       </ul>
      </div>
     )}
@@ -246,22 +343,22 @@ export default function ForecastingPage() {
      </div>
      <div className="p-3 bg-printflow-surface rounded-lg border border-printflow-outline-variant/50">
       <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant uppercase">Alpha (Level)</p>
-      <p className="text-sm font-semibold mt-1.5 text-printflow-primary">0.20</p>
+       <p className="text-sm font-semibold mt-1.5 text-printflow-primary">{FORECAST_PARAMS.alpha.toFixed(2)}</p>
       <p className="text-xs text-printflow-on-surface-variant mt-0.5">Base level smoothing</p>
      </div>
      <div className="p-3 bg-printflow-surface rounded-lg border border-printflow-outline-variant/50">
       <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant uppercase">Beta (Trend)</p>
-      <p className="text-sm font-semibold mt-1.5 text-printflow-primary">0.15</p>
+       <p className="text-sm font-semibold mt-1.5 text-printflow-primary">{FORECAST_PARAMS.beta.toFixed(2)}</p>
       <p className="text-xs text-printflow-on-surface-variant mt-0.5">Trend component weight</p>
      </div>
      <div className="p-3 bg-printflow-surface rounded-lg border border-printflow-outline-variant/50">
       <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant uppercase">Gamma (Seasonality)</p>
-      <p className="text-sm font-semibold mt-1.5 text-printflow-primary">0.05</p>
+       <p className="text-sm font-semibold mt-1.5 text-printflow-primary">{FORECAST_PARAMS.gamma.toFixed(2)}</p>
       <p className="text-xs text-printflow-on-surface-variant mt-0.5">Seasonal pattern weight</p>
      </div>
      <div className="p-3 bg-printflow-surface rounded-lg border border-printflow-outline-variant/50 sm:col-span-2">
       <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant uppercase">Seasonality Period (L)</p>
-      <p className="text-sm font-semibold mt-1.5 text-printflow-primary">7 intervals</p>
+       <p className="text-sm font-semibold mt-1.5 text-printflow-primary">{FORECAST_PARAMS.seasonLength} intervals</p>
       <p className="text-xs text-printflow-on-surface-variant mt-0.5">Daily seasonal pattern (weekly cycle)</p>
      </div>
     </div>
@@ -269,7 +366,7 @@ export default function ForecastingPage() {
 
    <ContentCard title="Demand Forecast" subtitle={`${searched.length} materials`}>
     <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search material" onSearchChange={setSearch} searchValue={search} />
-    <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" />
+     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" pageSize={25} />
    </ContentCard>
   </AdminLayout>
  );

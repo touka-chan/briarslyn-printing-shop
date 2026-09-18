@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -17,9 +20,9 @@ import '../../utils/animations.dart';
 import '../../widgets/address_cascade.dart';
 import 'cashier_order_confirmed.dart';
 
-/// The New Order screen — Cashier's second tab.
+/// The New Order screen - Cashier's second tab.
 ///
-/// Multi-step form: Customer → Details → Schedule.
+/// Multi-step form: Customer - Details - Schedule.
 /// Uses [PfTextField], [PfCard], [PfSegmentedControl], [PfButton].
 /// Sticky bottom action bar: Save Draft / Create Order.
 class CashierNewOrderScreen extends StatefulWidget {
@@ -51,7 +54,10 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
   final _quantityCtrl = TextEditingController(text: '1');
   final _layoutFileCtrl = TextEditingController();
   final _paymentAmountCtrl = TextEditingController(text: '0.00');
-  String _paymentStatus = 'Unpaid'; // 'Paid' | 'Full Paid' | 'Unpaid' | 'Incomplete'
+  // Canonical POS terms: 'Unpaid' | 'Partially Paid' | 'Paid'.
+  // Legacy values ('Full Paid', 'Incomplete', 'Partial') still parse
+  // everywhere - they are just no longer offered as choices.
+  String _paymentStatus = 'Unpaid';
   String _paymentMethod = 'Cash'; // 'Cash' | 'E-Wallets' | 'Bank Transfer'
 
   // Schedule
@@ -73,18 +79,41 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
   // from this list.
   List<InventoryItem> _inventory = const <InventoryItem>[];
   StreamSubscription<List<InventoryItem>>? _inventorySub;
+  bool _feedErrorShown = false;
+
+  /// Feed failures keep last-known values (availability check degrades
+  /// gracefully) but must be visible, not silent.
+  void _onFeedError(Object e) {
+    debugPrint('[new-order] feed failed: $e');
+    if (!mounted || _feedErrorShown) return;
+    _feedErrorShown = true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Live data paused - showing last known stock.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
   List<Map<String, dynamic>> _derivedCustomers = const <Map<String, dynamic>>[];
   StreamSubscription<List<Order>>? _ordersSub;
 
   @override
   void initState() {
     super.initState();
-    _inventorySub = fb_inventory.subscribeInventoryStream().listen((items) {
-      if (mounted) setState(() => _inventory = items);
-    });
-    _ordersSub = fb_orders.subscribeOrdersStream().listen((orders) {
-      if (mounted) setState(() => _derivedCustomers = _buildCustomers(orders));
-    });
+    _inventorySub = fb_inventory.subscribeInventoryStream().listen(
+      (items) {
+        if (mounted) setState(() => _inventory = items);
+      },
+      onError: _onFeedError,
+    );
+    _ordersSub = fb_orders.subscribeOrdersStream().listen(
+      (orders) {
+        if (mounted) {
+          setState(() => _derivedCustomers = _buildCustomers(orders));
+        }
+      },
+      onError: _onFeedError,
+    );
   }
 
   @override
@@ -172,10 +201,13 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         targetDate: _selectedTargetDate!,
         paymentAmount: double.parse(_paymentAmountCtrl.text),
         paymentStatus: _paymentStatus,
+        paymentMethod: _paymentMethod,
         status: 'Pending',
         priority: _computePriority(_selectedTargetDate!),
         estimatedCompletion: _selectedTargetDate!.add(const Duration(days: 2)),
-        basedOn: ['Manual entry'],
+        // No ETA signals are live at manual entry - null, never an
+        // out-of-vocab placeholder (renderers null-guard this).
+        basedOn: null,
         cashierId: auth.currentUser?.id,
         createdAt: DateTime.now(),
       );
@@ -197,6 +229,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         targetDate: draft.targetDate,
         paymentAmount: draft.paymentAmount,
         paymentStatus: draft.paymentStatus,
+        paymentMethod: draft.paymentMethod,
         status: draft.status,
         priority: draft.priority,
         estimatedCompletion: draft.estimatedCompletion,
@@ -298,11 +331,11 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
 
   /// Finds the best matching inventory variant for the chosen item type.
   ///
-  /// Mirrors the proposal §VII rule: a variant matches if the item_type is
+  /// Mirrors the proposal Sec.VII rule: a variant matches if the item_type is
   /// contained in the inventory item_type (case-insensitive). Reads from the
   /// live inventory subscription populated in [initState]. Returns null when
   /// the chosen item type has no corresponding inventory variant (the
-  /// cashier can still create the order — it simply has no inventory check).
+  /// cashier can still create the order - it simply has no inventory check).
   InventoryItem? _findInventoryVariant(String itemType) {
     final needle = itemType.toLowerCase().trim();
     for (final item in _inventory) {
@@ -335,13 +368,13 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
         status = 'In Stock';
         color = AppTheme.stockInStock;
         message =
-            'Sufficient stock — ${variant.currentStock} units available for ${variant.materialVariantId}.';
+            'Sufficient stock - ${variant.currentStock} units available for ${variant.materialVariantId}.';
       }
     } else {
       status = 'Insufficient Stock';
       color = AppTheme.stockInsufficient;
       message =
-          'Only ${variant.currentStock} unit${variant.currentStock == 1 ? '' : 's'} available — short by ${quantity - variant.currentStock}. Notify the owner before proceeding.';
+          'Only ${variant.currentStock} unit${variant.currentStock == 1 ? '' : 's'} available - short by ${quantity - variant.currentStock}. Notify the owner before proceeding.';
     }
     return _AvailabilityCheck(
       variant: variant,
@@ -653,7 +686,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
             },
             textInputAction: TextInputAction.next,
           ),
-          // Live inventory availability indicator — proposal §VII.
+          // Live inventory availability indicator - proposal Sec.VII.
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: _quantityCtrl,
             builder: (context, value, _) {
@@ -679,8 +712,11 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
           const SizedBox(height: AppSpacing.sm),
           _LayoutUploadArea(
             controller: _layoutFileCtrl,
-            onFileSelected: (fileName) {
-              setState(() => _layoutFileCtrl.text = fileName);
+            // Receives the Storage download URL (or the bare filename when
+            // the upload fell back) - that string is what `layout_file`
+            // persists.
+            onFileSelected: (storedValue) {
+              setState(() => _layoutFileCtrl.text = storedValue);
             },
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -720,10 +756,9 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
           PfSegmentedControl<String>(
             value: _paymentStatus,
             options: const [
-              PfSegmentOption(value: 'Paid', label: 'Paid'),
-              PfSegmentOption(value: 'Full Paid', label: 'Full Paid'),
               PfSegmentOption(value: 'Unpaid', label: 'Unpaid'),
-              PfSegmentOption(value: 'Incomplete', label: 'Incomplete'),
+              PfSegmentOption(value: 'Partially Paid', label: 'Partially Paid'),
+              PfSegmentOption(value: 'Paid', label: 'Paid'),
             ],
             onChanged: (v) {
               HapticFeedback.selectionClick();
@@ -828,13 +863,13 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                 _SummaryField(
                   label: 'Customer',
                   controller: _customerNameCtrl,
-                  placeholder: '—',
+                  placeholder: '-',
                 ),
                 _SummaryField(
                   label: 'Address',
                   controller: null,
                   value: _addressValue.summary().isEmpty
-                      ? '—'
+                      ? '-'
                       : _addressValue.summary(),
                 ),
                 _SummaryField(
@@ -850,7 +885,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                 _SummaryField(
                   label: 'Layout',
                   controller: _layoutFileCtrl,
-                  placeholder: '—',
+                  placeholder: '-',
                 ),
                 _SummaryField(
                   label: 'Amount',
@@ -938,7 +973,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
                           canProceed ? () => _goToStep(_currentStep + 1) : null,
                     )
                   : PfButton.filled(
-                      label: _isSubmitting ? 'Creating…' : 'Create Order',
+                      label: _isSubmitting ? 'Creating...' : 'Create Order',
                       icon: Icons.check_circle_rounded,
                       fullWidth: true,
                       size: PfButtonSize.large,
@@ -1078,10 +1113,18 @@ class _SummaryRow extends StatelessWidget {
               color: AppTheme.onSurfaceVariant,
             ),
           ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
+          const SizedBox(width: AppSpacing.md),
+          // Bounded + ellipsized: long values (layout URLs, addresses)
+          // must never overflow the card (right-overflow red-screen).
+          Flexible(
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -1092,7 +1135,7 @@ class _SummaryRow extends StatelessWidget {
 
 /// A summary row that subscribes to a [TextEditingController] via
 /// [ValueListenableBuilder], so the value updates live as the user types
-/// in the Customer or Details steps — even when the Schedule page was
+/// in the Customer or Details steps - even when the Schedule page was
 /// built earlier and is now off-screen in a [PageView].
 class _SummaryField extends StatelessWidget {
   const _SummaryField({
@@ -1100,7 +1143,7 @@ class _SummaryField extends StatelessWidget {
     this.controller,
     this.value,
     this.prefix = '',
-    this.placeholder = '—',
+    this.placeholder = '-',
   }) : assert(
           controller != null || value != null,
           'Provide either controller or value',
@@ -1181,11 +1224,18 @@ class _LayoutUploadAreaState extends State<_LayoutUploadArea> {
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                'AI, PDF, JPG, PNG • Max 10MB',
+                _uploading ? 'Uploading...' : 'PDF, JPG, PNG - Max 5MB',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.onSurfaceVariant,
                 ),
               ),
+              if (_uploading) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const SizedBox(
+                  width: 160,
+                  child: LinearProgressIndicator(),
+                ),
+              ],
               if (widget.controller.text.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.md),
                 Container(
@@ -1224,33 +1274,124 @@ class _LayoutUploadAreaState extends State<_LayoutUploadArea> {
     );
   }
 
-  Future<void> _pickFile() async {
-    // In a real app, use file_picker or image_picker.
-    // For frontend mock, just simulate with a dialog.
-    final fileName = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Layout File'),
-        content: const Text('File picker would open here. Enter a mock file name:'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = 'design_${DateTime.now().millisecondsSinceEpoch}.ai';
-              Navigator.pop(context, name);
-            },
-            child: const Text('Mock Pick'),
-          ),
-        ],
-      ),
-    );
+  /// Picks a layout file from the device (PDF/JPG/PNG, max 5 MB) and
+  /// uploads it to Cloudinary (free tier, unsigned preset). The delivery
+  /// URL travels with the order in `layout_file`, so Production Staff can
+  /// open the actual file on any device. If the upload fails, the bare
+  /// filename is kept as a fallback reference instead of losing the pick.
+  static const _maxLayoutBytes = 5 * 1024 * 1024;
 
-    if (fileName != null && mounted) {
-      widget.onFileSelected(fileName);
+  bool _uploading = false;
+
+  Future<void> _pickFile() async {
+    if (_uploading) return;
+    HapticFeedback.selectionClick();
+    // file_picker v12 static API: single pick returns PlatformFile?,
+    // null when the user cancels.
+    late final PlatformFile? file;
+    try {
+      file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open the file picker. Try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
+    if (file == null || !mounted) {
+      return; // user cancelled
+    }
+    // Exact byte count (falls back to reading the file when the picker
+    // did not report a size). Guarded: unreadable files are rejected
+    // instead of crashing the form.
+    late final int byteCount;
+    try {
+      byteCount = file.lengthSync() ?? await file.length();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not read that file. Try another one.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (byteCount > _maxLayoutBytes) {
+      if (!mounted) return;
+      final mb = (byteCount / (1024 * 1024)).toStringAsFixed(1);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '"${file.name}" is $mb MB - layout files must be 5 MB or smaller.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    setState(() => _uploading = true);
+    try {
+      final url = await _uploadLayout(file);
+      if (!mounted) return;
+      widget.onFileSelected(url);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Layout uploaded: ${file.name}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      // Upload failed (offline, preset misconfigured): keep the filename
+      // so the order still records which file the cashier picked.
+      if (!mounted) return;
+      widget.onFileSelected(file.name);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Upload failed - filename saved instead.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// Uploads the picked file bytes to Cloudinary (unsigned preset) and
+  /// returns the secure delivery URL. Free tier, no Firebase Blaze needed.
+  /// file_picker v12 exposes content via `readAsBytes()` (no `.bytes`).
+  /// The `auto` resource type accepts both images and PDFs.
+  static const _cloudinaryCloud = 'nvfwbwqo';
+  static const _cloudinaryPreset = 'brialyns_artsign';
+
+  Future<String> _uploadLayout(PlatformFile file) async {
+    final Uint8List bytes = await file.readAsBytes();
+    if (bytes.isEmpty) throw StateError('Empty file: ${file.name}');
+    final safeName = file.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final uri = Uri.https(
+      'api.cloudinary.com',
+      '/v1_1/$_cloudinaryCloud/auto/upload',
+    );
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['upload_preset'] = _cloudinaryPreset
+      ..fields['public_id'] =
+          'printflow_layouts/${DateTime.now().millisecondsSinceEpoch}_$safeName'
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: safeName));
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      throw StateError('Cloudinary upload failed (${streamed.statusCode})');
+    }
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    final url = json['secure_url'] as String?;
+    if (url == null || url.isEmpty) throw StateError('No secure_url returned');
+    return url;
   }
 }
 

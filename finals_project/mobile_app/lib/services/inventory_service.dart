@@ -1,7 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../auth/auth_service.dart';
 import '../models/inventory_item.dart';
+import 'audit_service.dart';
 import 'firebase_inventory.dart' as fb;
 
 /// Service layer for inventory operations with permission enforcement.
@@ -9,7 +11,7 @@ import 'firebase_inventory.dart' as fb;
 /// All write operations check permissions via [AuthService] before
 /// delegating to the Firestore-backed `firebase_inventory` service.
 ///
-/// Note: `recordRfidEvent` was removed — RFID events are written by the
+/// Note: `recordRfidEvent` was removed - RFID events are written by the
 /// ESP32 station (or a Cloud Function) directly to Firestore, never by the
 /// mobile app. The production sensor screen subscribes to the `rfid_events`
 /// collection via `firebase_rfid.subscribeRfidEvents`.
@@ -29,9 +31,19 @@ class InventoryService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.inventoryUpdate);
+    final prev = await _readVariant(materialVariantId);
     try {
       await fb.updateStock(materialVariantId, newStock);
       debugPrint('[InventoryService] Updated stock for $materialVariantId to $newStock');
+      AuditService.log(
+        actor: auth.currentUser,
+        action: 'stock_adjusted',
+        module: 'inventory',
+        recordId: materialVariantId,
+        recordLabel: 'Material $materialVariantId',
+        oldValue: prev?['current_stock'],
+        newValue: newStock,
+      );
     } catch (e) {
       debugPrint('[InventoryService] updateStock failed: $e');
       rethrow;
@@ -47,9 +59,19 @@ class InventoryService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.inventoryUpdate);
+    final prev = await _readVariant(materialVariantId);
     try {
       await fb.updateReorderPoint(materialVariantId, newReorderPoint);
       debugPrint('[InventoryService] Updated reorder point for $materialVariantId to $newReorderPoint');
+      AuditService.log(
+        actor: auth.currentUser,
+        action: 'reorder_point_updated',
+        module: 'inventory',
+        recordId: materialVariantId,
+        recordLabel: 'Material $materialVariantId',
+        oldValue: prev?['reorder_point'],
+        newValue: newReorderPoint,
+      );
     } catch (e) {
       rethrow;
     }
@@ -66,6 +88,14 @@ class InventoryService {
     try {
       await fb.createVariant(item);
       debugPrint('[InventoryService] Created new variant ${item.materialVariantId}');
+      AuditService.log(
+        actor: auth.currentUser,
+        action: 'variant_created',
+        module: 'inventory',
+        recordId: item.materialVariantId,
+        recordLabel: 'Material ${item.materialVariantId} (${item.itemType})',
+        newValue: 'stock=${item.currentStock}, ROP=${item.reorderPoint}',
+      );
     } catch (e) {
       rethrow;
     }
@@ -79,11 +109,34 @@ class InventoryService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.inventoryDelete);
+    final prev = await _readVariant(materialVariantId);
     try {
       await fb.deleteVariant(materialVariantId);
       debugPrint('[InventoryService] Deleted variant $materialVariantId');
+      AuditService.log(
+        actor: auth.currentUser,
+        action: 'variant_deleted',
+        module: 'inventory',
+        recordId: materialVariantId,
+        recordLabel: 'Material $materialVariantId (${prev?['item_type'] ?? '?'})',
+        oldValue: prev?['item_type'] as String?,
+      );
     } catch (e) {
       rethrow;
+    }
+  }
+
+  /// Best-effort pre-read for audit old-values. Returns null when the doc
+  /// is missing/unreadable - callers still proceed with the write.
+  static Future<Map<String, dynamic>?> _readVariant(String id) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('inventory')
+          .doc(id)
+          .get();
+      return snap.data();
+    } catch (_) {
+      return null;
     }
   }
 }

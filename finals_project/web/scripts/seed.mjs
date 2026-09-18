@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * seed.mjs — one-shot Firestore seeder for PrintFlow.
+ * seed.mjs - one-shot Firestore seeder for PrintFlow.
  *
  * What it writes (in this order):
- *   1. users/{uid}       — the Owner's profile doc (uid comes from the Auth
+ *   1. users/{uid}       - the Owner's profile doc (uid comes from the Auth
  *                          account already created in Firebase Auth). Also
  *                          one extra "Cashier 01" / "Production 01" profile
  *                          doc under the matching auth uids.
- *   2. employees/{auto}  — 3 HR records (no Auth accounts, just info).
- *   3. orders/{orderId}  — 8 sample orders, with priority/ETA recomputed
+ *   2. employees/{auto}  - 3 HR records (no Auth accounts, just info).
+ *   3. orders/{orderId}  - 8 sample orders, with priority/ETA recomputed
  *                          for "today" so the data feels current.
- *   4. inventory/{vid}   — 10 material variants.
- *   5. rfid_events/{auto}— 5 sample RFID checkout events (best-effort; the
+ *   4. inventory/{vid}   - 10 material variants.
+ *   5. rfid_events/{auto}- 5 sample RFID checkout events (best-effort; the
  *                          collection is service-account-only in prod, but
  *                          a signed-in Owner can also write to it for demo).
  *
@@ -25,8 +25,8 @@
  *
  * Why a script (not the web app): the web app's orders / inventory collections
  * are read by the live UI; an empty Firestore is the default state for a new
- * project. This script fills it with the same `mockData.ts` fixtures the UI
- * was designed around so you can demo / develop / test against real data.
+ * project. This script fills it with realistic fixtures so you can demo /
+ * develop / test against real data. Run `seed_bom.mjs` too for recipes.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -89,7 +89,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-console.log(`[seed] Signing in as ${env.SEED_OWNER_EMAIL}…`);
+console.log(`[seed] Signing in as ${env.SEED_OWNER_EMAIL}...`);
 const cred = await signInWithEmailAndPassword(
   auth,
   env.SEED_OWNER_EMAIL,
@@ -339,7 +339,7 @@ const inventorySeeds = [
 
 let writes = 0;
 
-// 1. Owner profile — written under the real Auth uid so AuthGate works.
+// 1. Owner profile - written under the real Auth uid so AuthGate works.
 await setDoc(doc(db, "users", ownerUid), {
   email: env.SEED_OWNER_EMAIL,
   name: "Jena Bersamina",
@@ -381,7 +381,7 @@ async function confirmOwnerRole() {
   }
   throw new Error(
     "Owner role did not persist after writing users/{uid}. Aborting seed " +
-      "to avoid partial data — re-run after fixing the role write.",
+      "to avoid partial data - re-run after fixing the role write.",
   );
 }
 await confirmOwnerRole();
@@ -436,7 +436,7 @@ for (const e of employees) {
   writes++;
 }
 
-// 3. Orders — compute priority/ETA for "today" so the demo feels fresh.
+// 3. Orders - compute priority/ETA for "today" so the demo feels fresh.
 for (const o of orderSeeds) {
   const priority = getPriority(o.target_date);
   const eta = getEta(o.target_date, priority);
@@ -468,11 +468,11 @@ for (const o of orderSeeds) {
     ...(o.status === "In Production" ? { started_at: Timestamp.now() } : {}),
     ...(o.status === "Completed" ? { completed_at: Timestamp.now() } : {}),
   });
-  console.log(`[seed] orders/${docId}  (${o.customer_name} — ${o.status})`);
+  console.log(`[seed] orders/${docId}  (${o.customer_name} - ${o.status})`);
   writes++;
 }
 
-// 4. Inventory — compute status/isStale from the same rules the web app uses.
+// 4. Inventory - compute status/isStale from the same rules the web app uses.
 for (const inv of inventorySeeds) {
   const status = getInvStatus(inv);
   const stale = isStale(inv.last_updated);
@@ -497,7 +497,7 @@ for (const inv of inventorySeeds) {
   writes++;
 }
 
-// 5. RFID events — 5 sample check-outs. Best-effort: in production this
+// 5. RFID events - 5 sample check-outs. Best-effort: in production this
 // collection is service-account-only (no client-side writes), so the
 // signed-in Owner will be rejected by Firestore rules. We try, and if
 // the rules reject, we log a warning and move on. The rest of the seed
@@ -529,9 +529,9 @@ for (const r of rfidSeeds) {
     const code = e?.code ?? "";
     if (code === "permission-denied" || /permission/i.test(String(e?.message ?? ""))) {
       console.warn(
-        "[seed] rfid_events is service-account-only — skipping. " +
-          "Run this script with a service account, or set up the ESP32 → " +
-          "Cloud Function → Firestore flow, to populate RFID events.",
+        "[seed] rfid_events is service-account-only - skipping. " +
+          "Run this script with a service account, or set up the ESP32 - " +
+          "Cloud Function - Firestore flow, to populate RFID events.",
       );
       break;
     }

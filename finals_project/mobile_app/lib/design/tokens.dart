@@ -97,11 +97,12 @@ class AppResponsive {
   }
 }
 
-// Typography — the app uses Inter (display + body) and JetBrains Mono (data).
+// Typography - Poppins (display), Inter (body), JetBrains Mono (data).
+// Matches the web system (Poppins 700/800 display + system-sans body).
 // We expose semantic helpers; the actual TextStyle is provided by Theme.of(context).
 class AppTypography {
   // Family keys (google_fonts will resolve these in app_theme.dart)
-  static const String display = 'Inter';
+  static const String display = 'Poppins';
   static const String body = 'Inter';
   static const String mono = 'JetBrainsMono';
 

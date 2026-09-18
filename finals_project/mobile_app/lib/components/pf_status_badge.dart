@@ -6,16 +6,16 @@ import '../theme/app_theme.dart';
 /// Size presets for [PfStatusBadge]. Controls font size and vertical
 /// padding. Horizontal padding scales with the text.
 enum PfBadgeSize {
-  /// 10pt label, 3px vertical padding — for dense lists/chips.
+  /// 10pt label, 3px vertical padding - for dense lists/chips.
   tiny,
 
-  /// 11pt label, 4px vertical padding — compact but readable.
+  /// 11pt label, 4px vertical padding - compact but readable.
   small,
 
-  /// 12pt label, 5px vertical padding — the default size.
+  /// 12pt label, 5px vertical padding - the default size.
   medium,
 
-  /// 13pt label, 6px vertical padding — for prominent callouts.
+  /// 13pt label, 6px vertical padding - for prominent callouts.
   large,
 }
 
@@ -24,10 +24,10 @@ enum PfBadgeSize {
 /// states.
 ///
 /// Use the factory constructors for consistent theming:
-///   * [PfStatusBadge.priority] — Overdue / Urgent / Upcoming
-///   * [PfStatusBadge.orderStatus] — Pending / In Production / Ready for Pickup / Completed
-///   * [PfStatusBadge.stock] — In Stock / Low Stock / Insufficient Stock
-///   * [PfStatusBadge.payment] — Paid / Unpaid / Partial
+///   * [PfStatusBadge.priority] - Overdue / Urgent / Upcoming
+///   * [PfStatusBadge.orderStatus] - Pending / In Production / Ready for Pickup / Completed
+///   * [PfStatusBadge.stock] - In Stock / Low Stock / Insufficient Stock
+///   * [PfStatusBadge.payment] - Paid / Unpaid / Partial
 ///
 /// All badges animate color/background changes via [AnimatedContainer]
 /// over [AppMotion.base] (220ms) so status transitions feel smooth.
@@ -53,10 +53,10 @@ class PfStatusBadge extends StatelessWidget {
   /// Builds a priority badge.
   ///
   /// Color mapping:
-  ///   * 'Overdue'   → [AppTheme.statusOverdue] (red)
-  ///   * 'Urgent'    → [AppTheme.statusUrgent] (amber)
-  ///   * 'Upcoming'  → [AppTheme.statusUpcoming] (primary teal)
-  ///   * anything else → [AppTheme.onSurfaceVariant] (neutral)
+  ///   * 'Overdue'   - [AppTheme.statusOverdue] (red)
+  ///   * 'Urgent'    - [AppTheme.statusUrgent] (amber)
+  ///   * 'Upcoming'  - [AppTheme.statusUpcoming] (primary teal)
+  ///   * anything else - [AppTheme.onSurfaceVariant] (neutral)
   factory PfStatusBadge.priority(String priority, {PfBadgeSize size = PfBadgeSize.medium}) {
     final color = switch (priority) {
       'Overdue' => AppTheme.statusOverdue,
@@ -80,17 +80,19 @@ class PfStatusBadge extends StatelessWidget {
   /// Builds an order status badge.
   ///
   /// Color mapping:
-  ///   * 'Pending'           → [AppTheme.onSurfaceVariant] (neutral)
-  ///   * 'In Production'     → [AppTheme.statusInProduction] (blue)
-  ///   * 'Ready for Pickup'  → [AppTheme.statusReadyForPickup] (purple)
-  ///   * 'Completed'         → [AppTheme.statusCompleted] (green)
-  ///   * anything else       → [AppTheme.onSurfaceVariant] (neutral)
+  ///   * 'Pending'           - [AppTheme.onSurfaceVariant] (neutral)
+  ///   * 'In Production'     - [AppTheme.statusInProduction] (blue)
+  ///   * 'Ready for Pickup'  - [AppTheme.statusReadyForPickup] (purple)
+  ///   * 'Completed'         - [AppTheme.statusCompleted] (green)
+  ///   * 'Cancelled'         - [AppTheme.statusOverdue] (red)
+  ///   * anything else       - [AppTheme.onSurfaceVariant] (neutral)
   factory PfStatusBadge.orderStatus(String status, {PfBadgeSize size = PfBadgeSize.medium}) {
     final color = switch (status) {
       'Pending' => AppTheme.onSurfaceVariant,
       'In Production' => AppTheme.statusInProduction,
       'Ready for Pickup' => AppTheme.statusReadyForPickup,
       'Completed' => AppTheme.statusCompleted,
+      'Cancelled' => AppTheme.statusOverdue,
       _ => AppTheme.onSurfaceVariant,
     };
     return PfStatusBadge._(
@@ -104,10 +106,10 @@ class PfStatusBadge extends StatelessWidget {
   /// Builds an inventory stock badge.
   ///
   /// Color mapping:
-  ///   * 'In Stock'           → [AppTheme.stockInStock] (green)
-  ///   * 'Low Stock'          → [AppTheme.stockLow] (amber)
-  ///   * 'Insufficient Stock' → [AppTheme.stockInsufficient] (red)
-  ///   * anything else        → [AppTheme.onSurfaceVariant] (neutral)
+  ///   * 'In Stock'           - [AppTheme.stockInStock] (green)
+  ///   * 'Low Stock'          - [AppTheme.stockLow] (amber)
+  ///   * 'Insufficient Stock' - [AppTheme.stockInsufficient] (red)
+  ///   * anything else        - [AppTheme.onSurfaceVariant] (neutral)
   factory PfStatusBadge.stock(String status, {PfBadgeSize size = PfBadgeSize.medium}) {
     final color = switch (status) {
       'In Stock' => AppTheme.stockInStock,
@@ -126,15 +128,15 @@ class PfStatusBadge extends StatelessWidget {
   /// Builds a payment status badge.
   ///
   /// Color mapping:
-  ///   * 'Paid'     → [AppTheme.statusCompleted] (green)
-  ///   * 'Unpaid'   → [AppTheme.statusOverdue] (red)
-  ///   * 'Partial'  → [AppTheme.statusUrgent] (amber)
-  ///   * anything else → [AppTheme.onSurfaceVariant] (neutral)
+  ///   * 'Paid' / 'Full Paid' - [AppTheme.statusCompleted] (green)
+  ///   * 'Unpaid'             - [AppTheme.statusOverdue] (red)
+  ///   * 'Partial' / 'Partially Paid' / 'Incomplete' - [AppTheme.statusUrgent]
+  ///   * anything else        - [AppTheme.onSurfaceVariant] (neutral)
   factory PfStatusBadge.payment(String status, {PfBadgeSize size = PfBadgeSize.medium}) {
     final color = switch (status) {
-      'Paid' => AppTheme.statusCompleted,
+      'Paid' || 'Full Paid' => AppTheme.statusCompleted,
       'Unpaid' => AppTheme.statusOverdue,
-      'Partial' => AppTheme.statusUrgent,
+      'Partial' || 'Partially Paid' || 'Incomplete' => AppTheme.statusUrgent,
       _ => AppTheme.onSurfaceVariant,
     };
     return PfStatusBadge._(

@@ -28,12 +28,17 @@ const CONFIG: Record<Priority, { label: string; className: string; dot: string }
 };
 
 export function PriorityBadge({
- priority,
- children,
- className = "",
- showDot = true,
+  priority,
+  children,
+  className = "",
+  showDot = true,
 }: PriorityBadgeProps) {
- const config = CONFIG[priority];
+  // Fallback: unknown/legacy values render neutral instead of crashing.
+  const config = CONFIG[priority] ?? {
+    label: priority,
+    className: "priority-upcoming",
+    dot: "bg-printflow-on-surface-variant/60",
+  };
  return (
   <span
    className={`status-badge ${config.className} ${className}`.trim()}

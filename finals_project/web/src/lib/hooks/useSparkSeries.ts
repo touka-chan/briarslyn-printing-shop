@@ -1,5 +1,5 @@
 /**
- * useSparkSeries — bucket timestamped records into a `days`-long series for
+ * useSparkSeries - bucket timestamped records into a `days`-long series for
  * sparkline rendering. Pure time-bucketing: it doesn't care what the records
  * are (orders, inventory checkouts, users) as long as you can hand it a
  * timestamp fn.
@@ -16,7 +16,7 @@
 
 import { useMemo } from "react";
 
-/** Local-time day key — strips the time component and uses the user's TZ. */
+/** Local-time day key - strips the time component and uses the user's TZ. */
 export function dayKey(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -44,7 +44,7 @@ export function dayKeysEndingToday(days: number, now: Date = new Date()): string
   return out;
 }
 
-/** Day-key → count map for any iterable of records. */
+/** Day-key - count map for any iterable of records. */
 export function countPerDay<T>(
   items: Iterable<T>,
   getKey: (item: T) => string | undefined,
@@ -80,7 +80,7 @@ export function useSparkSeries<T>(
 
 /* ------------------------------------------------------------------ *
  * Convenience: bucketing fns per collection.                          *
- * Pages don't need to write these inline — import the one that fits.  *
+ * Pages don't need to write these inline - import the one that fits.  *
  * ------------------------------------------------------------------ */
 
 /** Order: bucket by `created_at` (ISO). */

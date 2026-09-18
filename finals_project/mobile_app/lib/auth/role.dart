@@ -2,20 +2,20 @@
 ///
 /// Server-side (Firestore `users/{uid}.role`) carries one of the four
 /// Title 1 strings: `"Owner"`, `"Admin"`, `"POS_Cashier"`, or
-/// `"Production Staff"`. The mobile `Role` enum mirrors the four — the
+/// `"Production Staff"`. The mobile `Role` enum mirrors the four - the
 /// in-app UI uses the enum exclusively; the conversion happens in
 /// `AuthService._roleFromServer`.
 enum Role {
-  /// Owner — full access (admin dashboard, all pages)
+  /// Owner - full access (admin dashboard, all pages)
   owner,
 
-  /// Admin — admin dashboard access
+  /// Admin - admin dashboard access
   admin,
 
-  /// POS / Cashier role — handles orders, payments, and customers
+  /// POS / Cashier role - handles orders, payments, and customers
   cashier,
 
-  /// Production Staff role — handles production queue, inventory, and sensors
+  /// Production Staff role - handles production queue, inventory, and sensors
   production,
 }
 
@@ -45,20 +45,6 @@ extension RoleX on Role {
         return 'Cashier';
       case Role.production:
         return 'Production';
-    }
-  }
-
-  /// Icon representing the role.
-  String get icon {
-    switch (this) {
-      case Role.owner:
-        return '👑';
-      case Role.admin:
-        return '🛡️';
-      case Role.cashier:
-        return '💳';
-      case Role.production:
-        return '🏭';
     }
   }
 

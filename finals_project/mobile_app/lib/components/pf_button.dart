@@ -22,13 +22,13 @@ enum PfButtonVariant {
 
 /// Sizing presets for [PfButton]. Controls tap target height and font size.
 enum PfButtonSize {
-  /// 36h button, 12pt label — for compact rows / inline actions.
+  /// 36h button, 12pt label - for compact rows / inline actions.
   small,
 
-  /// 44h button, 14pt label — the default size, suitable for most screens.
+  /// 44h button, 14pt label - the default size, suitable for most screens.
   medium,
 
-  /// 52h button, 15pt label — for prominent hero actions.
+  /// 52h button, 15pt label - for prominent hero actions.
   large,
 }
 
@@ -41,7 +41,7 @@ enum PfButtonSize {
 /// haptic. When [loading] is true, the label is replaced with a
 /// [CircularProgressIndicator] and the button is disabled.
 ///
-/// Use [fullWidth] to make the button stretch to its parent's width —
+/// Use [fullWidth] to make the button stretch to its parent's width -
 /// useful inside form footers and dialogs.
 ///
 /// Example:
@@ -67,7 +67,7 @@ class PfButton extends StatelessWidget {
     this.fullWidth = false,
   });
 
-  /// Primary (filled) button — for the main CTA on a screen.
+  /// Primary (filled) button - for the main CTA on a screen.
   const PfButton.filled({
     super.key,
     required this.label,
@@ -78,7 +78,7 @@ class PfButton extends StatelessWidget {
     this.fullWidth = false,
   }) : variant = PfButtonVariant.filled;
 
-  /// Outlined button — for secondary actions next to a filled CTA.
+  /// Outlined button - for secondary actions next to a filled CTA.
   const PfButton.outlined({
     super.key,
     required this.label,
@@ -89,7 +89,7 @@ class PfButton extends StatelessWidget {
     this.fullWidth = false,
   }) : variant = PfButtonVariant.outlined;
 
-  /// Text button — for tertiary, low-emphasis actions.
+  /// Text button - for tertiary, low-emphasis actions.
   const PfButton.text({
     super.key,
     required this.label,

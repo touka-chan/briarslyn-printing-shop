@@ -12,9 +12,8 @@ import {
  Check,
  Filter,
  X,
- Shield,
- Eye,
- Inbox,
+  Shield,
+  Inbox,
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
@@ -25,24 +24,27 @@ import {
  KpiCard,
  useToast,
  Modal,
- DataTable,
- PaymentBadge,
- EmptyState,
+  DataTable,
+  PaymentBadge,
+  EmptyState,
+  FeedErrorBanner,
 } from "@/components/ui";
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
 import { subscribeOrders } from "@/lib/services/orders";
 import { subscribeUsers } from "@/lib/services/users";
+import { csvRow, downloadCsv } from "@/lib/csv";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import { useAuth } from "@/lib/auth";
 import {
   useSparkSeries,
   orderCreatedAtKey,
 } from "@/lib/hooks/useSparkSeries";
-import { Order, PaymentMethod, User } from "@/types";
+import { Order, PaymentMethod, TableColumn, User } from "@/types";
 
 const paymentMethodColor: Record<PaymentMethod, string> = {
- "Cash": "#00535b",
- "E-Wallets": "#a8372c",
- "Bank Transfer": "#00479b",
+  "Cash": "#17171c",
+  "E-Wallets": "#52525b",
+  "Bank Transfer": "#a1a1aa",
 };
 
 function todayIso(): string {
@@ -97,32 +99,24 @@ function exportSalesToCSV(rows: Sale[], users: User[]) {
   "payment_method",
   "cashier",
  ];
- const lines = [
-  headers.join(","),
-  ...rows.map((s) => {
-   const cashier = users.find((u) => u.id === s.cashierId)?.name ?? s.cashierId;
-   return [
-    orderDate(s.order),
-    s.order.order_id,
-    `"${s.order.customer_name}"`,
-    `"${s.order.item_type}"`,
-    s.order.quantity,
-    s.order.payment_amount,
-    s.order.payment_status ?? "Unpaid",
-    s.paymentMethod,
-    `"${cashier}"`,
-   ].join(",");
-  }),
- ];
- const blob = new Blob([lines.join("\n")], { type: "text/csv" });
- const url = URL.createObjectURL(blob);
- const a = document.createElement("a");
- a.href = url;
- a.download = `sales-${todayIso()}.csv`;
- document.body.appendChild(a);
- a.click();
- a.remove();
- URL.revokeObjectURL(url);
+  const lines = [
+   headers.join(","),
+   ...rows.map((s) => {
+    const cashier = users.find((u) => u.id === s.cashierId)?.name ?? s.cashierId;
+    return csvRow([
+     orderDate(s.order),
+     s.order.order_id,
+     s.order.customer_name,
+     s.order.item_type,
+     s.order.quantity,
+     s.order.payment_amount,
+     s.order.payment_status ?? "Unpaid",
+     s.paymentMethod,
+     cashier,
+    ]);
+   }),
+  ];
+  downloadCsv(`sales-${todayIso()}.csv`, lines);
 }
 
 const formatPHP = (n: number) =>
@@ -152,71 +146,81 @@ export default function SalesPage() {
  null | "revenue" | "txns" | "avg" | "topCashier"
  >(null);
  const [selSale, setSelSale] = useState<Sale | null>(null);
- const [orders, setOrders] = useState<Order[]>([]);
- const [users, setUsers] = useState<User[]>([]);
- const toast = useToast();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const toast = useToast();
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsubOrders = subscribeOrders(setOrders);
-  const unsubUsers = subscribeUsers(setUsers);
-  return () => {
-   unsubOrders();
-   unsubUsers();
-  };
- }, []);
+  useEffect(() => {
+   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubUsers = subscribeUsers(setUsers, onFeedError);
+   return () => {
+    unsubOrders();
+    unsubUsers();
+   };
+  }, [feedNonce, onFeedError]);
 
- // Convert orders → sales shape, only those with a payment method
- const sales: Sale[] = useMemo(() => {
-  return orders
-   .filter((o) => !!o.payment_method)
-   .map((o) => ({
-    order: o,
-    paymentMethod: (o.payment_method ?? "Cash") as PaymentMethod,
-    cashierId: (o as any).cashier_id ?? "",
-   }));
- }, [orders]);
+  // Fully-paid statuses count as revenue; everything else carrying a
+  // payment method sits in Outstanding until the cashier marks it paid.
+  const isPaidStatus = (s: string | undefined) =>
+   s === "Paid" || s === "Full Paid";
+
+  // Convert orders - sales shape, only those with a payment method
+  // (written by the POS cashier app at order creation).
+  const sales: Sale[] = useMemo(() => {
+   return orders
+    .filter((o) => !!o.payment_method)
+    .map((o) => ({
+     order: o,
+     paymentMethod: (o.payment_method ?? "Cash") as PaymentMethod,
+     cashierId: o.cashier_id ?? "",
+    }));
+  }, [orders]);
+
+  const paidSales = useMemo(
+   () => sales.filter((s) => isPaidStatus(s.order.payment_status)),
+   [sales],
+  );
+  const outstandingSales = useMemo(
+   () => sales.filter((s) => !isPaidStatus(s.order.payment_status)),
+   [sales],
+  );
 
  const cashiers = useMemo(
   () => users.filter((u) => u.role === "POS_Cashier" || u.role === "Owner" || u.role === "Admin"),
   [users],
  );
 
- // Role gating
- if (auth.role === "Production Staff") {
-  return (
-   <AdminLayout title="Sales" subtitle="Restricted access">
-    <ContentCard className="text-center py-16">
-     <EmptyState
-      icon={<Shield className="w-8 h-8" />}
-      title="Access restricted"
-      description="Sales reporting is only available to Admin and POS/Cashier roles."
-     />
-    </ContentCard>
-   </AdminLayout>
+  // Filtering - one shared predicate over both sets. Revenue-bearing
+  // (paid) sales drive KPIs, charts, and exports; unpaid ones surface
+  // under Outstanding Receivables below.
+  const { filtered, filteredOutstanding } = useMemo(() => {
+   const pass = (s: Sale) => {
+    if (!inRange(orderDate(s.order), activeRange, customFrom, customTo)) return false;
+    if (cashierId !== "all" && s.cashierId !== cashierId) return false;
+    if (method !== "all" && s.paymentMethod !== method) return false;
+    if (search) {
+     const q = search.toLowerCase();
+     const cashier = users.find((u) => u.id === s.cashierId)?.name ?? "";
+     if (
+      !s.order.order_id.toLowerCase().includes(q) &&
+      !s.order.customer_name.toLowerCase().includes(q) &&
+      !cashier.toLowerCase().includes(q)
+     )
+      return false;
+    }
+    return true;
+   };
+   return {
+    filtered: paidSales.filter(pass),
+    filteredOutstanding: outstandingSales.filter(pass),
+   };
+  }, [paidSales, outstandingSales, activeRange, customFrom, customTo, cashierId, method, search, users]);
+
+  const outstandingTotal = useMemo(
+   () => filteredOutstanding.reduce((sum, s) => sum + s.order.payment_amount, 0),
+   [filteredOutstanding],
   );
- }
-
- const isReadOnly = auth.role === "POS_Cashier";
-
- // Filtering
- const filtered = useMemo(() => {
-  return sales.filter((s) => {
-   if (!inRange(orderDate(s.order), activeRange, customFrom, customTo)) return false;
-   if (cashierId !== "all" && s.cashierId !== cashierId) return false;
-   if (method !== "all" && s.paymentMethod !== method) return false;
-   if (search) {
-    const q = search.toLowerCase();
-    const cashier = users.find((u) => u.id === s.cashierId)?.name ?? "";
-    if (
-     !s.order.order_id.toLowerCase().includes(q) &&
-     !s.order.customer_name.toLowerCase().includes(q) &&
-     !cashier.toLowerCase().includes(q)
-    )
-     return false;
-   }
-   return true;
-  });
- }, [sales, activeRange, customFrom, customTo, cashierId, method, search, users]);
 
  // KPIs
  const revenue = useMemo(
@@ -226,7 +230,7 @@ export default function SalesPage() {
  const txnCount = filtered.length;
  const avgTxn = txnCount > 0 ? Math.round(revenue / txnCount) : 0;
 
- // Live sparkline series — last 7 days, local TZ.
+ // Live sparkline series - last 7 days, local TZ.
  // Revenue series sums payment_amount per day; others count transactions.
  const revenueSeries = useMemo(() => {
   const keys: string[] = [];
@@ -236,13 +240,13 @@ export default function SalesPage() {
    d.setDate(d.getDate() - i);
    keys.push(d.toISOString().slice(0, 10));
   }
-  return keys.map((k) =>
-   sales
-    .filter((s) => (s.order.created_at ?? "").slice(0, 10) === k)
-    .reduce((sum, s) => sum + s.order.payment_amount, 0),
-  );
- }, [sales]);
- const txnsSeries = useSparkSeries(sales as unknown as { created_at?: string }[], orderCreatedAtKey, 7);
+   return keys.map((k) =>
+    paidSales
+     .filter((s) => (s.order.created_at ?? "").slice(0, 10) === k)
+     .reduce((sum, s) => sum + s.order.payment_amount, 0),
+   );
+  }, [paidSales]);
+  const txnsSeries = useSparkSeries(paidSales as unknown as { created_at?: string }[], orderCreatedAtKey, 7);
  const avgSeries = useMemo(() => {
   const keys: string[] = [];
   const now = new Date();
@@ -251,16 +255,16 @@ export default function SalesPage() {
    d.setDate(d.getDate() - i);
    keys.push(d.toISOString().slice(0, 10));
   }
-  return keys.map((k) => {
-   const day = sales.filter(
-    (s) => (s.order.created_at ?? "").slice(0, 10) === k,
-   );
-   if (day.length === 0) return 0;
-   return Math.round(
-    day.reduce((sum, s) => sum + s.order.payment_amount, 0) / day.length,
-   );
-  });
- }, [sales]);
+   return keys.map((k) => {
+    const day = paidSales.filter(
+     (s) => (s.order.created_at ?? "").slice(0, 10) === k,
+    );
+    if (day.length === 0) return 0;
+    return Math.round(
+     day.reduce((sum, s) => sum + s.order.payment_amount, 0) / day.length,
+    );
+   });
+  }, [paidSales]);
  const topCashierSeries = useMemo(() => {
   const keys: string[] = [];
   const now = new Date();
@@ -269,16 +273,16 @@ export default function SalesPage() {
    d.setDate(d.getDate() - i);
    keys.push(d.toISOString().slice(0, 10));
   }
-  return keys.map((k) => {
-   const totals: Record<string, number> = {};
-   for (const s of sales) {
-    if ((s.order.created_at ?? "").slice(0, 10) !== k) continue;
-    totals[s.cashierId] = (totals[s.cashierId] ?? 0) + s.order.payment_amount;
-   }
-   const top = Object.values(totals).sort((a, b) => b - a)[0] ?? 0;
-   return top;
-  });
- }, [sales]);
+   return keys.map((k) => {
+    const totals: Record<string, number> = {};
+    for (const s of paidSales) {
+     if ((s.order.created_at ?? "").slice(0, 10) !== k) continue;
+     totals[s.cashierId] = (totals[s.cashierId] ?? 0) + s.order.payment_amount;
+    }
+    const top = Object.values(totals).sort((a, b) => b - a)[0] ?? 0;
+    return top;
+   });
+  }, [paidSales]);
 
  const topCashier = useMemo(() => {
   if (filtered.length === 0) return null;
@@ -292,9 +296,9 @@ export default function SalesPage() {
   return { id: winnerId, name: winner?.name ?? winnerId, total: totals[winnerId] };
  }, [filtered, users]);
 
- const tabCounts = useMemo(() => {
-  const f = (range: string) => {
-   return sales.filter((s) => {
+  const tabCounts = useMemo(() => {
+   const f = (range: string) => {
+    return paidSales.filter((s) => {
     if (cashierId !== "all" && s.cashierId !== cashierId) return false;
     if (method !== "all" && s.paymentMethod !== method) return false;
     if (search) {
@@ -317,7 +321,7 @@ export default function SalesPage() {
    quarter: f("quarter"),
    custom: f("custom"),
   };
- }, [sales, cashierId, method, search, customFrom, customTo, users]);
+  }, [paidSales, cashierId, method, search, customFrom, customTo, users]);
 
  const rangeTabs = TIME_RANGES.map((r) => ({
   id: r.id,
@@ -325,33 +329,80 @@ export default function SalesPage() {
   count: tabCounts[r.id as keyof typeof tabCounts],
  }));
 
- const revenueTrend = useMemo(() => {
-  const buckets: { n: number; label: string }[] = (() => {
-   if (activeRange === "today") return [{ n: 1, label: "Today" }];
-   if (activeRange === "week")
-    return [1, 2, 3, 4, 5, 6, 7].map((d) => ({ n: d, label: `D-${8 - d}` }));
-   if (activeRange === "quarter")
-    return [1, 2, 3, 4, 5, 6].map((d) => ({ n: d, label: `M-${6 - d}` }));
-   if (activeRange === "custom") {
-    const start = new Date(customFrom + "T00:00:00Z").getTime();
-    const end = new Date(customTo + "T00:00:00Z").getTime();
-    const days = Math.max(1, Math.round((end - start) / 86400000) + 1);
-    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => ({
-     n: i,
-     label: `W${i}`,
-    }));
+  // Real date bucketing: each paid sale lands in the bucket its order
+  // date falls in (no hashing, no forced totals). Ranges mirror
+  // `rangeStart`/`inRange` above so every filtered sale has a bucket.
+  const revenueTrend = useMemo(() => {
+   const dayMs = 86400000;
+   const toDayMs = (iso: string): number | null => {
+    const t = new Date(`${iso.slice(0, 10)}T00:00:00`).getTime();
+    return Number.isNaN(t) ? null : t;
+   };
+   const today = new Date();
+   today.setHours(0, 0, 0, 0);
+   const todayMs = today.getTime();
+
+   let labels: string[];
+   let startMs: number;
+   let spanDays: number;
+   let mode: "day" | "monthOfQuarter" | "weekOfMonth" | "proportional";
+   if (activeRange === "today") {
+    labels = ["Today"];
+    startMs = todayMs;
+    spanDays = 1;
+    mode = "day";
+   } else if (activeRange === "week") {
+    labels = [6, 5, 4, 3, 2, 1, 0].map((d) =>
+     d === 0 ? "Today" : `D-${d}`,
+    );
+    startMs = todayMs - 6 * dayMs;
+    spanDays = 7;
+    mode = "day";
+   } else if (activeRange === "quarter") {
+    labels = [5, 4, 3, 2, 1, 0].map((m) => `M-${m}`);
+    startMs = todayMs - 89 * dayMs;
+    spanDays = 90;
+    mode = "monthOfQuarter";
+   } else if (activeRange === "custom") {
+    const s = new Date(`${customFrom}T00:00:00`).getTime();
+    const e = new Date(`${customTo}T00:00:00`).getTime();
+    const days = Number.isNaN(s) || Number.isNaN(e)
+     ? 1
+     : Math.max(1, Math.round((e - s) / dayMs) + 1);
+    labels = Array.from({ length: 10 }, (_, i) => `W${i + 1}`);
+    startMs = s;
+    spanDays = days;
+    mode = "proportional";
+   } else {
+    // "month": week-of-month buckets.
+    labels = ["W1", "W2", "W3", "W4"];
+    startMs = todayMs - 29 * dayMs;
+    spanDays = 30;
+    mode = "weekOfMonth";
    }
-   return [1, 2, 3, 4].map((d) => ({ n: d, label: `W${d}` }));
-  })();
-  const out = buckets.map((b) => ({ name: b.label, revenue: 0 }));
-  for (const s of filtered) {
-   const h =
-   s.order.order_id.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
-   out[Math.abs(h) % out.length].revenue += s.order.payment_amount;
-  }
-  if (out.length > 0) out[out.length - 1].revenue = revenue;
-  return out;
- }, [activeRange, customFrom, customTo, filtered, revenue]);
+
+   const out = labels.map((name) => ({ name, revenue: 0 }));
+   const nowYM = today.getFullYear() * 12 + today.getMonth();
+   for (const s of filtered) {
+    const saleMs = toDayMs(orderDate(s.order));
+    if (saleMs === null) continue;
+    let idx: number;
+    if (mode === "monthOfQuarter") {
+     const d = new Date(saleMs);
+     const monthsAgo = nowYM - (d.getFullYear() * 12 + d.getMonth());
+     idx = 5 - monthsAgo;
+    } else if (mode === "weekOfMonth") {
+     idx = Math.min(3, Math.floor((new Date(saleMs).getDate() - 1) / 7));
+    } else {
+     const offset = Math.floor((saleMs - startMs) / dayMs);
+     if (offset < 0) continue;
+     idx = Math.min(out.length - 1, Math.floor((offset / spanDays) * out.length));
+    }
+    if (idx < 0 || idx >= out.length) continue;
+    out[idx].revenue += s.order.payment_amount;
+   }
+   return out;
+  }, [activeRange, customFrom, customTo, filtered]);
 
  const byMethod = useMemo(() => {
   const totals: Record<PaymentMethod, number> = {
@@ -381,7 +432,7 @@ export default function SalesPage() {
   };
   window.addEventListener("afterprint", cleanup);
   window.print();
-  toast.success("Generating Sales Report (PDF) — use the browser print dialog");
+  toast.success("Generating Sales Report (PDF) - use the browser print dialog");
  };
  const handleCustomRangeApply = () => {
   if (!customFrom || !customTo || customFrom > customTo) {
@@ -389,7 +440,7 @@ export default function SalesPage() {
    return;
   }
   setActiveRange("custom");
-  toast.success(`Custom range applied: ${customFrom} → ${customTo}`);
+  toast.success(`Custom range applied: ${customFrom} - ${customTo}`);
  };
  const handleReset = () => {
   setActiveRange("month");
@@ -399,12 +450,7 @@ export default function SalesPage() {
   toast.info("Filters reset");
  };
 
- const saleColumns: {
-  key: string;
-  header: string;
-  render?: (s: Sale) => ReactNode;
-  className?: string;
- }[] = [
+  const saleColumns: TableColumn<Sale>[] = [
   {
    key: "date",
    header: "Date",
@@ -427,7 +473,7 @@ export default function SalesPage() {
    header: "Items",
    render: (s) => (
     <span className="text-sm text-printflow-on-surface-variant">
-     {s.order.item_type} × {s.order.quantity.toLocaleString()}
+     {s.order.item_type} x {s.order.quantity.toLocaleString()}
     </span>
    ),
   },
@@ -467,7 +513,7 @@ export default function SalesPage() {
    header: "Cashier",
    render: (s) => (
     <span className="text-sm">
-     {users.find((u) => u.id === s.cashierId)?.name ?? "—"}
+     {users.find((u) => u.id === s.cashierId)?.name ?? "-"}
     </span>
    ),
   },
@@ -521,27 +567,39 @@ export default function SalesPage() {
   },
  };
 
- return (
-  <AdminLayout
-   title="Sales"
-   subtitle="Revenue and transaction overview from cashier activity"
-  >
-   {isReadOnly && (
-    <div className="mb-6 p-3.5 rounded-xl border border-printflow-primary-fixed/40 bg-printflow-primary-fixed/10 flex items-center gap-3">
-     <Eye className="w-4 h-4 text-printflow-primary shrink-0" />
-     <p className="text-sm text-printflow-on-surface">
-      <span className="font-semibold">Read-only.</span> Only Admins can
-      export sales data. Filters, KPIs, and the transactions table are
-      still available.
-     </p>
-    </div>
-   )}
+  // Role gating (after all hooks - rules-of-hooks: no early return above).
+  if (auth.role === "Production Staff") {
+   return (
+    <AdminLayout title="Sales" subtitle="Restricted access">
+     <ContentCard className="text-center py-16">
+      <EmptyState
+       icon={<Shield className="w-8 h-8" />}
+       title="Access restricted"
+       description="Sales reporting is only available to Owner and Admin roles."
+      />
+     </ContentCard>
+    </AdminLayout>
+   );
+  }
 
-   <div className="space-y-8">
+   return (
+    <AdminLayout
+     title="Sales"
+     subtitle="Revenue and transaction overview from cashier activity"
+     onSearch={setSearch}
+    >
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={orders.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <div className="space-y-8">
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
      <KpiCard
       label="Total Revenue"
-      value={txnCount > 0 ? formatPHP(revenue) : "—"}
+      value={txnCount > 0 ? formatPHP(revenue) : "-"}
       icon="OrdersIcon"
       sparkline={revenueSeries}
       sparklineTone="primary"
@@ -561,9 +619,9 @@ export default function SalesPage() {
      />
      <KpiCard
       label="Avg Transaction"
-      value={txnCount > 0 ? formatPHP(avgTxn) : "—"}
+      value={txnCount > 0 ? formatPHP(avgTxn) : "-"}
       icon={<Wallet className="w-5 h-5" />}
-      change={txnCount > 0 ? "per sale" : "—"}
+      change={txnCount > 0 ? "per sale" : "-"}
       changeType="neutral"
       sparkline={avgSeries}
       sparklineTone="primary"
@@ -572,7 +630,7 @@ export default function SalesPage() {
      />
      <KpiCard
       label="Top Cashier"
-      value={topCashier ? topCashier.name : "—"}
+      value={topCashier ? topCashier.name : "-"}
       icon="Users"
       change={topCashier ? formatPHP(topCashier.total) : "no sales"}
       changeType="positive"
@@ -680,7 +738,7 @@ export default function SalesPage() {
      {activeRange === "custom" && (
       <div className="mt-3 flex items-center gap-2 text-xs text-printflow-on-surface-variant">
        <Filter className="w-3.5 h-3.5" />
-       Custom range active: {customFrom} → {customTo}
+       Custom range active: {customFrom} - {customTo}
       </div>
      )}
     </ContentCard>
@@ -698,7 +756,7 @@ export default function SalesPage() {
         data={revenueTrend}
         xKey="name"
         yKeys={["revenue"]}
-        colors={["#00535b"]}
+        colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
        />
@@ -727,9 +785,9 @@ export default function SalesPage() {
      </ContentCard>
     </div>
 
-    <ContentCard
-     title="Transactions"
-     subtitle={`${filtered.length} sales`}
+     <ContentCard
+      title="Transactions"
+      subtitle={`${filtered.length} paid sales`}
      className="min-w-0 overflow-hidden w-full"
     >
      <FilterToolbar
@@ -740,23 +798,16 @@ export default function SalesPage() {
       onSearchChange={setSearch}
       searchValue={search}
       customActions={
-       !isReadOnly ? (
-        <div className="flex items-center gap-2">
-         <Button variant="secondary" onClick={handleDownloadPDF}>
-          <FileText className="w-4 h-4" />
-          Download PDF
-         </Button>
-         <Button variant="primary" onClick={handleExportCSV} disabled={filtered.length === 0}>
-          <Download className="w-4 h-4" />
-          Export CSV
-         </Button>
-        </div>
-       ) : (
-        <span className="text-xs text-printflow-on-surface-variant flex items-center gap-1.5">
-         <Eye className="w-3.5 h-3.5" />
-         Read-only role
-        </span>
-       )
+       <div className="flex items-center gap-2">
+        <Button variant="secondary" onClick={handleDownloadPDF}>
+         <FileText className="w-4 h-4" />
+         Download PDF
+        </Button>
+        <Button variant="primary" onClick={handleExportCSV} disabled={filtered.length === 0}>
+         <Download className="w-4 h-4" />
+         Export CSV
+        </Button>
+       </div>
       }
      />
      <div className="mt-5 overflow-x-auto -mx-6 px-6">
@@ -768,18 +819,48 @@ export default function SalesPage() {
        />
       ) : (
        <DataTable
-        columns={saleColumns as any}
+        columns={saleColumns}
         data={filtered}
         keyExtractor={(s) => s.order.order_id}
         emptyMessage="No sales in this range"
         onRowClick={(s) => setSelSale(s)}
+        pageSize={25}
        />
       )}
-     </div>
-    </ContentCard>
+      </div>
+     </ContentCard>
 
-    <Modal
-     isOpen={kpiModal !== null}
+     <ContentCard
+      title="Outstanding Receivables"
+      subtitle={
+       filteredOutstanding.length > 0
+        ? `${formatPHP(outstandingTotal)} across ${filteredOutstanding.length} unpaid order${filteredOutstanding.length === 1 ? "" : "s"}`
+        : "Nothing awaiting payment"
+      }
+      className="min-w-0 overflow-hidden w-full"
+     >
+      <div className="mt-5 overflow-x-auto -mx-6 px-6">
+       {filteredOutstanding.length === 0 ? (
+        <EmptyState
+         icon={<Inbox className="w-7 h-7" />}
+         title="No outstanding payments"
+         description="All recorded sales in this range are fully paid."
+        />
+       ) : (
+        <DataTable
+         columns={saleColumns}
+         data={filteredOutstanding}
+         keyExtractor={(s) => s.order.order_id}
+         emptyMessage="No outstanding payments"
+         onRowClick={(s) => setSelSale(s)}
+         pageSize={25}
+        />
+       )}
+      </div>
+     </ContentCard>
+
+     <Modal
+      isOpen={kpiModal !== null}
      onClose={() => setKpiModal(null)}
      title={kpiModal ? kpiMeta[kpiModal].title : ""}
      description={kpiModal ? kpiMeta[kpiModal].desc : undefined}
@@ -794,7 +875,6 @@ export default function SalesPage() {
        >
         Close
        </Button>
-       {!isReadOnly && (
         <Button
          variant="primary"
          onClick={() => {
@@ -806,7 +886,6 @@ export default function SalesPage() {
          <Download className="w-4 h-4" />
          Download as PDF
         </Button>
-       )}
       </div>
      }
     >
@@ -818,10 +897,11 @@ export default function SalesPage() {
       />
      ) : (
       <DataTable
-       columns={saleColumns as any}
+       columns={saleColumns}
        data={drillDown}
        keyExtractor={(s) => s.order.order_id}
        emptyMessage="No sales in this range"
+       pageSize={10}
       />
      )}
     </Modal>
@@ -832,7 +912,7 @@ export default function SalesPage() {
      title={selSale ? selSale.order.order_id : ""}
      description={
       selSale
-       ? `${selSale.order.customer_name} • ${formatPHP(selSale.order.payment_amount)}`
+       ? `${selSale.order.customer_name} - ${formatPHP(selSale.order.payment_amount)}`
        : undefined
      }
      icon={selSale ? <Receipt className="w-5 h-5" /> : undefined}
@@ -865,7 +945,7 @@ export default function SalesPage() {
           ITEM
          </p>
          <p className="text-sm font-medium mt-1 truncate">
-          {selSale.order.item_type} × {selSale.order.quantity.toLocaleString()}
+          {selSale.order.item_type} x {selSale.order.quantity.toLocaleString()}
          </p>
         </div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
@@ -902,7 +982,7 @@ export default function SalesPage() {
           CASHIER
          </p>
          <p className="text-sm font-medium mt-1">
-          {users.find((u) => u.id === selSale.cashierId)?.name ?? "—"}
+          {users.find((u) => u.id === selSale.cashierId)?.name ?? "-"}
           <span className="type-mono text-xs text-printflow-on-surface-variant ml-2">
             {selSale.cashierId}
           </span>

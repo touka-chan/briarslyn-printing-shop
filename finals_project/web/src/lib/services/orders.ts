@@ -1,29 +1,29 @@
 /**
- * Firestore service — orders collection.
+ * Firestore service - orders collection.
  *
- * Field shape (camelCase in the TS types ↔ snake_case in Firestore):
- *   customerName      ↔ customer_name
- *   customerEmail     ↔ customer_email
- *   customerPhone     ↔ customer_phone
- *   customerRegion    ↔ customer_region
- *   customerProvince  ↔ customer_province
- *   customerCity      ↔ customer_city
- *   customerBarangay  ↔ customer_barangay
- *   customerZip       ↔ customer_zip
- *   itemType          ↔ item_type
- *   layoutFile        ↔ layout_file
- *   targetDate        ↔ target_date (Timestamp)
- *   paymentAmount     ↔ payment_amount
- *   paymentStatus     ↔ payment_status
- *   paymentMethod     ↔ payment_method
- *   estimatedCompletion ↔ estimated_completion (Timestamp)
- *   basedOn           ↔ based_on (string[])
- *   createdAt         ↔ created_at (Timestamp)
- *   startedAt         ↔ started_at (Timestamp, optional)
- *   completedAt       ↔ completed_at (Timestamp, optional)
- *   cashierId         ↔ cashier_id
- *   productionNotes   ↔ production_notes
- *   actualMinutes     ↔ actual_minutes
+ * Field shape (camelCase in the TS types <-> snake_case in Firestore):
+ *   customerName      <-> customer_name
+ *   customerEmail     <-> customer_email
+ *   customerPhone     <-> customer_phone
+ *   customerRegion    <-> customer_region
+ *   customerProvince  <-> customer_province
+ *   customerCity      <-> customer_city
+ *   customerBarangay  <-> customer_barangay
+ *   customerZip       <-> customer_zip
+ *   itemType          <-> item_type
+ *   layoutFile        <-> layout_file
+ *   targetDate        <-> target_date (Timestamp)
+ *   paymentAmount     <-> payment_amount
+ *   paymentStatus     <-> payment_status
+ *   paymentMethod     <-> payment_method
+ *   estimatedCompletion <-> estimated_completion (Timestamp)
+ *   basedOn           <-> based_on (string[])
+ *   createdAt         <-> created_at (Timestamp)
+ *   startedAt         <-> started_at (Timestamp, optional)
+ *   completedAt       <-> completed_at (Timestamp, optional)
+ *   cashierId         <-> cashier_id
+ *   productionNotes   <-> production_notes
+ *   actualMinutes     <-> actual_minutes
  */
 import {
  collection,
@@ -39,28 +39,84 @@ import {
  type Unsubscribe,
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
+import { logAudit } from "@/lib/services/audit";
 import type { Order } from "@/types";
-import { getPriority, getETA } from "@/lib/derived";
+import {
+  completedUnitsLast7d,
+  getLiveETA,
+  getPriority,
+  isActiveStatus,
+} from "@/lib/derived";
 
 const COLL = "orders";
 
-/** Subscribe to all orders, sorted by createdAt desc. */
-export function subscribeOrders(cb: (orders: Order[]) => void): Unsubscribe {
-  const q = query(collection(requireDb(), COLL), orderBy("created_at", "desc"));
-  return onSnapshot(q, (snap) => {
-    const orders = snap.docs.map((d) => fromFirestore(d.id, d.data()));
-    cb(orders);
-  });
+/** Firestore subscription failure handler (permission/offline). */
+export type FeedErrorHandler = (e: unknown) => void;
+
+function logFeedError(scope: string): FeedErrorHandler {
+  return (e) => {
+    console.error(`[${scope}] subscription failed:`, e);
+  };
 }
 
-/** Subscribe to one order by id. */
+/**
+ * Subscribe to all orders, sorted by createdAt desc.
+ *
+ * Priority is re-derived live from each order's target date on every
+ * snapshot (Overdue < today, Urgent <= 2 days, else Upcoming), and the
+ * ETA is recomputed from the live backlog (Title 1 objective 9), so
+ * tags, tabs, counts, and dates never go stale as the clock advances -
+ * the stored values are only create-time defaults.
+ */
+export function subscribeOrders(
+  cb: (orders: Order[]) => void,
+  onError: FeedErrorHandler = logFeedError("orders"),
+): Unsubscribe {
+  const q = query(collection(requireDb(), COLL), orderBy("created_at", "desc"));
+  return onSnapshot(q, (snap) => {
+    const now = new Date();
+    const parsed = snap.docs.map((d) => fromFirestore(d.id, d.data()));
+    const active = parsed.filter((o) => isActiveStatus(o.status));
+    const rate = completedUnitsLast7d(parsed, now) / 7;
+    cb(
+      parsed.map((o) => {
+        o.priority = getPriority(o, now);
+        if (isActiveStatus(o.status)) {
+          const eta = getLiveETA(o, active, rate, now);
+          o.estimated_completion = eta.iso;
+          o.based_on = eta.basedOn;
+        }
+        return o;
+      }),
+    );
+  }, onError);
+}
+
+/**
+ * Subscribe to one order by id (priority + ETA derived live against a
+ * standalone context - rank 0, cold-start rate - since the full queue
+ * isn't in scope here).
+ */
 export function subscribeOrder(
   id: string,
   cb: (order: Order | null) => void,
+  onError: FeedErrorHandler = logFeedError("orders"),
 ): Unsubscribe {
   return onSnapshot(doc(requireDb(), COLL, id), (snap) => {
-    cb(snap.exists() ? fromFirestore(snap.id, snap.data()) : null);
-  });
+    if (!snap.exists()) {
+      cb(null);
+      return;
+    }
+    const now = new Date();
+    const o = fromFirestore(snap.id, snap.data());
+    o.priority = getPriority(o, now);
+    if (isActiveStatus(o.status)) {
+      const eta = getLiveETA(o, [o], 0, now);
+      o.estimated_completion = eta.iso;
+      o.based_on = eta.basedOn;
+    }
+    cb(o);
+  }, onError);
 }
 
 /** Create a new order. Returns the generated orderId. */
@@ -99,18 +155,53 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
     cashier_id: input.cashier_id ?? null,
   };
   await setDoc(doc(requireDb(), COLL, orderId), doc_);
+  logAudit({
+   action: "order_created",
+   module: "orders",
+   record_id: orderId,
+   record_label: `Order ${orderId} (${input.item_type} x ${input.quantity})`,
+   old_value: null,
+   new_value: `status=${input.status}, amount=${input.payment_amount}`,
+  });
   return orderId;
 }
 
-/** Update the order's status (production flow). */
+/**
+ * Update the order's status (production flow).
+ *
+ * Entering "In Production" means materials were pulled: the recipe is
+ * auto-deducted afterwards (idempotent - re-entries deduct nothing).
+ * Stock failures never block the status change; a missing BOM only
+ * warns (log usage manually instead).
+ */
 export async function updateOrderStatus(
   id: string,
   status: Order["status"],
+  byUid?: string | null,
 ): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
+  const prevStatus = (prevSnap?.data()?.status as string | undefined) ?? null;
   const patch: Record<string, unknown> = { status };
   if (status === "In Production") patch.started_at = Timestamp.now();
   if (status === "Completed") patch.completed_at = Timestamp.now();
   await updateDoc(doc(requireDb(), COLL, id), patch);
+  logAudit({
+   action: "order_status_updated",
+   module: "orders",
+   record_id: id,
+   record_label: `Order ${id}`,
+   old_value: prevStatus,
+   new_value: status,
+  });
+  if (status === "In Production") {
+    try {
+      const { autoDeductForOrder } = await import("@/lib/services/usage");
+      await autoDeductForOrder(id, byUid ?? null);
+    } catch (e) {
+      // Status already moved; deduction retries on re-entry.
+      console.warn(`[orders] auto-deduct failed for ${id}:`, e);
+    }
+  }
 }
 
 /** Update the order's payment status. */
@@ -119,30 +210,43 @@ export async function updatePaymentStatus(
   paymentStatus: Order["payment_status"],
   paymentMethod?: Order["payment_method"],
 ): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
+  const prev = prevSnap?.data() as Record<string, unknown> | undefined;
   const patch: Record<string, unknown> = { payment_status: paymentStatus };
   if (paymentMethod) patch.payment_method = paymentMethod;
   await updateDoc(doc(requireDb(), COLL, id), patch);
+  logAudit({
+   action: "payment_updated",
+   module: "payments",
+   record_id: id,
+   record_label: `Order ${id}`,
+   old_value:
+    paymentLabel(prev?.payment_status, prev?.payment_method) ?? null,
+   new_value: paymentLabel(paymentStatus, paymentMethod ?? prev?.payment_method),
+  });
 }
 
-/** Mark an order as cancelled. We never delete orders — history is kept. */
+/** Mark an order as cancelled. We never delete orders - history is kept. */
 export async function cancelOrder(id: string): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
+  const prevStatus = (prevSnap?.data()?.status as string | undefined) ?? null;
   await updateDoc(doc(requireDb(), COLL, id), { status: "Cancelled" });
+  logAudit({
+   action: "order_cancelled",
+   module: "orders",
+   record_id: id,
+   record_label: `Order ${id}`,
+   old_value: prevStatus,
+   new_value: "Cancelled",
+  });
 }
 
-/** Mark an order as completed with optional production notes. */
-export async function completeOrder(
-  id: string,
-  notes?: string,
-  actualMinutes?: number,
-): Promise<void> {
-  const patch: Record<string, unknown> = {
-    status: "Completed",
-    completed_at: Timestamp.now(),
-  };
-  if (notes) patch.production_notes = notes;
-  if (actualMinutes != null) patch.actual_minutes = actualMinutes;
-  await updateDoc(doc(requireDb(), COLL, id), patch);
+function paymentLabel(status: unknown, method: unknown): string | null {
+  if (status == null && method == null) return null;
+  return `${String(status ?? "-")} via ${String(method ?? "-")}`;
 }
+
+
 
 // ---- internal helpers ----
 
@@ -165,12 +269,17 @@ function fromFirestore(id: string, data: Record<string, unknown>): Order {
     payment_amount: (data.payment_amount as number) ?? 0,
     payment_status: (data.payment_status as Order["payment_status"]) ?? "Unpaid",
     payment_method: (data.payment_method as Order["payment_method"]) ?? undefined,
+    cashier_id: (data.cashier_id as string) ?? undefined,
+    stock_deducted: (data.stock_deducted as boolean) ?? false,
+    deducted_at: fromTimestamp(data.deducted_at),
     status: (data.status as Order["status"]) ?? "Pending",
     priority: (data.priority as Order["priority"]) ?? "Upcoming",
     estimated_completion:
       fromTimestamp(data.estimated_completion) ?? new Date().toISOString().slice(0, 10),
     based_on: (data.based_on as Order["based_on"]) ?? [],
     created_at: fromTimestamp(data.created_at),
+    started_at: fromTimestamp(data.started_at),
+    completed_at: fromTimestamp(data.completed_at),
   };
 }
 
@@ -195,8 +304,8 @@ function computeEta(
   priority: Order["priority"],
   _now: Date,
 ): { iso: string; basedOn: string[] } {
-  // +1 day for Overdue, +2 for Urgent, +3 for Upcoming — same rules the
-  // mockData used, just expressed in days.
+  // +1 day for Overdue, +2 for Urgent, +3 for Upcoming - rule-based
+  // estimate from the order's priority band (see Title 1 objective 9).
   const days = priority === "Overdue" ? 1 : priority === "Urgent" ? 2 : 3;
   const d = new Date(targetDate);
   d.setDate(d.getDate() + days);

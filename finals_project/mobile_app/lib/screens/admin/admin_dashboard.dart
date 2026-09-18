@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../app_router.dart';
+import '../../auth/auth.dart';
 import '../../theme/app_theme.dart';
 
 class AdminDashboard extends StatelessWidget {
@@ -10,7 +12,37 @@ class AdminDashboard extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Admin / Owner'),
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: () => Navigator.pop(context)),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
+            onPressed: () async {
+              final auth = AuthProvider.of(context);
+              try {
+                await auth.signOut();
+              } catch (_) {
+                // Stay put on failure (previously the finally block
+                // navigated to login even while still signed in).
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Sign out failed. Try again.'),
+                    ),
+                  );
+                }
+                return;
+              }
+              if (!context.mounted) return;
+              // The shell gate usually navigates first once sign-out
+              // completes - push only if we're not already heading there.
+              if (ModalRoute.of(context)?.settings.name != AppRoutes.login) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context,
+                  AppRoutes.login,
+                  (_) => false,
+                );
+              }
+            },
+          ),
         ],
       ),
       body: Padding(
@@ -41,7 +73,11 @@ class AdminDashboard extends StatelessWidget {
                     FilledButton.icon(
                       onPressed: () {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Open the web dashboard at http://localhost:3000')),
+                          const SnackBar(
+                            content: Text(
+                              'Open the web Admin dashboard from your deployed web app URL.',
+                            ),
+                          ),
                         );
                       },
                       icon: const Icon(Icons.open_in_new),
@@ -60,8 +96,8 @@ class AdminDashboard extends StatelessWidget {
                   children: [
                     const Text('Quick links', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
-                    _quickLink(context, Icons.receipt_long, 'POS / Cashier', '/cashier'),
-                    _quickLink(context, Icons.precision_manufacturing, 'Production Queue', '/production'),
+                    _quickLink(context, Icons.receipt_long, 'POS / Cashier', AppRoutes.cashierHome),
+                    _quickLink(context, Icons.precision_manufacturing, 'Production Queue', AppRoutes.productionHome),
                   ],
                 ),
               ),
@@ -78,8 +114,12 @@ class AdminDashboard extends StatelessWidget {
       title: Text(label),
       trailing: const Icon(Icons.chevron_right),
       onTap: () {
+        // Role-gated: an Admin session can't enter the cashier/production
+        // shells, so the link explains instead of pushing a dead route.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$label — switch role from the login screen.')),
+          SnackBar(
+            content: Text('$label lives at $route - switch role from the login screen.'),
+          ),
         );
       },
     );

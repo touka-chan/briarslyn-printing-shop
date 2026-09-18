@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 
 import '../auth/auth_service.dart';
 import '../models/order.dart';
+import 'audit_service.dart';
 import 'firebase_orders.dart' as fb;
+import 'usage_service.dart';
 
 /// Service layer for order operations with permission enforcement.
 ///
@@ -26,9 +28,30 @@ class OrderService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderUpdatePayment);
+    Map<String, dynamic>? prev;
+    try {
+      final prevSnap = await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId)
+          .get();
+      prev = prevSnap.data();
+    } catch (_) {
+      prev = null;
+    }
     try {
       await fb.updatePaymentStatus(orderId, newPaymentStatus);
       debugPrint('[OrderService] Updated payment for $orderId to $newPaymentStatus');
+      AuditService.log(
+        actor: auth.currentUser,
+        action: 'payment_updated',
+        module: 'payments',
+        recordId: orderId,
+        recordLabel: 'Order $orderId',
+        oldValue: prev == null
+            ? null
+            : '${prev['payment_status'] ?? '-'} via ${prev['payment_method'] ?? '-'}',
+        newValue: '$newPaymentStatus via ${prev?['payment_method'] ?? '-'}',
+      );
     } catch (e) {
       debugPrint('[OrderService] updatePaymentStatus failed: $e');
       rethrow;
@@ -59,6 +82,33 @@ class OrderService {
     }
     await fb.updateOrderStatus(orderId, next);
     debugPrint('[OrderService] Advanced $orderId from $currentStatus to $next');
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'order_status_updated',
+      module: 'orders',
+      recordId: orderId,
+      recordLabel: 'Order $orderId',
+      oldValue: currentStatus,
+      newValue: next,
+    );
+    // Entering production = materials pulled: auto-deduct the recipe.
+    // Idempotent via the order's stock_deducted flag - re-entering
+    // In Production later deducts nothing. A missing BOM only warns;
+    // the status change itself always stands.
+    if (next == 'In Production') {
+      try {
+        final res =
+            await UsageService.autoDeductForOrder(orderId: orderId, auth: auth);
+        if (res.skipped) {
+          debugPrint('[OrderService] Auto-deduct skipped for $orderId (no BOM or already deducted)');
+        }
+      } catch (e) {
+        // Stock problems must never block the production flow - the
+        // order is already In Production. Nothing is half-written
+        // (transaction), so a later re-entry still deducts correctly.
+        debugPrint('[OrderService] Auto-deduct failed for $orderId: $e');
+      }
+    }
   }
 
   /// Cancels an order.
@@ -86,6 +136,15 @@ class OrderService {
     }
     await fb.cancelOrder(orderId);
     debugPrint('[OrderService] Cancelled order $orderId');
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'order_cancelled',
+      module: 'orders',
+      recordId: orderId,
+      recordLabel: 'Order $orderId',
+      oldValue: currentStatus,
+      newValue: 'Cancelled',
+    );
   }
 
   /// Creates a new order. Returns the persisted order id.
@@ -98,6 +157,14 @@ class OrderService {
     auth.assertCan(Permission.orderCreate);
     final id = await fb.createOrder(order);
     debugPrint('[OrderService] Created new order $id');
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'order_created',
+      module: 'orders',
+      recordId: id,
+      recordLabel: 'Order $id (${order.itemType} x ${order.quantity})',
+      newValue: 'status=${order.status}, amount=${order.paymentAmount}',
+    );
     return id;
   }
 

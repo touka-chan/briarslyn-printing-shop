@@ -1,5 +1,5 @@
 /**
- * Firebase Web SDK bootstrap — the single import point for Firebase in the
+ * Firebase Web SDK bootstrap - the single import point for Firebase in the
  * web app. Reads `process.env.NEXT_PUBLIC_FIREBASE_*` (set in `.env.local`),
  * initialises the app once, and exports the two clients every page needs.
  *

@@ -7,6 +7,13 @@ import '../../design/tokens.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
 
+/// Initials for the avatar (first letters of the first two name parts).
+String _initialsOf(String name) {
+  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+  final letters = parts.take(2).map((p) => p[0].toUpperCase()).join();
+  return letters.isEmpty ? '-' : letters;
+}
+
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
@@ -14,13 +21,13 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = AuthProvider.of(context);
     final role = auth.currentRole;
-    final isCashier = auth.isCashier;
+    final user = auth.currentUser;
 
-    final name = isCashier ? 'Maria Santos' : 'Production 01';
-    final email = isCashier ? 'maria@brialyns.com' : 'prod01@brialyns.com';
-    final initials = isCashier ? 'MS' : 'P1';
+    final name = (user?.name.isNotEmpty ?? false) ? user!.name : 'Staff';
+    final email = user?.email ?? '-';
+    final initials = _initialsOf(name);
     final roleLabel = role?.label ?? 'Guest';
-    final lastLogin = isCashier ? '2026-08-20 07:45' : '2026-08-20 08:00';
+    final lastLogin = user?.lastLogin ?? '-';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -103,8 +110,8 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             const _SettingsRow(
               icon: Icons.info_outline_rounded,
-              title: 'PrintFlow',
-              subtitle: 'Version 1.0.0 • Brialyns Art Sign',
+              title: 'Brialyns Art Sign',
+              subtitle: 'Version 1.0.0 - Brialyns Art Sign',
             ),
             const _SettingsRow(
               icon: Icons.help_outline_rounded,

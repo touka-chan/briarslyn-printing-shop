@@ -1,16 +1,13 @@
 "use client";
 
 /**
- * /users — VIEW-ONLY directory of Firebase Auth sign-in accounts.
+ * /users - directory of Firebase Auth sign-in accounts + approval desk.
  *
- * Edit/create flow was removed when the Add/Edit employee form was
- * consolidated onto /employees (the source of truth for HR records).
- * Sign-in accounts here are read-only: admins can browse, filter,
- * and inspect existing users, but cannot add new accounts or change
- * a user's role/status from this page. New sign-in accounts are
- * created via the "Add Employee" form on /employees — both the
- * HR record and the Firebase Auth account are written from a single
- * submission. The /users page only displays the resulting accounts.
+ * Browsing is read-only, but Owners/Admins can approve access here:
+ * auto-provisioned accounts arrive `inactive` (pending), and the view
+ * modal lets an admin set the role (Cashier / Production / Admin /
+ * Owner) and flip Active <-> Inactive. HR records still live on
+ * /employees; this page governs sign-in access only.
  */
 
 import { useState, useMemo, useEffect, type ReactNode } from "react";
@@ -23,16 +20,19 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
- ContentCard,
- FilterToolbar,
- DataTable,
- StatusBadge,
- Button,
- Modal,
- KpiCard,
- EmptyState,
+  ContentCard,
+  FilterToolbar,
+  DataTable,
+  StatusBadge,
+  Button,
+  Modal,
+  KpiCard,
+  EmptyState,
+  FeedErrorBanner,
 } from "@/components/ui";
-import { subscribeUsers } from "@/lib/services/users";
+import { subscribeUsers, updateUser } from "@/lib/services/users";
+import { useFeedStatus } from "@/lib/useFeedStatus";
+import { useToast } from "@/components/ui/Toast";
 import {
  useSparkSeries,
  userLastLoginKey,
@@ -40,7 +40,7 @@ import {
 import type { User as UserType } from "@/types";
 
 function formatLastLogin(iso: string | undefined): string {
- if (!iso) return "—";
+ if (!iso) return "-";
  const d = new Date(iso);
  return d.toLocaleDateString("en-PH", {
   month: "short",
@@ -53,29 +53,56 @@ function getLastLogin(u: any): string {
  return u.lastLogin ?? u.last_login_at ?? "";
 }
 
+const APPROVABLE_ROLES: UserType["role"][] = [
+  "POS_Cashier",
+  "Production Staff",
+  "Admin",
+  "Owner",
+];
+
 export default function UsersPage() {
- const [users, setUsers] = useState<UserType[]>([]);
- const [active, setActive] = useState("All");
- const [search, setSearch] = useState("");
- const [sel, setSel] = useState<UserType | null>(null);
- const [open, setOpen] = useState(false);
+  const toast = useToast();
+  const [users, setUsers] = useState<UserType[]>([]);
+  const [active, setActive] = useState("All");
+  const [search, setSearch] = useState("");
+  const [sel, setSel] = useState<UserType | null>(null);
+  const [open, setOpen] = useState(false);
+  // Approval editor state (synced from `sel` on open).
+  const [editRole, setEditRole] = useState<UserType["role"]>("POS_Cashier");
+  const [editStatus, setEditStatus] = useState<UserType["status"]>("inactive");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
  const [kpiModal, setKpiModal] = useState<
   null | "all" | "Admin" | "POS_Cashier" | "Production Staff"
  >(null);
 
- useEffect(() => {
-  const unsub = subscribeUsers(setUsers);
-  return () => unsub();
- }, []);
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- // /users is the user-management page — the signed-in admin (Owner or
- // Admin) needs to see every account so they can browse them. The
- // previous "owner-only sees self" filter was hiding newly-created
- // users from the bootstrap Owner and made the page look broken
- // right after a successful Create. The page is now view-only.
- const visibleUsers = useMemo(() => users, [users]);
+  useEffect(() => {
+   const unsub = subscribeUsers(setUsers, onFeedError);
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
 
- // Live sparkline series — last-login counts per day for the last 7 days.
+  // /users is the user-management page - the signed-in admin (Owner or
+  // Admin) needs to see every account so they can browse them. The
+  // previous "owner-only sees self" filter was hiding newly-created
+  // users from the bootstrap Owner and made the page look broken
+  // right after a successful Create. The page is now view-only.
+  //
+  // Deactivated/archived staff disappear from the default view: only
+  // ACTIVE accounts list here (they also cannot sign in). Inactive
+  // accounts live under their own tab so nothing is hidden forever.
+  const activeUsers = useMemo(
+   () => users.filter((u) => u.status === "active"),
+   [users],
+  );
+  const inactiveUsers = useMemo(
+   () => users.filter((u) => u.status !== "active"),
+   [users],
+  );
+  const visibleUsers = activeUsers;
+
+ // Live sparkline series - last-login counts per day for the last 7 days.
  const allUsersSeries = useSparkSeries(visibleUsers, userLastLoginKey, 7);
  const adminSeries = useSparkSeries(
   visibleUsers.filter((u) => u.role === "Admin"),
@@ -111,24 +138,33 @@ export default function UsersPage() {
     label: "POS/Cashier",
     count: visibleUsers.filter((u) => u.role === "POS_Cashier").length,
    },
-   {
-    id: "Production Staff",
-    label: "Production Staff",
-    count: visibleUsers.filter((u) => u.role === "Production Staff").length,
-   },
-  ],
-  [visibleUsers],
- );
+    {
+     id: "Production Staff",
+     label: "Production Staff",
+     count: visibleUsers.filter((u) => u.role === "Production Staff").length,
+    },
+    {
+     id: "Inactive",
+     label: "Inactive",
+     count: inactiveUsers.length,
+    },
+   ],
+   [visibleUsers, inactiveUsers],
+  );
 
- const filtered = useMemo(() => {
-  const byRole = active === "All" ? visibleUsers : visibleUsers.filter((u) => u.role === active);
-  if (!search) return byRole;
+  const filtered = useMemo(() => {
+   const pool = active === "Inactive" ? inactiveUsers : visibleUsers;
+   const byRole =
+    active === "All" || active === "Inactive"
+     ? pool
+     : pool.filter((u) => u.role === active);
+   if (!search) return byRole;
   const q = search.toLowerCase();
   return byRole.filter(
    (u) =>
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
   );
- }, [visibleUsers, active, search]);
+  }, [visibleUsers, inactiveUsers, active, search]);
 
  const cols = [
   { key: "name", header: "Name" },
@@ -233,18 +269,53 @@ export default function UsersPage() {
   },
  ];
 
- const openView = (r: UserType) => {
-  setSel(r);
-  setOpen(true);
- };
- const closeView = () => {
-  setOpen(false);
-  setSel(null);
- };
+  const openView = (r: UserType) => {
+   setSel(r);
+   setEditRole(r.role);
+   setEditStatus(r.status);
+   setSaveError(null);
+   setOpen(true);
+  };
+  const closeView = () => {
+   if (saving) return;
+   setOpen(false);
+   setSel(null);
+  };
+
+  const accessDirty =
+   !!sel && (editRole !== sel.role || editStatus !== sel.status);
+
+  const handleSaveAccess = async () => {
+   if (!sel || !accessDirty || saving) return;
+   setSaving(true);
+   setSaveError(null);
+   try {
+    await updateUser(sel.id, { role: editRole, status: editStatus });
+    toast.success(
+     editStatus === "active"
+      ? `${sel.name || sel.email} activated as ${editRole}`
+      : `${sel.name || sel.email} set to inactive`,
+    );
+    closeView();
+   } catch (e: unknown) {
+    setSaveError(
+     e instanceof Error ? e.message : "Failed to update access.",
+    );
+   } finally {
+    setSaving(false);
+   }
+  };
 
  return (
-  <AdminLayout title="Users" subtitle="Team sign-in accounts" onSearch={setSearch}>
-   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+   <AdminLayout title="Users" subtitle="Team sign-in accounts" onSearch={setSearch}>
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={users.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <KpiCard
      label="Total Users"
      value={visibleUsers.length}
@@ -301,39 +372,68 @@ export default function UsersPage() {
       />
      </div>
     ) : (
-     <DataTable
-      columns={cols}
-      data={filtered}
-      keyExtractor={(r) => r.id}
-      onRowClick={openView}
-      emptyMessage="No users"
-     />
+      <DataTable
+       columns={cols}
+       data={filtered}
+       keyExtractor={(r) => r.id}
+       onRowClick={openView}
+       emptyMessage="No users"
+       pageSize={25}
+      />
     )}
    </ContentCard>
 
-   {/* View modal — read-only. Same fields as before, no Edit button. */}
-   <Modal
-    isOpen={open}
-    onClose={closeView}
-    title={sel?.name ?? "User"}
-    description={sel ? `${sel.role} • ${sel.email}` : undefined}
-    icon={<UserIcon className="w-5 h-5" />}
-    size="lg"
-    footer={
-     <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
-      <Button
-       variant="secondary"
-       onClick={closeView}
-       className="flex-1 sm:flex-none"
-      >
-       Close
-      </Button>
-     </div>
-    }
-   >
-    {sel && (
-     <div className="space-y-5">
-      <div className="flex items-center gap-4 p-4 bg-printflow-surface-container/50 rounded-xl border border-printflow-outline-variant/40">
+    {/* View + approval modal. Browsing is read-only; Owners/Admins
+        can set role + active state here (pending approvals included). */}
+    <Modal
+     isOpen={open}
+     onClose={closeView}
+     title={sel?.name ?? "User"}
+     description={sel ? `${sel.role} - ${sel.email}` : undefined}
+     icon={<UserIcon className="w-5 h-5" />}
+     size="lg"
+     footer={
+      <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+       <Button
+        variant="secondary"
+        onClick={closeView}
+        disabled={saving}
+        className="flex-1 sm:flex-none"
+       >
+        Close
+       </Button>
+       <Button
+        variant="primary"
+        onClick={() => void handleSaveAccess()}
+        disabled={!accessDirty || saving}
+        loading={saving}
+        className="flex-1 sm:flex-none"
+       >
+        {saving ? "Saving..." : "Save access"}
+       </Button>
+      </div>
+     }
+    >
+     {sel && (
+      <div className="space-y-5">
+       {sel.status !== "active" && (
+        <div
+         role="status"
+         className="px-4 py-3 rounded-xl bg-printflow-warning-container/40 border border-printflow-warning-container/60 text-sm text-printflow-warning"
+        >
+         Pending approval - this account can&apos;t sign in until you
+         set a role and flip it to Active below.
+        </div>
+       )}
+       {saveError && (
+        <div
+         role="alert"
+         className="px-4 py-3 rounded-xl bg-printflow-error/10 border border-printflow-error/30 text-printflow-error text-sm"
+        >
+         {saveError}
+        </div>
+       )}
+       <div className="flex items-center gap-4 p-4 bg-printflow-surface-container/50 rounded-xl border border-printflow-outline-variant/40">
        <div className="w-12 h-12 rounded-xl bg-printflow-primary-fixed flex items-center justify-center font-bold text-printflow-primary text-sm shrink-0">
         {sel.name
          .split(" ")
@@ -361,18 +461,55 @@ export default function UsersPage() {
          {sel.email}
         </p>
        </div>
-       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>ROLE</p>
-        <p className="text-sm font-medium text-printflow-on-surface mt-1">
-         {sel.role}
-        </p>
-       </div>
-       <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-        <p className={labelCls}>STATUS</p>
-        <div className="mt-1.5">
-         <StatusBadge status={sel.status} />
+        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+         <label className={labelCls} htmlFor="users-role">
+          ROLE
+         </label>
+         <select
+          id="users-role"
+          value={editRole}
+          onChange={(e) =>
+           setEditRole(e.target.value as UserType["role"])
+          }
+          className="mt-1.5 w-full px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+         >
+          {APPROVABLE_ROLES.map((r) => (
+           <option key={r} value={r}>
+            {r}
+           </option>
+          ))}
+         </select>
         </div>
-       </div>
+        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+         <span className={labelCls}>STATUS</span>
+         <div className="mt-1.5 flex items-center gap-2">
+          <StatusBadge status={editStatus} />
+          <button
+           type="button"
+           role="switch"
+           aria-checked={editStatus === "active"}
+           aria-label="Toggle active state"
+           onClick={() =>
+            setEditStatus(editStatus === "active" ? "inactive" : "active")
+           }
+           className={`relative w-11 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-printflow-primary ${
+            editStatus === "active"
+             ? "bg-printflow-success"
+             : "bg-printflow-outline-variant"
+           }`}
+          >
+           <span
+            aria-hidden
+            className={`absolute top-0.5 w-5 h-5 rounded-full bg-printflow-surface shadow transition-all ${
+             editStatus === "active" ? "left-[22px]" : "left-0.5"
+            }`}
+           />
+          </button>
+          <span className="text-xs text-printflow-on-surface-variant">
+           {editStatus === "active" ? "Active" : "Inactive"}
+          </span>
+         </div>
+        </div>
        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
         <p className={labelCls}>LAST LOGIN</p>
         <p className="text-sm font-medium text-printflow-on-surface mt-1">
@@ -399,7 +536,7 @@ export default function UsersPage() {
            .join(", ")}
          </p>
         ) : (
-         <p className="text-sm text-printflow-on-surface-variant/60 mt-1">—</p>
+         <p className="text-sm text-printflow-on-surface-variant/60 mt-1">-</p>
         )}
         {sel.address?.region && (
          <p className="text-xs text-printflow-on-surface-variant/70 mt-0.5">
@@ -408,13 +545,14 @@ export default function UsersPage() {
         )}
        </div>
       </div>
-      {/* Read-only hint: directs admins to the right surface to make
-          changes. The /users page intentionally has no edit affordance. */}
-      <p className="text-[12px] text-printflow-on-surface-variant/80 leading-relaxed">
-       To add or edit an employee&apos;s HR record, go to{" "}
-       <span className="font-medium text-printflow-on-surface">Employees</span>.
-       Sign-in accounts are created from the Add Employee form there.
-      </p>
+       {/* Access editing lives here (role + active state); HR records
+           stay on /employees. */}
+       <p className="text-[12px] text-printflow-on-surface-variant/80 leading-relaxed">
+        Role and access are managed here - approve pending accounts by
+        setting a role and flipping them Active. For HR records, go to{" "}
+        <span className="font-medium text-printflow-on-surface">Employees</span>.
+        Sign-in accounts are created from the Add Employee form there.
+       </p>
      </div>
     )}
    </Modal>
@@ -447,16 +585,17 @@ export default function UsersPage() {
       />
      </div>
     ) : (
-     <DataTable
-      columns={userKpiColumns as any}
-      data={kpiFilteredUsers}
-      keyExtractor={(u) => u.id}
-      emptyMessage="No users in this group"
-      onRowClick={(u) => {
-       setKpiModal(null);
-       openView(u);
-      }}
-     />
+      <DataTable
+       columns={userKpiColumns as any}
+       data={kpiFilteredUsers}
+       keyExtractor={(u) => u.id}
+       emptyMessage="No users in this group"
+       onRowClick={(u) => {
+        setKpiModal(null);
+        openView(u);
+       }}
+       pageSize={10}
+      />
     )}
    </Modal>
   </AdminLayout>

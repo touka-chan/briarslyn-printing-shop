@@ -1,6 +1,8 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
 import '../../services/firebase_inventory.dart' as fb_inventory;
@@ -10,7 +12,7 @@ import '../../utils/animations.dart';
 import '../../models/rfid_event.dart';
 import '../../models/inventory_item.dart';
 
-/// The RFID Sensor screen — the third tab in the Production shell.
+/// The RFID Sensor screen - the third tab in the Production shell.
 ///
 /// Displays live sensor status, RFID activity feed, and per-tag status.
 ///
@@ -32,11 +34,13 @@ class ProductionSensorScreen extends StatefulWidget {
 
 class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
   static const _sensorId = 'ESP32-01';
+  int _feedNonce = 0;
 
   Future<void> _toggleSensor(bool currentlyOnline) async {
     HapticFeedback.mediumImpact();
+    final actor = AuthProvider.of(context).currentUser;
     try {
-      await fb_rfid.setSensorOnline(_sensorId, !currentlyOnline);
+      await fb_rfid.setSensorOnline(_sensorId, !currentlyOnline, actor: actor);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -48,21 +52,79 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
     }
   }
 
+  /// Persists what a station tap means (check-in proof, stock-in
+  /// receiving, or manual stock-out). The ESP32 reads this mode when it
+  /// comes online; until then it documents the station's operating mode.
+  Future<void> _setTapMode(String mode) async {
+    HapticFeedback.selectionClick();
+    final actor = AuthProvider.of(context).currentUser;
+    try {
+      await fb_rfid.setTapMode(_sensorId, mode, actor: actor);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not update tap mode'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<InventoryItem>>(
-      stream: fb_inventory.subscribeInventoryStream(),
-      builder: (context, invSnap) {
-        final inventory = invSnap.data ?? const <InventoryItem>[];
-        return StreamBuilder<List<RfidCheckoutEvent>>(
-          stream: fb_rfid.subscribeRfidEventsStream(),
-          builder: (context, rfidSnap) {
-            final events = rfidSnap.data ?? const <RfidCheckoutEvent>[];
-            final tagsBySensor = _tagsBySensor(inventory);
-            final tagsTracked = inventory.where((i) => i.tagUid != null).length;
-            final todayCount = _eventsToday(events);
-            final lastEventAt = events.isEmpty ? null : events.first.timestamp;
-            final sensorOnline = _isSensorOnline(inventory);
+    // Online state comes from the `sensors/{id}` doc (what the toggle
+    // and the ESP32 actually write), not from inventory rows.
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      key: ValueKey('sensors-$_feedNonce'),
+      stream: FirebaseFirestore.instance
+          .collection('sensors')
+          .doc(_sensorId)
+          .snapshots(),
+      builder: (context, sensorSnap) {
+        final sensorData = sensorSnap.data?.data();
+        // The mobile toggle writes `is_online`; the web console writes
+        // `online`. Honor either writer; only when the doc does not exist
+        // yet do we fall back to the inventory heuristic below.
+        final bool? docOnline = sensorData == null
+            ? null
+            : (sensorData['is_online'] as bool?) ??
+                (sensorData['online'] as bool?);
+        return StreamBuilder<List<InventoryItem>>(
+          key: ValueKey('inventory-$_feedNonce'),
+          stream: fb_inventory.subscribeInventoryStream(),
+          builder: (context, invSnap) {
+            final inventory = invSnap.data ?? const <InventoryItem>[];
+            return StreamBuilder<List<RfidCheckoutEvent>>(
+              key: ValueKey('rfid-$_feedNonce'),
+              stream: fb_rfid.subscribeRfidEventsStream(),
+              builder: (context, rfidSnap) {
+                // A failed feed must not masquerade as zero tags / zero
+                // events — surface the error with a retry instead.
+                final feedError =
+                    invSnap.hasError || rfidSnap.hasError;
+                if (feedError) {
+                  final details =
+                      '${invSnap.error ?? rfidSnap.error}';
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.lg,
+                        AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
+                    child: PfErrorCard(
+                      message:
+                          'Live sensor data failed to load. Check your connection and permissions.',
+                      details: details,
+                      onRetry: () => setState(() => _feedNonce++),
+                    ),
+                  );
+                }
+                final events = rfidSnap.data ?? const <RfidCheckoutEvent>[];
+                final tagsBySensor = _tagsBySensor(inventory);
+                final tagsTracked =
+                    inventory.where((i) => i.tagUid != null).length;
+                final todayCount = _eventsToday(events);
+                final lastEventAt =
+                    events.isEmpty ? null : events.first.timestamp;
+                final sensorOnline = docOnline ?? _isSensorOnline(inventory);
 
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(
@@ -74,6 +136,62 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                     isOnline: sensorOnline,
                     lastEventAt: lastEventAt,
                     onToggle: () => _toggleSensor(sensorOnline),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  // Tap mode - what a station tap means once the ESP32
+                  // is online. Persisted on the sensor doc; taps never
+                  // move stock by themselves.
+                  StreamBuilder<String>(
+                    stream: fb_rfid.subscribeTapModeStream(_sensorId),
+                    builder: (context, modeSnap) {
+                      final mode = modeSnap.data ?? 'check-in';
+                      return PfCard(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Station tap mode',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              'Decides what a tap means when the station is online. Taps never change stock directly.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: AppTheme.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            PfSegmentedControl<String>(
+                              value: mode,
+                              onChanged: _setTapMode,
+                              options: const [
+                                PfSegmentOption(
+                                  value: 'check-in',
+                                  label: 'Check-in',
+                                  icon: Icons.verified_outlined,
+                                ),
+                                PfSegmentOption(
+                                  value: 'stock-in',
+                                  label: 'Stock IN',
+                                  icon: Icons.move_to_inbox_rounded,
+                                ),
+                                PfSegmentOption(
+                                  value: 'stock-out',
+                                  label: 'Stock OUT',
+                                  icon: Icons.outbox_rounded,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   // Sensor stats
@@ -108,7 +226,7 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  // Stock-at-risk row — flags low/insufficient variants that
+                  // Stock-at-risk row - flags low/insufficient variants that
                   // the sensor is currently tracking, so production staff can
                   // re-order before the next RFID checkout drives stock to 0.
                   _StockAtRiskBanner(
@@ -170,15 +288,17 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                 ],
               ),
             );
+              },
+            );
           },
         );
       },
     );
   }
 
-  // ──────────────────────────────────────────────
-  // Helpers — derive UI state from live Firestore
-  // ──────────────────────────────────────────────
+  // ----------------------------------------------
+  // Helpers - derive UI state from live Firestore
+  // ----------------------------------------------
   Map<String, List<InventoryItem>> _tagsBySensor(List<InventoryItem> items) {
     final grouped = <String, List<InventoryItem>>{};
     for (final item in items) {
@@ -195,10 +315,9 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
     return events.where((e) => !e.timestamp.isBefore(start)).length;
   }
 
-  /// Heuristic for sensor online state: at least one tracked tag exists for
-  /// the default sensor ID. With the ESP32 not yet online, the user toggles
-  /// the sensor manually via [fb_rfid.setSensorOnline]; the visual cue
-  /// reflects the inventory grouping until that path is exercised.
+  /// Last-resort heuristic for sensor online state (used only when the
+  /// `sensors/{id}` doc does not exist yet): at least one tracked tag
+  /// exists for the default sensor ID.
   bool _isSensorOnline(List<InventoryItem> items) {
     return items.any((i) => i.sensorId == _sensorId);
   }
@@ -224,7 +343,7 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
-              'No events yet — waiting for $_sensorId to come online',
+              'No events yet - waiting for $_sensorId to come online',
               style: Theme.of(context)
                   .textTheme
                   .titleMedium
@@ -337,9 +456,9 @@ class _SensorHeaderCard extends StatelessWidget {
                 Text(
                   isOnline
                       ? (lastEventAt == null
-                          ? 'Listening for RFID check-outs…'
+                          ? 'Listening for RFID check-outs...'
                           : 'Last check-out ${_formatRelative(lastEventAt!)}')
-                      : 'Sensors stopped — toggle to resume',
+                      : 'Sensors stopped - toggle to resume',
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium
@@ -619,7 +738,7 @@ class _ActivityRow extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
-                  '${event.tagUid} • ${event.sensorId}',
+                  '${event.tagUid} - ${event.sensorId}',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -667,7 +786,7 @@ class _StockAtRiskBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Quiet, semantic background — not an error toast. We don't escalate to
+    // Quiet, semantic background - not an error toast. We don't escalate to
     // a full PfCard border so it doesn't compete with the sensor header.
     if (lowCount == 0 && insufficientCount == 0) {
       return Row(

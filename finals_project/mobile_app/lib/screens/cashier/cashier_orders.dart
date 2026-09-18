@@ -11,7 +11,7 @@ import '../../theme/app_theme.dart';
 /// The Orders list screen for POS/Cashier.
 ///
 /// Displays all orders in a filterable, searchable list using job ticket
-/// cards. Subscribes live to Firestore — empty states render honestly when
+/// cards. Subscribes live to Firestore - empty states render honestly when
 /// the cashier has not yet created any orders.
 class CashierOrdersScreen extends StatelessWidget {
   const CashierOrdersScreen({super.key});
@@ -32,6 +32,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
   String _statusFilter = 'All';
   DateTime? _fromDate;
   DateTime? _toDate;
+  int _feedNonce = 0;
   final List<String> _statusFilters = [
     'All',
     'Pending',
@@ -129,8 +130,30 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
       body: SafeArea(
         top: canPop,
         child: StreamBuilder<List<Order>>(
+          key: ValueKey('orders-$_feedNonce'),
           stream: fb_orders.subscribeOrdersStream(),
           builder: (context, snap) {
+            if (snap.hasError) {
+              return CustomScrollView(
+                slivers: [
+                  const SliverPadding(
+                    padding: EdgeInsets.only(top: AppSpacing.md),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg, 0, AppSpacing.lg, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: PfErrorCard(
+                        message:
+                            'Live orders failed to load. Check your connection and permissions.',
+                        details: '${snap.error}',
+                        onRetry: () => setState(() => _feedNonce++),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
             final orders = snap.data ?? const <Order>[];
             final filtered = _filter(orders);
             return Column(
@@ -360,7 +383,7 @@ class _SearchFilterBar extends StatelessWidget {
                     borderRadius: AppRadius.rPill,
                   ),
                   child: Text(
-                    '${_fmt(fromDate!)} → ${_fmt(toDate!)}',
+                    '${_fmt(fromDate!)} - ${_fmt(toDate!)}',
                     style: TextStyle(
                       fontSize: AppTypography.label,
                       fontWeight: FontWeight.w600,

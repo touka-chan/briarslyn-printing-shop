@@ -1,5 +1,5 @@
 /**
- * Firestore service — employees collection.
+ * Firestore service - employees collection.
  *
  * Employees/{id} is a doc that holds the HR record of a team member. It is
  * separate from the `users` collection on purpose: an Employee entry is
@@ -15,6 +15,7 @@ import {
   onSnapshot,
   doc,
   addDoc,
+  deleteDoc,
   updateDoc,
   query,
   orderBy,
@@ -53,20 +54,33 @@ async function nextEmployeeId(): Promise<string> {
   return `EMP-${String(max + 1).padStart(4, "0")}`;
 }
 
-export function subscribeEmployees(cb: (employees: Employee[]) => void): Unsubscribe {
+/** Firestore subscription failure handler (permission/offline). */
+export type FeedErrorHandler = (e: unknown) => void;
+
+function logFeedError(scope: string): FeedErrorHandler {
+  return (e) => {
+    console.error(`[${scope}] subscription failed:`, e);
+  };
+}
+
+export function subscribeEmployees(
+  cb: (employees: Employee[]) => void,
+  onError: FeedErrorHandler = logFeedError("employees"),
+): Unsubscribe {
   return onSnapshot(collection(requireDb(), COLL), (snap) => {
     const employees = snap.docs.map((d) => fromFirestore(d.id, d.data()));
     cb(employees);
-  });
+  }, onError);
 }
 
 export function subscribeEmployee(
   id: string,
   cb: (employee: Employee | null) => void,
+  onError: FeedErrorHandler = logFeedError("employees"),
 ): Unsubscribe {
   return onSnapshot(doc(requireDb(), COLL, id), (snap) => {
     cb(snap.exists() ? fromFirestore(snap.id, snap.data()) : null);
-  });
+  }, onError);
 }
 
 export interface CreateEmployeeInput {
@@ -74,12 +88,16 @@ export interface CreateEmployeeInput {
   initial?: string;
   lname: string;
   contact_number: string;
-  /** ISO YYYY-MM-DD. The on-doc source of truth; `age` is derived from this. */
+  /** ISO YYYY-MM-DD. The on-document source of truth; `age` is derived from this. */
   birthdate: string;
   gender: EmployeeGender;
   address?: UserAddress;
   role: EmployeeRole;
   status?: "active" | "inactive";
+  /** Sign-in account link (email known upfront; uid stamped after the
+   * Auth account exists). Enables archive/deactivate login blocking. */
+  email?: string;
+  uid?: string;
 }
 
 export async function createEmployee(
@@ -88,6 +106,9 @@ export async function createEmployee(
   const employee_id = await nextEmployeeId();
   const ref = await addDoc(collection(requireDb(), COLL), {
     employee_id,
+    email: input.email ?? null,
+    uid: input.uid ?? null,
+    archived: false,
     fname: input.fname,
     initial: input.initial ?? "",
     lname: input.lname,
@@ -119,11 +140,14 @@ export async function updateEmployee(
       | "address"
       | "role"
       | "status"
+      | "email"
+      | "uid"
+      | "archived"
     >
   >,
 ): Promise<void> {
   // If the patch updates `birthdate`, re-derive `age` so the two stay
-  // consistent. If only `age` is patched, leave `birthdate` alone — but
+  // consistent. If only `age` is patched, leave `birthdate` alone - but
   // the form always sends both, so this branch is mostly defensive.
   const next: Record<string, unknown> = { ...patch };
   if (typeof patch.birthdate === "string" && patch.birthdate.length > 0) {
@@ -133,6 +157,16 @@ export async function updateEmployee(
     ...next,
     updated_at: Timestamp.now(),
   });
+}
+
+/**
+ * Delete an HR record. Used as compensation when a later step of the
+ * Add Employee flow fails while the admin session is still active
+ * (employees writes require Owner/Admin, so this must run BEFORE the
+ * SDK session swaps to the new account).
+ */
+export async function deleteEmployee(id: string): Promise<void> {
+  await deleteDoc(doc(requireDb(), COLL, id));
 }
 
 export async function deactivateEmployee(id: string): Promise<void> {
@@ -145,7 +179,7 @@ export async function deactivateEmployee(id: string): Promise<void> {
 // ---- internal helpers ----
 
 function fromFirestore(id: string, data: Record<string, unknown>): Employee {
-  // Legacy rows may not have `birthdate` — keep showing the stored `age`.
+  // Legacy rows may not have `birthdate` - keep showing the stored `age`.
   // New rows always have both; `age` is always derived from `birthdate`.
   const birthdateRaw = (data.birthdate as string | undefined) ?? "";
   const storedAge = typeof data.age === "number" ? data.age : 0;
@@ -163,6 +197,9 @@ function fromFirestore(id: string, data: Record<string, unknown>): Employee {
     address: (data.address as UserAddress) ?? undefined,
     role: (data.role as EmployeeRole) ?? "POS_Cashier",
     status: (data.status as "active" | "inactive") ?? "active",
+    email: (data.email as string) || undefined,
+    uid: (data.uid as string) || undefined,
+    archived: (data.archived as boolean) ?? false,
     created_at: fromTimestamp(data.created_at),
     updated_at: fromTimestamp(data.updated_at),
   };
@@ -170,7 +207,7 @@ function fromFirestore(id: string, data: Record<string, unknown>): Employee {
 
 /**
  * Compute the age (in completed years) from an ISO YYYY-MM-DD birthdate.
- * Returns 0 for empty/invalid input — callers should validate first.
+ * Returns 0 for empty/invalid input - callers should validate first.
  */
 export function ageFromBirthdate(birthdate: string): number {
   if (!birthdate) return 0;

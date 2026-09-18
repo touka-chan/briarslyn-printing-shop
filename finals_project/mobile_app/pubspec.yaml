@@ -37,6 +37,12 @@ dependencies:
 
   # Google Fonts — Inter (display/body) + JetBrains Mono (IDs, data)
   google_fonts: ^6.2.1
+  firebase_core: ^4.14.0
+  cloud_firestore: ^6.9.0
+  firebase_auth: ^6.6.1
+  file_picker: ^12.3.0
+  url_launcher: ^6.3.1
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:
@@ -60,10 +66,17 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # PSGC address data for the cashier AddressCascade dropdowns
+  # (mirrors web/public/Address/*.json).
+  assets:
+    - assets/address/region.json
+    - assets/address/province.json
+    - assets/address/city.json
+    - assets/address/city_zip_map.json
+    - assets/address/barangay.json
+    # Official shop badge (same file as web/public/logo.jpg).
+    # Always display as-is: contain fit, no tint, no stretch.
+    - assets/images/logo.jpg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

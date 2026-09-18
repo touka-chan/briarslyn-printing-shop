@@ -1,7 +1,20 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: the app toggles `.dark` on <html> (theme toggle
+   + localStorage). Without this, Tailwind v4's `dark:` utilities follow
+   the OS setting instead — so every `dark:` style silently misfires
+   whenever the OS theme and the app toggle disagree. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Segoe UI", "Segoe UI Variable", "Aptos", Calibri, Helvetica, Arial, sans-serif;
+
+  /* Slightly enlarged body tiers ("sakto" bump): xs 12→13px and
+     sm 14→15px app-wide. Layout/spacing untouched (type only). */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.35rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.45rem;
 
   --color-printflow-bg: #fbf9f4;
   --color-printflow-surface: #ffffff;
@@ -10,47 +23,51 @@
   --color-printflow-surface-container-highest: #e4e2dd;
   --color-printflow-surface-dim: #dbdad5;
 
-  --color-printflow-primary: #00535b;
-  --color-printflow-primary-container: #006d77;
-  --color-printflow-primary-fixed: #9ff0fb;
-  --color-printflow-primary-fixed-dim: #82d3de;
+  /* Monochrome brand ramp (black/white/gray) — matches the login +
+     sidebar identity. Semantic roles (error/success/…) share the ramp;
+     meaning is carried by shade + label + icon, never hue alone. */
+
+  --color-printflow-primary: #17171c;
+  --color-printflow-primary-container: #000000;
+  --color-printflow-primary-fixed: #e7e7ea;
+  --color-printflow-primary-fixed-dim: #d4d4d8;
   --color-printflow-on-primary: #ffffff;
-  --color-printflow-on-primary-container: #9becf7;
-  --color-printflow-on-primary-fixed: #001f23;
-  --color-printflow-on-primary-fixed-variant: #004f56;
+  --color-printflow-on-primary-container: #e7e7ea;
+  --color-printflow-on-primary-fixed: #111114;
+  --color-printflow-on-primary-fixed-variant: #3f3f46;
 
-  --color-printflow-secondary: #a8372c;
-  --color-printflow-secondary-container: #fe7766;
-  --color-printflow-secondary-fixed: #ffdad5;
-  --color-printflow-secondary-fixed-dim: #ffb4a9;
+  --color-printflow-secondary: #3f3f46;
+  --color-printflow-secondary-container: #27272a;
+  --color-printflow-secondary-fixed: #e4e4e7;
+  --color-printflow-secondary-fixed-dim: #d4d4d8;
   --color-printflow-on-secondary: #ffffff;
-  --color-printflow-on-secondary-container: #710e09;
-  --color-printflow-on-secondary-fixed: #410001;
-  --color-printflow-on-secondary-fixed-variant: #872017;
+  --color-printflow-on-secondary-container: #e4e4e7;
+  --color-printflow-on-secondary-fixed: #18181b;
+  --color-printflow-on-secondary-fixed-variant: #3f3f46;
 
-  --color-printflow-tertiary: #00479b;
-  --color-printflow-tertiary-container: #005ec9;
-  --color-printflow-tertiary-fixed: #d8e2ff;
-  --color-printflow-tertiary-fixed-dim: #adc6ff;
+  --color-printflow-tertiary: #52525b;
+  --color-printflow-tertiary-container: #27272a;
+  --color-printflow-tertiary-fixed: #e4e4e7;
+  --color-printflow-tertiary-fixed-dim: #d4d4d8;
   --color-printflow-on-tertiary: #ffffff;
-  --color-printflow-on-tertiary-container: #d2deff;
-  --color-printflow-on-tertiary-fixed: #001a41;
-  --color-printflow-on-tertiary-fixed-variant: #004494;
+  --color-printflow-on-tertiary-container: #e4e4e7;
+  --color-printflow-on-tertiary-fixed: #18181b;
+  --color-printflow-on-tertiary-fixed-variant: #52525b;
 
-  --color-printflow-error: #ba1a1a;
-  --color-printflow-error-container: #ffdad6;
+  --color-printflow-error: #18181b;
+  --color-printflow-error-container: #e4e4e7;
   --color-printflow-on-error: #ffffff;
-  --color-printflow-on-error-container: #93000a;
+  --color-printflow-on-error-container: #18181b;
 
-  --color-printflow-outline: #6f797a;
-  --color-printflow-outline-variant: #bec8ca;
-  --color-printflow-on-surface: #1b1c19;
-  --color-printflow-on-surface-variant: #3e494a;
+  --color-printflow-outline: #737373;
+  --color-printflow-outline-variant: #d4d4d8;
+  --color-printflow-on-surface: #131315;
+  --color-printflow-on-surface-variant: #52525b;
 
-  --color-printflow-success: #2e7d32;
-  --color-printflow-success-container: #dcedc8;
-  --color-printflow-warning: #ed6c02;
-  --color-printflow-warning-container: #fff3e0;
+  --color-printflow-success: #27272a;
+  --color-printflow-success-container: #e7e7ea;
+  --color-printflow-warning: #52525b;
+  --color-printflow-warning-container: #f0f0f2;
 
   --spacing-0: 0;
   --spacing-1: 0.25rem;
@@ -88,47 +105,47 @@
   --color-printflow-surface-container-highest: #383e44;
   --color-printflow-surface-dim: #1a1d20;
 
-  --color-printflow-primary: #5cd4dd;
-  --color-printflow-primary-container: #008a95;
-  --color-printflow-primary-fixed: #003a3f;
-  --color-printflow-primary-fixed-dim: #004f56;
-  --color-printflow-on-primary: #003539;
-  --color-printflow-on-primary-container: #9becf7;
-  --color-printflow-on-primary-fixed: #9ff0fb;
-  --color-printflow-on-primary-fixed-variant: #82d3de;
+  --color-printflow-primary: #fafafa;
+  --color-printflow-primary-container: #ffffff;
+  --color-printflow-primary-fixed: #27272a;
+  --color-printflow-primary-fixed-dim: #3f3f46;
+  --color-printflow-on-primary: #09090b;
+  --color-printflow-on-primary-container: #09090b;
+  --color-printflow-on-primary-fixed: #f4f4f5;
+  --color-printflow-on-primary-fixed-variant: #d4d4d8;
 
-  --color-printflow-secondary: #ffb4a9;
-  --color-printflow-secondary-container: #872017;
-  --color-printflow-secondary-fixed: #710e09;
-  --color-printflow-secondary-fixed-dim: #872017;
-  --color-printflow-on-secondary: #410001;
-  --color-printflow-on-secondary-container: #ffdad5;
-  --color-printflow-on-secondary-fixed: #ffdad5;
-  --color-printflow-on-secondary-fixed-variant: #ffb4a9;
+  --color-printflow-secondary: #e4e4e7;
+  --color-printflow-secondary-container: #d4d4d8;
+  --color-printflow-secondary-fixed: #27272a;
+  --color-printflow-secondary-fixed-dim: #3f3f46;
+  --color-printflow-on-secondary: #09090b;
+  --color-printflow-on-secondary-container: #09090b;
+  --color-printflow-on-secondary-fixed: #f4f4f5;
+  --color-printflow-on-secondary-fixed-variant: #e4e4e7;
 
-  --color-printflow-tertiary: #adc6ff;
-  --color-printflow-tertiary-container: #005ec9;
-  --color-printflow-tertiary-fixed: #001a41;
-  --color-printflow-tertiary-fixed-dim: #004494;
-  --color-printflow-on-tertiary: #001a41;
-  --color-printflow-on-tertiary-container: #d2deff;
-  --color-printflow-on-tertiary-fixed: #d8e2ff;
-  --color-printflow-on-tertiary-fixed-variant: #adc6ff;
+  --color-printflow-tertiary: #e4e4e7;
+  --color-printflow-tertiary-container: #a1a1aa;
+  --color-printflow-tertiary-fixed: #27272a;
+  --color-printflow-tertiary-fixed-dim: #3f3f46;
+  --color-printflow-on-tertiary: #09090b;
+  --color-printflow-on-tertiary-container: #09090b;
+  --color-printflow-on-tertiary-fixed: #f4f4f5;
+  --color-printflow-on-tertiary-fixed-variant: #e4e4e7;
 
-  --color-printflow-error: #ff8a8a;
-  --color-printflow-error-container: #5a0a14;
-  --color-printflow-on-error: #410002;
-  --color-printflow-on-error-container: #ffdad6;
+  --color-printflow-error: #f4f4f5;
+  --color-printflow-error-container: #3f3f46;
+  --color-printflow-on-error: #09090b;
+  --color-printflow-on-error-container: #f4f4f5;
 
-  --color-printflow-outline: #8a8e92;
-  --color-printflow-outline-variant: #44484c;
-  --color-printflow-on-surface: #e2e2e5;
-  --color-printflow-on-surface-variant: #c4c7cb;
+  --color-printflow-outline: #8e8e93;
+  --color-printflow-outline-variant: #3f3f46;
+  --color-printflow-on-surface: #f4f4f5;
+  --color-printflow-on-surface-variant: #a1a1aa;
 
-  --color-printflow-success: #6dd47a;
-  --color-printflow-success-container: #1b4d20;
-  --color-printflow-warning: #ffb74d;
-  --color-printflow-warning-container: #4a2e00;
+  --color-printflow-success: #e4e4e7;
+  --color-printflow-success-container: #3f3f46;
+  --color-printflow-warning: #d4d4d8;
+  --color-printflow-warning-container: #3f3f46;
 
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-2: 0 4px 6px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -140,6 +157,14 @@
   :root {
     --background: var(--color-printflow-bg);
     --foreground: var(--color-printflow-on-surface);
+    /* Native controls (date inputs, selects, scrollbars) follow the
+       active color scheme — without this they render light-styled
+       even when .dark tokens are on. */
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
   }
 
   body {
@@ -172,8 +197,15 @@
   }
 
   .main-content {
-    @apply flex-1 min-h-screen bg-printflow-bg transition-all duration-300;
+    @apply flex-1 min-h-screen transition-all duration-300;
+    /* Cool-gray canvas (admin only) so white cards visibly float. */
+    background: #e2e5e9;
     margin-left: 16rem;
+  }
+  /* Dark mode = light canvas + dark floating panels (panel, cards,
+     sidebar stay dark; only the backdrop is light). */
+  .dark .main-content {
+    background: #e2e5e9;
   }
 
   .main-content-expanded {
@@ -184,24 +216,31 @@
     @apply px-6 py-4 bg-printflow-surface border-b border-printflow-outline-variant;
   }
 
+  /* Display face (Poppins) for headings/KPI values — matches login. */
+  .font-display {
+    font-family: var(--font-display), "Segoe UI", system-ui, sans-serif;
+  }
+
   .kpi-card {
-    @apply bg-printflow-surface rounded-xl p-6 shadow-sm border border-printflow-outline-variant;
+    @apply bg-printflow-surface rounded-2xl p-6 border border-printflow-outline-variant;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .content-card {
-    @apply bg-printflow-surface rounded-xl shadow-sm border border-printflow-outline-variant overflow-hidden min-w-0;
+    @apply bg-printflow-surface rounded-2xl border border-printflow-outline-variant overflow-hidden min-w-0;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .filter-toolbar {
-    @apply flex flex-wrap items-center gap-3 p-4 bg-printflow-surface rounded-xl border border-printflow-outline-variant mb-6;
+    @apply flex flex-wrap items-center gap-3 p-4 bg-printflow-surface rounded-2xl border border-printflow-outline-variant mb-6;
   }
 
   .filter-tab {
-    @apply px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200;
+    @apply px-4 py-2 text-sm font-medium rounded-full transition-all duration-200;
   }
 
   .filter-tab-active {
-    @apply bg-printflow-primary text-printflow-on-primary shadow-sm;
+    @apply bg-[#17171c] text-white shadow-sm dark:bg-white dark:text-black;
   }
 
   .filter-tab-inactive {
@@ -209,11 +248,11 @@
   }
 
   .search-input {
-    @apply flex-1 max-w-md px-4 py-2.5 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:border-transparent transition-all;
+    @apply flex-1 max-w-md px-4 py-2.5 text-sm bg-printflow-surface-container rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent transition-all;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold text-printflow-on-primary bg-printflow-primary rounded-lg hover:bg-printflow-primary-container focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:ring-offset-2 transition-all duration-200;
+    @apply inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold text-white bg-[#17171c] rounded-lg hover:bg-black focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 transition-all duration-200 dark:bg-white dark:text-black dark:hover:bg-white/90 dark:focus:ring-white;
   }
 
   .btn-secondary {
@@ -225,7 +264,7 @@
   }
 
   .status-badge {
-    @apply inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full;
+    @apply inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full whitespace-nowrap;
   }
 
   .status-pending {
@@ -248,16 +287,20 @@
     @apply bg-printflow-error-container text-printflow-on-error-container;
   }
 
+  /* Tables fit their container — no bottom scrollbar: compact padding,
+     wrapping cells, and slightly smaller type so every column stays
+     viewable. Badges stay one-line via .status-badge nowrap. */
   .data-table {
-    @apply w-full text-sm;
+    @apply w-full text-[13px];
   }
 
   .data-table th {
-    @apply px-5 py-3.5 text-left font-semibold text-printflow-on-surface-variant bg-printflow-surface-container border-b border-printflow-outline-variant;
+    @apply px-3 py-2.5 text-left font-semibold text-printflow-on-surface-variant bg-printflow-surface-container border-b border-printflow-outline-variant whitespace-normal;
   }
 
   .data-table td {
-    @apply px-5 py-4 border-b border-printflow-outline-variant/40;
+    @apply px-3 py-2.5 border-b border-printflow-outline-variant/40 align-middle;
+    overflow-wrap: anywhere;
   }
 
   .data-table tr:hover {
@@ -265,7 +308,8 @@
   }
 
   .chart-card {
-    @apply bg-printflow-surface rounded-xl p-6 shadow-sm border border-printflow-outline-variant;
+    @apply bg-printflow-surface rounded-2xl p-6 border border-printflow-outline-variant;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .modal-overlay {
@@ -277,8 +321,8 @@
 
   .modal-content {
     @apply bg-printflow-surface w-full max-h-[85vh] flex flex-col overflow-hidden border border-printflow-outline-variant/40;
-    border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0, 83, 91, 0.12), 0 8px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16), 0 8px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
     animation: modal-in 180ms ease-out;
   }
 
@@ -333,5 +377,115 @@
 
   .dropdown-item {
     @apply flex items-center gap-3 px-4 py-2.5 text-sm text-printflow-on-surface hover:bg-printflow-surface-container transition-colors;
+  }
+
+  /* Priority chips — tinted pill + colored dot (dot color set inline). */
+  .priority-overdue {
+    @apply bg-printflow-error-container/50 text-printflow-on-error-container;
+  }
+
+  .priority-urgent {
+    @apply bg-printflow-warning-container/50 text-printflow-warning;
+  }
+
+  .priority-upcoming {
+    @apply bg-printflow-surface-container text-printflow-on-surface-variant;
+  }
+
+  /* Payment chips. */
+  .payment-paid {
+    @apply bg-printflow-success-container/50 text-printflow-success;
+  }
+
+  .payment-partial {
+    @apply bg-printflow-warning-container/50 text-printflow-warning;
+  }
+
+  .payment-unpaid {
+    @apply bg-printflow-error-container/50 text-printflow-on-error-container;
+  }
+
+  /* Small caps label used in dropdown headers. */
+  .type-label {
+    @apply text-xs font-semibold uppercase tracking-[0.14em];
+  }
+
+  /* Hidden scrollbars (reference look) — content still scrolls
+     via wheel, touch, and keyboard. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Thin scrollbars for dropdown panes. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(120, 130, 130, 0.4);
+    border-radius: 9999px;
+  }
+
+  @keyframes slide-in-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* Toast entrance + lifetime progress bar. */
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(20px) scale(0.97); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  @keyframes toast-progress {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+
+  /* Simple fade for in-place swaps (login error banner). */
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .modal-content {
+      animation: none;
+    }
+  }
+
+  /* Login illustration drift. Respects reduced-motion. */
+  @keyframes login-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .login-float {
+    animation: login-float 7s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .login-float {
+      animation: none;
+    }
+  }
+}
+
+/* Print: expand the floating panel so window.print() captures the
+   whole page instead of only the visible scroll area. */
+@media print {
+  .float-panel {
+    height: auto !important;
+    overflow: visible !important;
   }
 }

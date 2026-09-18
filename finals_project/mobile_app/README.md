@@ -28,10 +28,9 @@ flutter analyze
 - `lib/app.dart` — MaterialApp + theme + role-based shell
 - `lib/screens/` — Cashier, Production, Auth shells
 - `lib/widgets/` — Shared widgets (address cascade, etc.)
-- `lib/services/` — Inventory / order services (in-memory, with optimistic updates)
+- `lib/services/` — Firestore-backed inventory / order services (with optimistic updates)
 - `lib/models/` — Domain types (mirrors `web/src/types/`)
 - `lib/theme/app_theme.dart` — Material 3 palette + component themes
 - `lib/design/tokens.dart` — Spacing / radius / motion / type tokens
-- `lib/utils/mock_data.dart` — In-memory mock data (orders, inventory, RFID events)
 
 The full project README is at `../README.md`.

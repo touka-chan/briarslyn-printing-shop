@@ -1,19 +1,11 @@
 {
   "indexes": [
     {
-      "collectionGroup": "orders",
+      "collectionGroup": "rfid_events",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "priority", "order": "DESCENDING" },
-        { "fieldPath": "targetDate", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "targetDate", "order": "ASCENDING" }
+        { "fieldPath": "material_variant_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
     }
   ],

@@ -1,21 +1,21 @@
 /**
- * Firestore service — inventory collection.
+ * Firestore service - inventory collection.
  *
- * Field shape (camelCase ↔ snake_case in Firestore):
- *   materialVariantId    ↔ material_variant_id
- *   itemType             ↔ item_type
- *   tagUid               ↔ tag_uid
- *   sensorId             ↔ sensor_id
- *   currentStock         ↔ current_stock
- *   reorderPoint         ↔ reorder_point
- *   threshold            ↔ threshold
- *   forecastedDemandNext7Days ↔ forecasted_demand_next_7_days
- *   model                ↔ model
- *   status               ↔ status
- *   lastUpdated          ↔ last_updated
- *   lastCheckoutAt       ↔ last_checkout_at
+ * Field shape (camelCase <-> snake_case in Firestore):
+ *   materialVariantId    <-> material_variant_id
+ *   itemType             <-> item_type
+ *   tagUid               <-> tag_uid
+ *   sensorId             <-> sensor_id
+ *   currentStock         <-> current_stock
+ *   reorderPoint         <-> reorder_point
+ *   (no `threshold` - removed: write-only display data, never evaluated)
+ *   forecastedDemandNext7Days <-> forecasted_demand_next_7_days
+ *   model                <-> model
+ *   status               <-> status
+ *   lastUpdated          <-> last_updated
+ *   lastCheckoutAt       <-> last_checkout_at
  *
- * RFID check-out writes to the `rfid_events` collection are *not* here — that
+ * RFID check-out writes to the `rfid_events` collection are *not* here - that
  * path is service-account-only (the ESP32 firmware's job), so the web
  * dashboard has no `recordRfidEvent` method.
  */
@@ -23,6 +23,7 @@ import {
  collection,
  onSnapshot,
  doc,
+ getDoc,
  setDoc,
  updateDoc,
  deleteDoc,
@@ -30,25 +31,39 @@ import {
  type Unsubscribe,
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
+import { logAudit } from "@/lib/services/audit";
 import type { InventoryItem } from "@/types";
 import { getInventoryStatus, isStale } from "@/lib/derived";
 
 const COLL = "inventory";
 
-export function subscribeInventory(cb: (items: InventoryItem[]) => void): Unsubscribe {
+/** Firestore subscription failure handler (permission/offline). */
+export type FeedErrorHandler = (e: unknown) => void;
+
+function logFeedError(scope: string): FeedErrorHandler {
+  return (e) => {
+    console.error(`[${scope}] subscription failed:`, e);
+  };
+}
+
+export function subscribeInventory(
+  cb: (items: InventoryItem[]) => void,
+  onError: FeedErrorHandler = logFeedError("inventory"),
+): Unsubscribe {
   return onSnapshot(collection(requireDb(), COLL), (snap) => {
     const items = snap.docs.map((d) => fromFirestore(d.id, d.data()));
     cb(items);
-  });
+  }, onError);
 }
 
 export function subscribeInventoryItem(
   id: string,
   cb: (item: InventoryItem | null) => void,
+  onError: FeedErrorHandler = logFeedError("inventory"),
 ): Unsubscribe {
   return onSnapshot(doc(requireDb(), COLL, id), (snap) => {
     cb(snap.exists() ? fromFirestore(snap.id, snap.data()) : null);
-  });
+  }, onError);
 }
 
 export async function createVariant(input: {
@@ -59,7 +74,6 @@ export async function createVariant(input: {
   sensorId?: string;
   currentStock: number;
   reorderPoint: number;
-  threshold: number;
   forecastedDemandNext7Days: number;
   model: "Holt-Winters" | "Exponential Smoothing";
 }): Promise<string> {
@@ -74,13 +88,20 @@ export async function createVariant(input: {
     tag_uid: input.tagUid ?? null,
     sensor_id: input.sensorId ?? null,
     current_stock: input.currentStock,
-    threshold: input.threshold,
     reorder_point: input.reorderPoint,
     forecasted_demand_next_7_days: input.forecastedDemandNext7Days,
     model: input.model,
     status,
     last_updated: Timestamp.now(),
     last_checkout_at: null,
+  });
+  logAudit({
+   action: "variant_created",
+   module: "inventory",
+   record_id: id,
+   record_label: `Material ${id} (${input.itemType})`,
+   old_value: null,
+   new_value: `stock=${input.currentStock}, ROP=${input.reorderPoint}`,
   });
   return id;
 }
@@ -100,22 +121,57 @@ export async function updateStock(id: string, newStock: number): Promise<void> {
         reorder_point: (snap.data().reorder_point as number) ?? 0,
       } as InventoryItem)
     : status;
+  const prevStock = snap.exists()
+   ? ((snap.data().current_stock as number) ?? null)
+   : null;
   await updateDoc(doc(requireDb(), COLL, id), {
-    current_stock: newStock,
-    status: realStatus,
-    last_updated: Timestamp.now(),
+   current_stock: newStock,
+   status: realStatus,
+   last_updated: Timestamp.now(),
+  });
+  logAudit({
+   action: "stock_adjusted",
+   module: "inventory",
+   record_id: id,
+   record_label: `Material ${id}`,
+   old_value: prevStock,
+   new_value: newStock,
   });
 }
 
 export async function updateReorderPoint(id: string, newRop: number): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
+  const prevRop = prevSnap?.exists()
+   ? ((prevSnap.data().reorder_point as number) ?? null)
+   : null;
   await updateDoc(doc(requireDb(), COLL, id), {
-    reorder_point: newRop,
-    last_updated: Timestamp.now(),
+   reorder_point: newRop,
+   last_updated: Timestamp.now(),
   });
-}
+  logAudit({
+   action: "reorder_point_updated",
+   module: "inventory",
+   record_id: id,
+   record_label: `Material ${id}`,
+   old_value: prevRop,
+   new_value: newRop,
+  });
+ }
 
 export async function deleteVariant(id: string): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
+  const prevLabel = prevSnap?.exists()
+   ? ((prevSnap.data().item_type as string) ?? id)
+   : id;
   await deleteDoc(doc(requireDb(), COLL, id));
+  logAudit({
+   action: "variant_deleted",
+   module: "inventory",
+   record_id: id,
+   record_label: `Material ${id} (${prevLabel})`,
+   old_value: prevLabel,
+   new_value: null,
+  });
 }
 
 // ---- internal helpers ----
@@ -130,7 +186,6 @@ function fromFirestore(id: string, data: Record<string, unknown>): InventoryItem
     tag_uid: (data.tag_uid as string) ?? undefined,
     sensor_id: (data.sensor_id as string) ?? undefined,
     current_stock: (data.current_stock as number) ?? 0,
-    threshold: (data.threshold as number) ?? 0,
     reorder_point: (data.reorder_point as number) ?? 0,
     forecasted_demand_next_7_days:
       (data.forecasted_demand_next_7_days as number) ?? 0,

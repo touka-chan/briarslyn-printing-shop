@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * SessionTimeoutWatcher — the brain of the application-level session
+ * SessionTimeoutWatcher - the brain of the application-level session
  * timer. Renders nothing; mounts the warning modal and triggers
  * auto-logout by calling `useAuth().signOut()`.
  *
@@ -19,7 +19,7 @@
  *     `signOut()` and shows a "Session expired" toast on the
  *     next page.
  *
- * The watcher deliberately does NOT render any UI of its own —
+ * The watcher deliberately does NOT render any UI of its own -
  * it's a side-effect component. Wrapping it inside the
  * `<ToastProvider>` (already done in `layout.tsx`) gives it
  * access to the toast API for the expired-session message.
@@ -67,7 +67,7 @@ export function SessionTimeoutWatcher() {
   stopTimers();
   const expiry = getStoredExpiry();
   if (!expiry) {
-   // No expiry on disk — that means we have no active session.
+   // No expiry on disk - that means we have no active session.
    // Don't arm any timers; the next sign-in will write a fresh one.
    setWarningOpen(false);
    setExpiresAt(null);
@@ -78,7 +78,7 @@ export function SessionTimeoutWatcher() {
   timersRef.current = startTimers(expiry, {
    onWarning: () => {
     // Guard: don't open the modal if the user is no longer signed
-    // in (e.g. another tab signed them out — the storage event
+    // in (e.g. another tab signed them out - the storage event
     // would have removed the expiry, but we double-check here).
     setWarningOpen(true);
    },
@@ -89,7 +89,7 @@ export function SessionTimeoutWatcher() {
     try {
      await signOut();
     } catch {
-     /* ignore — we'll still navigate */
+     /* ignore - we'll still navigate */
     } finally {
      // `replace` so the protected URL doesn't end up in browser
      // history. The toast survives the navigation because the
@@ -104,7 +104,7 @@ export function SessionTimeoutWatcher() {
  // Re-arm when the user changes (sign-in / sign-out).
  useEffect(() => {
   if (!firebaseUser) {
-   // Signed out — kill any timers and close the modal.
+   // Signed out - kill any timers and close the modal.
    stopTimers();
    setWarningOpen(false);
    setExpiresAt(null);
@@ -128,7 +128,7 @@ export function SessionTimeoutWatcher() {
   const onStorage = (e: StorageEvent) => {
    if (e.key !== "printflow-session-expiry") return;
    if (!firebaseUser) return;
-   // Another tab changed the expiry — re-arm ourselves so our
+   // Another tab changed the expiry - re-arm ourselves so our
    // React state and timers stay aligned.
    arm();
   };

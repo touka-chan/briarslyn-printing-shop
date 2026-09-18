@@ -1,6 +1,8 @@
 "use client";
 
 import { ReactNode } from "react";
+import { Inbox } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import {
  LineChart,
  Line,
@@ -25,46 +27,61 @@ interface ChartDataPoint {
 }
 
 interface ChartCardProps {
- title: string;
- subtitle?: string;
- type: "line" | "area" | "bar" | "pie";
- data: ChartDataPoint[];
- xKey: string;
- yKeys: string[];
- colors?: string[];
- height?: number;
- showLegend?: boolean;
- showGrid?: boolean;
- children?: ReactNode;
- className?: string;
+  title: string;
+  subtitle?: string;
+  type: "line" | "area" | "bar" | "pie";
+  data: ChartDataPoint[];
+  xKey: string;
+  yKeys: string[];
+  colors?: string[];
+  height?: number;
+  showLegend?: boolean;
+  showGrid?: boolean;
+  children?: ReactNode;
+  className?: string;
+  emptyMessage?: string;
+  emptyDescription?: string;
 }
 
+/**
+ * Monochrome data ramp (reference-style) driven by theme tokens, so
+ * charts stay readable in light + dark without hardcoded hexes.
+ */
 const CHART_COLORS = [
- "#00535b",
- "#a8372c",
- "#00479b",
- "#2e7d32",
- "#ed6c02",
- "#8b5cf6",
+  "var(--color-printflow-on-surface)",
+  "var(--color-printflow-on-surface-variant)",
+  "var(--color-printflow-outline)",
+  "var(--color-printflow-outline-variant)",
+  "var(--color-printflow-on-surface)",
+  "var(--color-printflow-on-surface-variant)",
 ];
 
-const TEXT_COLOR = "#3e494a";
-const GRID_COLOR = "#bec8ca";
+const TEXT_COLOR = "var(--color-printflow-on-surface-variant)";
+const GRID_COLOR = "var(--color-printflow-outline-variant)";
 
 export function ChartCard({
- title,
- subtitle,
- type,
- data,
- xKey,
- yKeys,
- colors = CHART_COLORS,
- height = 300,
- showLegend = true,
- showGrid = true,
- children,
- className = "",
+  title,
+  subtitle,
+  type,
+  data,
+  xKey,
+  yKeys,
+  colors = CHART_COLORS,
+  height = 300,
+  showLegend = true,
+  showGrid = true,
+  children,
+  className = "",
+  emptyMessage = "No data yet",
+  emptyDescription = "Data will appear here once there is activity.",
 }: ChartCardProps) {
+  // Degenerate renders (empty array, or every value zero) produce
+  // misleading artifacts in some chart types - show an intentional
+  // empty state instead. This also covers fresh/emptied databases.
+  const hasData =
+   Array.isArray(data) &&
+   data.length > 0 &&
+   yKeys.some((k) => data.some((d) => Number(d[k]) > 0));
  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
   if (active && payload && payload.length) {
    return (
@@ -138,7 +155,7 @@ export function ChartCard({
     return (
      <PieChart margin={{ top: 5, right: 5, bottom: 35, left: 5 }}>
       <Pie data={data} cx="50%" cy="45%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey={yKeys[0]} nameKey={xKey} labelLine={false} label={false}>
-       {data.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} stroke="#fff" strokeWidth={2} />)}
+       {data.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} stroke="var(--color-printflow-surface)" strokeWidth={2} />)}
       </Pie>
       <Tooltip content={<CustomTooltip />} />
       {showLegend && <Legend verticalAlign="bottom" align="center" iconSize={10} wrapperStyle={{ fontSize: "12px", lineHeight: "16px", paddingTop: "8px" }} />}
@@ -150,20 +167,30 @@ export function ChartCard({
   }
  };
 
- return (
-  <div className={`chart-card ${className}`}>
-   {(title || subtitle) && (
-    <div className="mb-6">
-     <h3 className="text-lg font-semibold text-printflow-on-surface">{title}</h3>
-     {subtitle && <p className="text-sm text-printflow-on-surface-variant mt-0.5">{subtitle}</p>}
-    </div>
-   )}
-   <div style={{ height }} className="w-full">
-    <ResponsiveContainer width="100%" height="100%">
-     {renderChart()}
-    </ResponsiveContainer>
+  return (
+   <div className={`chart-card ${className}`}>
+    {(title || subtitle) && (
+     <div className="mb-6">
+      <h3 className="text-lg font-semibold text-printflow-on-surface">{title}</h3>
+      {subtitle && <p className="text-sm text-printflow-on-surface-variant mt-0.5">{subtitle}</p>}
+     </div>
+    )}
+    {!hasData ? (
+     <div style={{ height }} className="w-full flex items-center justify-center">
+      <EmptyState
+       icon={<Inbox className="w-7 h-7" />}
+       title={emptyMessage}
+       description={emptyDescription}
+      />
+     </div>
+    ) : (
+     <div style={{ height }} className="w-full">
+      <ResponsiveContainer width="100%" height="100%">
+       {renderChart()}
+      </ResponsiveContainer>
+     </div>
+    )}
+    {children}
    </div>
-   {children}
-  </div>
- );
+  );
 }

@@ -2,15 +2,15 @@
  * Client-only mount gate for `<AuthGate>`.
  *
  * The gate reads `usePathname()` / `useRouter()`, which cannot run during
- * a static-export prerender (no request context — the build dies with
+ * a static-export prerender (no request context - the build dies with
  * `Invariant: Expected workStore to be initialized` on `/_global-error`).
  *
  * History of what did NOT work, so nobody "simplifies" this back:
- *  1. Rendering `<AuthGate>` directly in the root layout → build crash.
- *  2. Wrapping it in `<Suspense>` → build passes, but the prerendered
+ *  1. Rendering `<AuthGate>` directly in the root layout - build crash.
+ *  2. Wrapping it in `<Suspense>` - build passes, but the prerendered
  *     boundary state can never be resumed by the client: every page stays
- *     frozen on "Loading…" forever, with zero console errors.
- *  3. `next/dynamic(..., { ssr: false })` → build passes, but the lazy
+ *     frozen on "Loading..." forever, with zero console errors.
+ *  3. `next/dynamic(..., { ssr: false })` - build passes, but the lazy
  *     chunk never resolves against the static export: same frozen page.
  *
  * This pattern avoids all three failure modes with no lazy chunks, no
@@ -18,7 +18,7 @@
  * render both emit the identical static fallback below (hydration is
  * trivially consistent), then the `useEffect` flips `mounted` and the
  * real gate renders with a live router. The gate module stays statically
- * imported, so it ships in the main chunk — slightly larger, always
+ * imported, so it ships in the main chunk - slightly larger, always
  * present, zero loading risk.
  */
 "use client";
@@ -39,7 +39,7 @@ function AuthLoadingFallback() {
         color: "#0b1314",
       }}
     >
-      <p style={{ fontSize: 14, opacity: 0.7 }}>Loading PrintFlow…</p>
+      <p style={{ fontSize: 14, opacity: 0.7 }}>Loading PrintFlow...</p>
     </div>
   );
 }

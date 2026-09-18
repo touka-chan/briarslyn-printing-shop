@@ -1,6 +1,6 @@
 /**
- * Auth-gate guard — lets the Add Employee flow opt out of AuthGate's
- * "signed out → /login" and "no profile doc → Profile not found"
+ * Auth-gate guard - lets the Add Employee flow opt out of AuthGate's
+ * "signed out - /login" and "no profile doc - Profile not found"
  * branches for the brief moment between
  * `createUserWithEmailAndPassword` (which atomically swaps the SDK
  * session) and the admin re-authenticating themselves.
@@ -13,7 +13,7 @@
  * path would also unmount the /employees tree.
  *
  * Module-level state, not React state, because AuthGate's effect
- * needs to read it on the same render that observes the auth change —
+ * needs to read it on the same render that observes the auth change -
  * a useState in the page component can't be set in time.
  *
  * The flag is automatically cleared after a generous timeout so a
@@ -21,7 +21,7 @@
  * doesn't permanently lock the app out.
  */
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — well over any plausible create flow
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes - well over any plausible create flow
 
 let inProgress = false;
 let timeoutHandle: ReturnType<typeof setTimeout> | null = null;

@@ -1,5 +1,5 @@
 /// Mirrors the web `UserAddress` interface in `web/src/types/index.ts` and the
-/// PSGC cascade dropdown output. All fields are optional so legacy mock data
+/// PSGC cascade dropdown output. All fields are optional so legacy rows
 /// and the Owner row stay valid without an address.
 class UserAddress {
   final String? region;

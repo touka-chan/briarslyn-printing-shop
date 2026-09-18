@@ -1,18 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../services/firebase_inventory.dart' as fb_inventory;
+import '../../services/firebase_rfid.dart' as fb_rfid;
+import '../../services/firebase_usage.dart' as fb_usage;
+import '../../services/forecast.dart' as forecast;
 import '../../services/inventory_service.dart';
+import '../../services/usage_service.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/mock_data.dart';
 import '../../utils/animations.dart';
 import '../../models/inventory_item.dart';
+import '../../models/rfid_event.dart';
+import '../../models/usage_event.dart';
 
-/// The Inventory screen — the second tab in the Production shell.
+/// The Inventory screen - the second tab in the Production shell.
 ///
-/// Displays inventory items grouped by stock status (In Stock, Low Stock,
+/// Live Firestore inventory grouped by stock status (In Stock, Low Stock,
 /// Insufficient Stock). Tapping an item shows a stock detail panel.
 class ProductionInventoryScreen extends StatefulWidget {
   const ProductionInventoryScreen({super.key});
@@ -24,18 +32,105 @@ class ProductionInventoryScreen extends StatefulWidget {
 class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
   String _filter = 'All';
   final List<String> _filters = ['All', 'In Stock', 'Low Stock', 'Insufficient Stock'];
+  int _feedNonce = 0;
 
-  List<InventoryItem> get _filteredInventory {
-    if (_filter == 'All') return mockInventory;
-    return mockInventory.where((i) => i.status == _filter).toList();
+  List<InventoryItem> _filteredInventory(List<InventoryItem> source) {
+    if (_filter == 'All') return source;
+    return source.where((i) => i.status == _filter).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final items = _filteredInventory;
-    final inStockCount = mockInventory.where((i) => i.status == 'In Stock').length;
-    final lowStockCount = mockInventory.where((i) => i.status == 'Low Stock').length;
-    final insufficientCount = mockInventory.where((i) => i.status == 'Insufficient Stock').length;
+    return StreamBuilder<List<InventoryItem>>(
+      key: ValueKey('inventory-$_feedNonce'),
+      stream: fb_inventory.subscribeInventoryStream(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return _buildErrorState(
+            details: '${snap.error}',
+            onRetry: () => setState(() => _feedNonce++),
+          );
+        }
+        if (!snap.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        return _buildBody(snap.data!);
+      },
+    );
+  }
+
+  Widget _buildErrorState({String? details, VoidCallback? onRetry}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.xxl, AppSpacing.lg, AppSpacing.xxl),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: AppTheme.statusOverdue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.cloud_off_outlined,
+                  size: 48, color: AppTheme.statusOverdue),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              'Couldn\'t load inventory',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Check your connection and try again.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: AppTheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            if (details != null && details.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                details,
+                style: AppTheme.monoStyle(
+                  fontSize: 11,
+                  color: AppTheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            if (onRetry != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              PfButton.outlined(
+                label: 'Retry',
+                icon: Icons.refresh_rounded,
+                onPressed: onRetry,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(List<InventoryItem> source) {
+    final items = _filteredInventory(source);
+    final inStockCount = source.where((i) => i.status == 'In Stock').length;
+    final lowStockCount = source.where((i) => i.status == 'Low Stock').length;
+    final insufficientCount = source.where((i) => i.status == 'Insufficient Stock').length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
@@ -75,13 +170,73 @@ class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
           // Inventory list
-          ...items.map((item) => Column(
-            children: [
-              _InventoryCard(item: item),
-              const SizedBox(height: AppSpacing.md),
-            ],
-          )),
+          if (source.isEmpty)
+            _EmptyInventoryState(
+              title: 'No inventory yet',
+              message:
+                  'Variants added on the web dashboard or by the Admin will appear here.',
+            )
+          else if (items.isEmpty)
+            const _EmptyInventoryState(
+              title: 'No matching items',
+              message: 'Try a different stock filter.',
+            )
+          else
+            ...items.map((item) => Column(
+              children: [
+                _InventoryCard(item: item),
+                const SizedBox(height: AppSpacing.md),
+              ],
+            )),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyInventoryState extends StatelessWidget {
+  const _EmptyInventoryState({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: AppTheme.statusCompleted.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.inventory_2_outlined,
+                  size: 48, color: AppTheme.statusCompleted),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              title,
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              message,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: AppTheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -153,7 +308,10 @@ class _InventoryCard extends StatelessWidget {
   }
 
   double get _stockPercentage {
-    return (item.currentStock / item.reorderPoint).clamp(0.0, 1.0);
+    // Guard: reorderPoint 0 (common on new variants) makes 0/0 = NaN,
+    // which fails LinearProgressIndicator's 0..1 assertion (red screen).
+    final rop = item.reorderPoint <= 0 ? 1 : item.reorderPoint;
+    return (item.currentStock / rop).clamp(0.0, 1.0);
   }
 
   @override
@@ -238,7 +396,7 @@ class _InventoryCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Stock: ${item.currentStock} / ${item.threshold}',
+                    'Stock: ${item.currentStock}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
                   ),
                   Text(
@@ -349,10 +507,9 @@ class _ItemDetailSheet extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           _DetailRow(label: 'Category', value: item.category),
           _DetailRow(label: 'Current Stock', value: '${item.currentStock}'),
-          _DetailRow(label: 'Threshold', value: '${item.threshold}'),
           _DetailRow(label: 'Reorder Point', value: '${item.reorderPoint}'),
           _DetailRow(label: 'Forecast (7d)', value: '${item.forecastedDemandNext7Days}'),
-          _DetailRow(label: 'Forecast Model', value: item.model ?? '—'),
+          _DetailRow(label: 'Forecast Model', value: item.model ?? '-'),
           if (item.tagUid != null)
             _DetailRow(label: 'RFID Tag', value: item.tagUid ?? 'N/A'),
           if (item.sensorId != null)
@@ -388,6 +545,47 @@ class _ItemDetailSheet extends StatelessWidget {
               _showAdjustStockSheet(context, item);
             },
           ),
+          const SizedBox(height: AppSpacing.sm),
+          PfButton.outlined(
+            label: 'Edit Reorder Point',
+            icon: Icons.flag_outlined,
+            fullWidth: true,
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              context.pop();
+              _showEditReorderPointSheet(context, item);
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Stock In',
+                  icon: Icons.move_to_inbox_rounded,
+                  fullWidth: true,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    context.pop();
+                    _showStockInSheet(context, item);
+                  },
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Log Usage',
+                  icon: Icons.outbox_rounded,
+                  fullWidth: true,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    context.pop();
+                    _showLogUsageSheet(context, item);
+                  },
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -395,8 +593,9 @@ class _ItemDetailSheet extends StatelessWidget {
 }
 
 /// Modal bottom sheet for placing a reorder request on a low/insufficient
-/// inventory variant. Suggests a quantity that lifts the variant above its
-/// reorder point, then on confirm delegates to [InventoryService] (production
+/// inventory variant. Suggests a quantity covering the larger of the
+/// stored reorder point (+25% buffer) and the live 7-day smoothed demand
+/// forecast, then on confirm delegates to [InventoryService] (production
 /// role) and shows a success snackbar.
 Future<void> _showReorderSheet(
   BuildContext context,
@@ -406,13 +605,71 @@ Future<void> _showReorderSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (sheetContext) => _ReorderSheet(item: item),
+    builder: (sheetContext) =>
+        StreamBuilder<List<RfidCheckoutEvent>>(
+      stream: fb_rfid.subscribeRfidEventsStream(limit: 500),
+      builder: (context, snap) {
+        final taps = snap.data ?? const <RfidCheckoutEvent>[];
+        return StreamBuilder<List<UsageEvent>>(
+          stream: fb_usage.subscribeUsageEventsStream(limit: 500),
+          builder: (context, usageSnap) {
+            // A failed feed degrades to the stored reorder point (never a
+            // fake zero) — but the sheet says so instead of implying live
+            // data informed the suggestion.
+            final forecastUnavailable =
+                snap.hasError || usageSnap.hasError;
+            // Demand = usage OUT movements (auto/manual/rfid). IN
+            // movements (receiving) never count. Legacy RFID taps
+            // count only when the variant has no usage history yet -
+            // afterwards taps are check-ins, not demand (no double
+            // count).
+            final usageOut =
+                (usageSnap.data ?? const <UsageEvent>[])
+                    .where((u) =>
+                        u.direction == 'out' &&
+                        u.materialVariantId == item.materialVariantId)
+                    .map((u) => RfidCheckoutEvent(
+                          materialVariantId: u.materialVariantId,
+                          tagUid: '',
+                          sensorId: '',
+                          timestamp: u.timestamp,
+                        ))
+                    .toList();
+            final events = <RfidCheckoutEvent>[
+              if (usageOut.isEmpty) ...taps,
+              ...usageOut,
+            ];
+            final live = forecast.forecastVariantDemand(
+              events,
+              item.materialVariantId,
+            );
+            return _ReorderSheet(
+              item: item,
+              liveForecast: live.hasHistory ? live : null,
+              forecastUnavailable: forecastUnavailable,
+            );
+          },
+        );
+      },
+    ),
   );
 }
 
 class _ReorderSheet extends StatefulWidget {
-  const _ReorderSheet({required this.item});
+  const _ReorderSheet({
+    required this.item,
+    this.liveForecast,
+    this.forecastUnavailable = false,
+  });
   final InventoryItem item;
+
+  /// Live demand forecast for this variant, or null when it has no
+  /// checkout history yet (falls back to the stored reorder point).
+  final forecast.VariantForecast? liveForecast;
+
+  /// True when the demand feeds failed: the suggestion uses the stored
+  /// reorder point and the sheet says so.
+  final bool forecastUnavailable;
 
   @override
   State<_ReorderSheet> createState() => _ReorderSheetState();
@@ -420,15 +677,32 @@ class _ReorderSheet extends StatefulWidget {
 
 class _ReorderSheetState extends State<_ReorderSheet> {
   late int _qty;
+  late final TextEditingController _qtyCtrl;
   bool _submitting = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    // Suggest enough units to bring the variant 25% above its reorder point.
-    final gap = (widget.item.reorderPoint * 1.25).ceil() - widget.item.currentStock;
+    // Cover the larger of the ROP (+25% buffer) and the live 7-day
+    // smoothed demand forecast when checkout history exists.
+    final live = widget.liveForecast;
+    var target = (widget.item.reorderPoint * 1.25).ceil();
+    if (live != null && live.forecast7d > target) {
+      target = live.forecast7d;
+    }
+    final gap = target - widget.item.currentStock;
     _qty = gap < 10 ? 10 : gap;
+    // Owned once here - never rebuilt in build(), so typing never loses
+    // focus or resets the field.
+    _qtyCtrl = TextEditingController(text: '$_qty')
+      ..selection = TextSelection.collapsed(offset: '$_qty'.length);
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _submit() async {
@@ -511,7 +785,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            '${widget.item.materialVariantId} • ${widget.item.itemType}',
+            '${widget.item.materialVariantId} - ${widget.item.itemType}',
             style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -544,10 +818,14 @@ class _ReorderSheetState extends State<_ReorderSheet> {
           PfTextField(
             label: 'Quantity to reorder',
             hintText: 'Suggested amount',
-            helper:
-                'Suggested to bring stock 25% above the reorder point.',
-            controller: TextEditingController(text: '$_qty')
-              ..selection = TextSelection.collapsed(offset: '$_qty'.length),
+            helper: widget.liveForecast != null
+                ? 'Covers the 7-day smoothed demand '
+                    '(${widget.liveForecast!.forecast7d} units, '
+                    '${widget.liveForecast!.model}) with buffer.'
+                : widget.forecastUnavailable
+                    ? 'Live demand unavailable - using the stored reorder point.'
+                    : 'Suggested to bring stock 25% above the reorder point.',
+            controller: _qtyCtrl,
             prefixIcon: Icons.add_shopping_cart_rounded,
             keyboardType: TextInputType.number,
             errorText: _error,
@@ -567,7 +845,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: PfButton.filled(
-                  label: _submitting ? 'Placing…' : 'Confirm Reorder',
+                  label: _submitting ? 'Placing...' : 'Confirm Reorder',
                   icon: Icons.check_rounded,
                   fullWidth: true,
                   loading: _submitting,
@@ -703,7 +981,7 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            '${widget.item.materialVariantId} • ${widget.item.itemType}',
+            '${widget.item.materialVariantId} - ${widget.item.itemType}',
             style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -747,7 +1025,192 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: PfButton.filled(
-                  label: _submitting ? 'Saving…' : 'Save',
+                  label: _submitting ? 'Saving...' : 'Save',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  loading: _submitting,
+                  onPressed: _submitting ? null : _submit,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet for editing a variant's reorder point.
+/// Wraps [InventoryService.updateReorderPoint] so the action is
+/// permission-checked (production role only); the status pill recomputes
+/// from the existing stock against the new ROP.
+Future<void> _showEditReorderPointSheet(
+  BuildContext context,
+  InventoryItem item,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => _EditReorderPointSheet(item: item),
+  );
+}
+
+class _EditReorderPointSheet extends StatefulWidget {
+  const _EditReorderPointSheet({required this.item});
+
+  final InventoryItem item;
+
+  @override
+  State<_EditReorderPointSheet> createState() =>
+      _EditReorderPointSheetState();
+}
+
+class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
+  late final TextEditingController _ctrl;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.item.reorderPoint.toString());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final raw = _ctrl.text.trim();
+    final value = int.tryParse(raw);
+    if (value == null || value < 0) {
+      setState(() => _error = 'Enter a non-negative whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    final auth = AuthProvider.of(context);
+    try {
+      await InventoryService.updateReorderPoint(
+        materialVariantId: widget.item.materialVariantId,
+        newReorderPoint: value,
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Reorder point updated to $value for ${widget.item.materialVariantId}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Failed to update reorder point';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Edit Reorder Point',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '${widget.item.materialVariantId} - ${widget.item.itemType}',
+            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: _Stat(
+                  label: 'Current Stock',
+                  value: '${widget.item.currentStock}',
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Stat(
+                  label: 'Current ROP',
+                  value: '${widget.item.reorderPoint}',
+                  highlight: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PfTextField(
+            label: 'New reorder point',
+            hintText: 'Enter new threshold',
+            helper: 'Stock at or below this level shows as Low Stock.',
+            controller: _ctrl,
+            prefixIcon: Icons.flag_outlined,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Cancel',
+                  fullWidth: true,
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.filled(
+                  label: _submitting ? 'Saving...' : 'Save',
                   icon: Icons.check_rounded,
                   fullWidth: true,
                   loading: _submitting,
@@ -827,6 +1290,431 @@ class _DetailRow extends StatelessWidget {
               style: AppTheme.monoStyle(fontSize: 14, fontWeight: FontWeight.w500),
               textAlign: TextAlign.right,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet for logging a stock IN (delivery received).
+/// Writes `current_stock += qty` plus a `usage_events` entry
+/// (direction `in`) in one transaction via [UsageService].
+Future<void> _showStockInSheet(
+  BuildContext context,
+  InventoryItem item,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => _StockInSheet(item: item),
+  );
+}
+
+class _StockInSheet extends StatefulWidget {
+  const _StockInSheet({required this.item});
+  final InventoryItem item;
+
+  @override
+  State<_StockInSheet> createState() => _StockInSheetState();
+}
+
+class _StockInSheetState extends State<_StockInSheet> {
+  late final TextEditingController _qtyCtrl;
+  late final TextEditingController _noteCtrl;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyCtrl = TextEditingController(text: '10');
+    _noteCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final qty = int.tryParse(_qtyCtrl.text.trim());
+    if (qty == null || qty <= 0) {
+      setState(() => _error = 'Enter a positive whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final auth = AuthProvider.of(context);
+    try {
+      await UsageService.logStockIn(
+        materialVariantId: widget.item.materialVariantId,
+        qty: qty,
+        note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Stock in: +$qty ${widget.item.materialVariantId}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Failed to record stock-in';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Stock in',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '${widget.item.materialVariantId} - ${widget.item.itemType}',
+            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PfTextField(
+            label: 'Quantity received',
+            hintText: 'e.g. 20',
+            controller: _qtyCtrl,
+            prefixIcon: Icons.move_to_inbox_rounded,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          PfTextField(
+            label: 'Note (optional)',
+            hintText: 'e.g. Supplier delivery, PO-123',
+            controller: _noteCtrl,
+            prefixIcon: Icons.note_alt_outlined,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Cancel',
+                  fullWidth: true,
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.filled(
+                  label: _submitting ? 'Saving...' : 'Confirm',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  loading: _submitting,
+                  onPressed: _submitting ? null : _submit,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet for logging a manual stock OUT (wastage, sample,
+/// correction, or extra production use outside the auto-deduct).
+/// An optional order ID links the log; when that order was already
+/// auto-deducted the user must confirm explicitly (double-count guard).
+Future<void> _showLogUsageSheet(
+  BuildContext context,
+  InventoryItem item,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => _LogUsageSheet(item: item),
+  );
+}
+
+class _LogUsageSheet extends StatefulWidget {
+  const _LogUsageSheet({required this.item});
+  final InventoryItem item;
+
+  @override
+  State<_LogUsageSheet> createState() => _LogUsageSheetState();
+}
+
+class _LogUsageSheetState extends State<_LogUsageSheet> {
+  static const _reasons = <String>[
+    'production-use',
+    'wastage',
+    'sample',
+    'correction',
+    'others',
+  ];
+
+  late final TextEditingController _qtyCtrl;
+  late final TextEditingController _orderCtrl;
+  String _reason = _reasons.first;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyCtrl = TextEditingController(text: '1');
+    _orderCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _orderCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final qty = int.tryParse(_qtyCtrl.text.trim());
+    if (qty == null || qty <= 0) {
+      setState(() => _error = 'Enter a positive whole number');
+      return;
+    }
+    final orderId = _orderCtrl.text.trim().isEmpty ? null : _orderCtrl.text.trim();
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final auth = AuthProvider.of(context);
+    try {
+      // Double-count guard: an order already auto-deducted needs an
+      // explicit second confirmation before logging more against it.
+      if (orderId != null) {
+        final snap = await FirebaseFirestore.instance
+            .collection('orders')
+            .doc(orderId)
+            .get();
+        if (!snap.exists) {
+          if (!mounted) return;
+          setState(() {
+            _submitting = false;
+            _error = 'Order not found: $orderId';
+          });
+          return;
+        }
+        final alreadyDeducted =
+            (snap.data()?['stock_deducted'] as bool?) == true;
+        if (alreadyDeducted && mounted) {
+          final proceed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Already deducted'),
+              content: Text(
+                'Order $orderId already auto-deducted its recipe. Log $qty more unit(s) anyway?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Log anyway'),
+                ),
+              ],
+            ),
+          );
+          if (proceed != true) {
+            if (!mounted) return;
+            setState(() => _submitting = false);
+            return;
+          }
+        }
+      }
+      await UsageService.logUsage(
+        materialVariantId: widget.item.materialVariantId,
+        qty: qty,
+        reason: _reason,
+        orderId: orderId,
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Usage logged: -$qty ${widget.item.materialVariantId} ($_reason)'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = 'Failed to log usage';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Log usage',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '${widget.item.materialVariantId} - ${widget.item.itemType}',
+            style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PfTextField(
+            label: 'Quantity used',
+            hintText: 'e.g. 2',
+            controller: _qtyCtrl,
+            prefixIcon: Icons.outbox_rounded,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Reason',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.onSurface,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          DropdownButtonFormField<String>(
+            initialValue: _reason,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppTheme.surfaceContainer,
+              border: OutlineInputBorder(
+                borderRadius: AppRadius.rMd,
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.md,
+              ),
+            ),
+            items: _reasons
+                .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                .toList(),
+            onChanged: (v) => setState(() => _reason = v ?? _reasons.first),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          PfTextField(
+            label: 'Link order ID (optional)',
+            hintText: 'e.g. ORD-200101',
+            helper: 'Links this log to an order. Warns when already deducted.',
+            controller: _orderCtrl,
+            prefixIcon: Icons.receipt_long_outlined,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Cancel',
+                  fullWidth: true,
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.filled(
+                  label: _submitting ? 'Saving...' : 'Confirm',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  loading: _submitting,
+                  onPressed: _submitting ? null : _submit,
+                ),
+              ),
+            ],
           ),
         ],
       ),

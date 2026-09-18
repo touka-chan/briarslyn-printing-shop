@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_router.dart';
 import '../../auth/auth.dart';
@@ -12,8 +13,9 @@ import '../../utils/animations.dart';
 import '../../services/firebase_orders.dart' as fb_orders;
 import '../../services/order_service.dart';
 import '../../services/services.dart';
+import '../../services/eta.dart' as eta;
 
-/// The Order Detail screen — shared between Cashier and Production.
+/// The Order Detail screen - shared between Cashier and Production.
 ///
 /// Subscribes live to the `orders/{orderId}` doc so payment + status
 /// updates from any device (web POS, web production, mobile) reflect
@@ -29,14 +31,50 @@ class OrderDetailScreen extends StatefulWidget {
 }
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
+  int _feedNonce = 0;
+
+  Widget _feedErrorScaffold(String message, String? details) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        backgroundColor: AppTheme.surface,
+        foregroundColor: AppTheme.onSurface,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text('Order ${widget.orderId}'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: PfErrorCard(
+            message: message,
+            details: details,
+            onRetry: () => setState(() => _feedNonce++),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
+      key: ValueKey('order-${widget.orderId}-$_feedNonce'),
       stream: FirebaseFirestore.instance
           .collection('orders')
           .doc(widget.orderId)
           .snapshots(),
       builder: (context, snap) {
+        if (snap.hasError) {
+          // Permission/offline - must not masquerade as "deleted".
+          return _feedErrorScaffold(
+            'Couldn\'t load this order. Check your connection and permissions.',
+            '${snap.error}',
+          );
+        }
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: AppTheme.background,
@@ -52,9 +90,68 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           );
         }
         final data = doc.data() as Map<String, dynamic>;
-        final order = Order.fromJson({...data, 'order_id': doc.id});
-        return _buildLoaded(context, order);
+        late final Order order;
+        try {
+          order = Order.fromJson({...data, 'order_id': doc.id});
+        } catch (e) {
+          return _feedErrorScaffold(
+            'This order has invalid data and could not be displayed.',
+            '$e',
+          );
+        }
+        // Queue-aware ETA: the detail must show the SAME live value as
+        // the production queue, not the stored (possibly stale) estimate.
+        return StreamBuilder<List<Order>>(
+          stream: fb_orders.subscribeOrdersStream(),
+          builder: (context, queueSnap) {
+            final queue = queueSnap.data ?? const <Order>[];
+            return _buildLoaded(context, _withLiveEta(order, queue));
+          },
+        );
       },
+    );
+  }
+
+  /// Recomputes ETA against the live active queue (same spec as the
+  /// production list). Non-active orders keep their stored values.
+  Order _withLiveEta(Order order, List<Order> queue) {
+    if (!eta.isActiveStatus(order.status)) return order;
+    final now = DateTime.now();
+    final active =
+        queue.where((o) => eta.isActiveStatus(o.status)).toList();
+    final rate = eta.completedUnitsLast7d(queue, now) / 7;
+    final e = eta.liveEta(
+      order: order,
+      active: active,
+      historyUnitsPerDay: rate,
+    );
+    if (e.date == order.estimatedCompletion) return order;
+    return Order(
+      orderId: order.orderId,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone,
+      customerRegion: order.customerRegion,
+      customerProvince: order.customerProvince,
+      customerCity: order.customerCity,
+      customerBarangay: order.customerBarangay,
+      customerZip: order.customerZip,
+      itemType: order.itemType,
+      quantity: order.quantity,
+      layoutFile: order.layoutFile,
+      targetDate: order.targetDate,
+      paymentAmount: order.paymentAmount,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      status: order.status,
+      priority: order.priority,
+      estimatedCompletion: e.date,
+      basedOn: e.basedOn,
+      cashierId: order.cashierId,
+      createdAt: order.createdAt,
+      stockDeducted: order.stockDeducted,
+      startedAt: order.startedAt,
+      completedAt: order.completedAt,
     );
   }
 
@@ -74,26 +171,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 onPressed: () => Navigator.pop(context),
               ),
               title: Text('Order ${order.orderId}'),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.share_outlined),
-                  onPressed: () {
-                    HapticFeedback.selectionClick();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Share order - coming soon'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                  tooltip: 'Share',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.more_vert_rounded),
-                  onPressed: () => _showMoreMenu(context, order),
-                  tooltip: 'More',
-                ),
-              ],
+              // No app-bar actions: Share/Duplicate/Report prototypes were
+              // removed (they only showed "coming soon" snackbars).
+              actions: const [],
             ),
             SliverPadding(
               padding: const EdgeInsets.all(AppSpacing.lg),
@@ -278,8 +358,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   void _viewCustomerDetails(BuildContext context, Order order) {
     HapticFeedback.selectionClick();
-    // Subscribe live to all orders for this customer; show a real list
-    // (or an honest empty state) instead of mock data.
+    // Subscribe live to all orders for this customer.
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -300,10 +379,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           const SizedBox(height: AppSpacing.md),
           _SpecRow(label: 'Item Type', value: order.itemType),
           _SpecRow(label: 'Quantity', value: '${order.quantity}'),
-          _SpecRow(
-            label: 'Layout File',
-            value: order.layoutFile.isEmpty ? '—' : order.layoutFile,
-          ),
+          _LayoutFileRow(layoutFile: order.layoutFile),
           if (order.createdAt != null)
             _SpecRow(
               label: 'Order Date',
@@ -331,6 +407,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final isPaid = order.paymentStatus == 'Paid' ||
         order.paymentStatus == 'Full Paid';
     final isPartial = order.paymentStatus == 'Partial' ||
+        order.paymentStatus == 'Partially Paid' ||
         order.paymentStatus == 'Incomplete';
     final color = isPaid
         ? AppTheme.statusCompleted
@@ -413,6 +490,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               onPressed: () => _updatePaymentStatus(context, order, 'Paid'),
             ),
           ),
+        // Paid state renders as a disabled (non-tappable) indicator -
+        // never an enabled button that does nothing.
         if (isCashier && (order.paymentStatus == 'Paid' || order.paymentStatus == 'Full Paid'))
           PermissionGate(
             permission: Permission.orderUpdatePayment,
@@ -421,7 +500,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               icon: Icons.check_circle_rounded,
               fullWidth: true,
               size: PfButtonSize.large,
-              onPressed: () {},
+              onPressed: null,
             ),
           ),
 
@@ -597,57 +676,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
-  void _showMoreMenu(BuildContext context, Order order) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) => Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.content_copy_rounded),
-              title: const Text('Duplicate Order'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                HapticFeedback.selectionClick();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Duplicate - coming soon'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.report_outlined),
-              title: const Text('Report Issue'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                HapticFeedback.selectionClick();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Returns true if the order has at least one address component set.
   bool _hasAddress(Order order) {
     return (order.customerRegion != null && order.customerRegion!.isNotEmpty) ||
@@ -756,6 +784,14 @@ class _CustomerOrdersSheet extends StatelessWidget {
       child: StreamBuilder<List<Order>>(
         stream: fb_orders.subscribeOrdersStream(),
         builder: (context, snap) {
+          if (snap.hasError) {
+            return PfErrorCard(
+              title: "Couldn't load orders",
+              message:
+                  'Check your connection and permissions, then reopen this panel.',
+              details: '${snap.error}',
+            );
+          }
           final all = snap.data ?? const <Order>[];
           final mine = all
               .where((o) => o.customerName.trim() == customerName.trim())
@@ -1011,6 +1047,100 @@ class _TimelineRow extends StatelessWidget {
                   color: isActive ? AppTheme.onSurface : AppTheme.onSurfaceVariant,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Layout file row: a Storage download URL renders as an image thumbnail
+/// (or file tile for PDFs) that opens externally; a legacy bare filename
+/// renders as plain text.
+class _LayoutFileRow extends StatelessWidget {
+  const _LayoutFileRow({required this.layoutFile});
+
+  final String layoutFile;
+
+  bool get _isUrl =>
+      layoutFile.startsWith('http://') || layoutFile.startsWith('https://');
+
+  bool get _isImage {
+    final lower = layoutFile.split('?').first.toLowerCase();
+    return lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg');
+  }
+
+  Future<void> _open(BuildContext context) async {
+    HapticFeedback.selectionClick();
+    final uri = Uri.tryParse(layoutFile);
+    if (uri == null || !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open the layout file.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (layoutFile.isEmpty) {
+      return const _SpecRow(label: 'Layout File', value: '-');
+    }
+    if (!_isUrl) {
+      // Legacy filename-only records (pre-Storage-upload).
+      return _SpecRow(label: 'Layout File', value: layoutFile);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Layout File',
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppTheme.onSurfaceVariant),
+          ),
+          InkWell(
+            onTap: () => _open(context),
+            borderRadius: AppRadius.rMd,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_isImage)
+                  ClipRRect(
+                    borderRadius: AppRadius.rMd,
+                    child: Image.network(
+                      layoutFile,
+                      width: 56,
+                      height: 56,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(
+                        Icons.broken_image_outlined,
+                        size: 40,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.08),
+                      borderRadius: AppRadius.rMd,
+                    ),
+                    child: const Icon(Icons.picture_as_pdf_outlined, size: 28),
+                  ),
+                const SizedBox(width: AppSpacing.sm),
+                const Icon(Icons.open_in_new_rounded, size: 18),
+              ],
             ),
           ),
         ],

@@ -1,15 +1,16 @@
 "use client";
 
 import { KpiData } from "@/types";
+import { CountUp } from "./CountUp";
 import { Icon, IconName } from "./Icon";
 
 interface KpiCardProps extends Omit<KpiData, "icon"> {
  icon?: IconName | React.ReactNode;
  className?: string;
  onClick?: () => void;
- /** Optional 7–14 day series rendered as a thin sparkline under the value. */
+ /** Optional 7-14 day series rendered as a thin sparkline under the value. */
  sparkline?: number[];
- /** Sparkline accent color — uses existing printflow tokens only. */
+ /** Sparkline accent color - uses existing printflow tokens only. */
  sparklineTone?: "primary" | "success" | "warning" | "error";
  /** Tiny "last updated" footnote (e.g. "Live" or "Aug 28"). */
  lastUpdated?: string;
@@ -31,7 +32,7 @@ const TONE_FILL: Record<NonNullable<KpiCardProps["sparklineTone"]>, string> = {
 
 /**
  * Renders a 7-point sparkline from a numeric series.
- * Geometry: 80×24 SVG, padding-aware, normalizes to range with a 1-unit
+ * Geometry: 80x24 SVG, padding-aware, normalizes to range with a 1-unit
  * floor so a fully-flat series still draws a visible (flat) line instead
  * of disappearing into the top edge.
  */
@@ -123,9 +124,9 @@ export function KpiCard({
      <p className="text-sm font-medium text-printflow-on-surface-variant mb-1">
       {label}
      </p>
-     <p className="text-3xl font-bold text-printflow-on-surface tabular-nums">
-      {value}
-     </p>
+       <p className="font-display text-3xl font-bold text-printflow-on-surface tabular-nums">
+        <CountUp value={value} />
+       </p>
      {change && (
       <div className="flex items-center gap-1.5 mt-2">
        <span
@@ -137,7 +138,7 @@ export function KpiCard({
           : "text-printflow-on-surface-variant"
         }`}
        >
-        {trend && trend !== "stable" ? (trend === "up" ? "↑ " : "↓ ") : "→ "}
+         {trend && trend !== "stable" ? (trend === "up" ? "Up " : "Down ") : "Flat "}
         {change}
        </span>
        {trend && trend !== "stable" && changeType !== "neutral" && (
@@ -158,7 +159,7 @@ export function KpiCard({
       </div>
      )}
     </div>
-    <div className="p-3 bg-printflow-primary-fixed/20 rounded-xl text-printflow-primary shrink-0">
+     <div className="p-3 bg-black/[0.05] dark:bg-white/10 rounded-xl text-black dark:text-white shrink-0">
      {typeof icon === "string" && <Icon name={icon as IconName} />}
      {typeof icon !== "string" && icon}
     </div>

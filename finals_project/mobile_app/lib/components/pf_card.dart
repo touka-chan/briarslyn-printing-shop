@@ -10,10 +10,10 @@ import '../theme/app_theme.dart';
 /// shadow, padding, and optional accent stripe.
 ///
 /// Variants:
-///   * `PfCard()`                      — default surface card, hairline border.
-///   * `PfCard(variant: PfCardVariant.elevated)` — soft shadow, no border.
-///   * `PfCard(variant: PfCardVariant.tinted, accent: ...)` — soft tinted background.
-///   * `PfCard(accent: AppTheme.statusCompleted)` — adds a 4px left accent stripe.
+///   * `PfCard()`                      - default surface card, hairline border.
+///   * `PfCard(variant: PfCardVariant.elevated)` - soft shadow, no border.
+///   * `PfCard(variant: PfCardVariant.tinted, accent: ...)` - soft tinted background.
+///   * `PfCard(accent: AppTheme.statusCompleted)` - adds a 4px left accent stripe.
 ///
 /// The `borderRadius` is applied to both the outer [Material] clip and the
 /// inner [BoxDecoration] so the border and shadow never leave a phantom line.

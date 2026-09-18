@@ -16,7 +16,7 @@ class PfAvatar extends StatelessWidget {
     this.size = 36,
   });
 
-  /// The full name to extract initials from (e.g., "John Doe" → "JD").
+  /// The full name to extract initials from (e.g., "John Doe" - "JD").
   final String name;
 
   /// The diameter of the avatar circle.
@@ -57,10 +57,10 @@ class PfAvatar extends StatelessWidget {
   /// Extracts up to 2 initials from a name.
   ///
   /// Examples:
-  /// - "John Doe" → "JD"
-  /// - "Alice" → "A"
-  /// - "Mary Jane Watson" → "MW"
-  /// - "" → ""
+  /// - "John Doe" - "JD"
+  /// - "Alice" - "A"
+  /// - "Mary Jane Watson" - "MW"
+  /// - "" - ""
   String _extractInitials(String name) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '';

@@ -1,4 +1,4 @@
-// PrintFlow Mobile — Firestore service for the `users` collection.
+// PrintFlow Mobile - Firestore service for the `users` collection.
 //
 // Mirrors the web `web/src/lib/services/users.ts` contract. The mobile
 // `AuthService` (see `auth_service.dart`) does its own single-doc
@@ -8,18 +8,19 @@
 // barrel so any screen can `import '../../services/services.dart'` and
 // pick it up.
 //
-// Field shape (snake_case ↔ Dart `AppUser`):
-//   email       ↔ AppUser.email
-//   name        ↔ AppUser.name
-//   role        ↔ AppUser.role   ('Owner' | 'Admin' | 'POS_Cashier' | 'Production Staff')
-//   status      ↔ AppUser.status ('active' | 'inactive')
-//   region      ↔ AppUser.region
-//   province    ↔ AppUser.province
-//   city        ↔ AppUser.city
-//   barangay    ↔ AppUser.barangay
-//   zip         ↔ AppUser.zip
-//   last_login_at ↔ AppUser.lastLogin (ISO string after format)
+// Field shape (snake_case <-> Dart `AppUser`):
+//   email       <-> AppUser.email
+//   name        <-> AppUser.name
+//   role        <-> AppUser.role   ('Owner' | 'Admin' | 'POS_Cashier' | 'Production Staff')
+//   status      <-> AppUser.status ('active' | 'inactive')
+//   region      <-> AppUser.region
+//   province    <-> AppUser.province
+//   city        <-> AppUser.city
+//   barangay    <-> AppUser.barangay
+//   zip         <-> AppUser.zip
+//   last_login_at <-> AppUser.lastLogin (ISO string after format)
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/app_user.dart';
 
@@ -66,10 +67,25 @@ Map<String, dynamic> normaliseUserDoc(Map<String, dynamic> raw) {
   return raw;
 }
 
+/// Finds a sign-in account uid by email (forgot-password existence
+/// check). Returns null when no account uses that address.
+Future<String?> findUserByEmail(String email) async {
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection(_kUsersCollection)
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+    return snap.docs.isEmpty ? null : snap.docs.first.id;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Subscribes to the live `users` collection.
 ///
 /// Emits an empty list until the first snapshot arrives. Note: the
-/// Owner row is included — callers that want to filter the Owner out
+/// Owner row is included - callers that want to filter the Owner out
 /// (e.g., the employees roster on the web admin) should drop
 /// `role == 'Owner'` themselves.
 Stream<List<AppUser>> subscribeUsersStream() {
@@ -79,11 +95,20 @@ Stream<List<AppUser>> subscribeUsersStream() {
       .map(
         (snap) => snap.docs
             .map(
-              (doc) => AppUser.fromJson(<String, dynamic>{
-                ...normaliseUserDoc(doc.data()),
-                'id': doc.id,
-              }),
+              (doc) {
+                try {
+                  return AppUser.fromJson(<String, dynamic>{
+                    ...normaliseUserDoc(doc.data()),
+                    'id': doc.id,
+                  });
+                } catch (e) {
+                  // One malformed doc must not kill the whole roster.
+                  debugPrint('[users] Skipping malformed doc ${doc.id}: $e');
+                  return null;
+                }
+              },
             )
+            .whereType<AppUser>()
             .toList(growable: false),
       );
 }

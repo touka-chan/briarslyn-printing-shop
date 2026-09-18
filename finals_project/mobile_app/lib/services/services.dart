@@ -1,4 +1,4 @@
-// PrintFlow Mobile — Services Library
+// PrintFlow Mobile - Services Library
 //
 // Barrel file exporting all service classes:
 //

@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
 import { AuthGateLoader } from "@/components/auth/AuthGateLoader";
 import { SessionTimeoutWatcher } from "@/components/auth/SessionTimeoutWatcher";
 
+/**
+ * Display face (Poppins Bold) shared by headings/KPI values via the
+ * `.font-display` utility. Self-hosted at build time - no runtime CDN.
+ */
+const displayFont = Poppins({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-display",
+});
+
 export const metadata: Metadata = {
-  title: "Briarslyn Printing Shop",
-  description: "Briarslyn Printing Shop Management System",
+  title: "Brialyns Art Sign",
+  description: "Brialyns Art Sign Management System",
+  icons: [{ rel: "icon", url: "/logo.jpg" }],
 };
 
 /**
@@ -16,12 +28,12 @@ export const metadata: Metadata = {
  * <html> on each route and the React effect that adds `.dark` would
  * otherwise land AFTER first paint).
  *
- * The script mirrors Header.tsx's applyTheme() — same key
+ * The script mirrors Header.tsx's applyTheme() - same key
  * ("printflow-theme"), same class name ("dark"), same fallback to the
  * OS preference via matchMedia. If the value is "light" we leave the
  * <html> alone (no class) and let the dark CSS block stay inactive.
  *
- * `dangerouslySetInnerHTML` is intentional — Next would otherwise
+ * `dangerouslySetInnerHTML` is intentional - Next would otherwise
  * escape the script body. The string is static; no user input flows
  * through it.
  */
@@ -29,7 +41,7 @@ const themeScript = `(function(){try{var s=localStorage.getItem('printflow-theme
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+    <html lang="en" className={`h-full antialiased ${displayFont.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

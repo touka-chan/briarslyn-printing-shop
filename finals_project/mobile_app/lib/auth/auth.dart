@@ -1,4 +1,4 @@
-// PrintFlow Mobile — Auth Library
+// PrintFlow Mobile - Auth Library
 //
 // This barrel file exports all auth-related classes:
 //

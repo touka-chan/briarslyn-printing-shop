@@ -13,7 +13,7 @@ import '../theme/app_theme.dart';
 ///     over [helper]).
 ///   * Optional leading [prefixIcon] and trailing [suffixIcon].
 ///   * When [monospace] is true the input text is rendered in JetBrains
-///     Mono (via [AppTheme.monoStyle]) — useful for IDs and codes.
+///     Mono (via [AppTheme.monoStyle]) - useful for IDs and codes.
 ///   * Filled with [AppTheme.surfaceContainer], borderless until focused,
 ///     then a 2px primary border is shown.
 ///

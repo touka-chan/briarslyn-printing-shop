@@ -8,7 +8,7 @@ import '../theme/app_theme.dart';
 ///
 /// Displays a large metric value with label, trend indicator, and a
 /// micro-chart showing the metric's recent history. The sparkline uses
-/// the "Ink Stroke" visual language — a fluid line drawing that connects
+/// the "Ink Stroke" visual language - a fluid line drawing that connects
 /// data points with organic curves.
 ///
 /// This is a signature component of the "Ink & Paper" design system,
@@ -86,7 +86,7 @@ class PfMetricCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          // Value — large display text
+          // Value - large display text
           Text(
             '$prefix${_formatValue(value)}$suffix',
             style: textTheme.displayMedium?.copyWith(
@@ -182,8 +182,8 @@ class _ChangeBadge extends StatelessWidget {
 
 /// Sparkline micro-chart with smooth cubic curves.
 ///
-/// Draws a fluid line through the data points using cubic Bézier curves
-/// for the "Ink Stroke" aesthetic — organic, hand-drawn feel rather than
+/// Draws a fluid line through the data points using cubic Bezier curves
+/// for the "Ink Stroke" aesthetic - organic, hand-drawn feel rather than
 /// rigid straight segments.
 class _Sparkline extends StatelessWidget {
   const _Sparkline({
@@ -244,7 +244,7 @@ class _SparklinePainter extends CustomPainter {
       points.add(Offset(x, y));
     }
 
-    // Draw smooth curve through points using cubic Bézier
+    // Draw smooth curve through points using cubic Bezier
     final path = Path();
     path.moveTo(points[0].dx, points[0].dy);
 

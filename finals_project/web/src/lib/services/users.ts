@@ -1,20 +1,27 @@
 /**
- * Firestore service — users collection.
+ * Firestore service - users collection.
  *
  * Users/{uid} is the doc keyed by Firebase Auth uid. The doc carries the
  * role (Owner | Admin | POS_Cashier | Production Staff) and the profile
- * fields. There is NO `customers` collection — see SETUP_FIREBASE.md.
+ * fields. There is NO `customers` collection - see SETUP_FIREBASE.md.
  */
 import {
  collection,
  onSnapshot,
  doc,
+ deleteDoc,
+ getDoc,
+ getDocs,
+ limit,
+ query,
  setDoc,
  updateDoc,
+ where,
  Timestamp,
  type Unsubscribe,
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
+import { logAudit } from "@/lib/services/audit";
 import type { User } from "@/types";
 
 const COLL = "users";
@@ -28,7 +35,7 @@ const COLL = "users";
  * region clears the previously-picked province/city/barangay), so the
  * value held in form state may contain `undefined` properties. This
  * helper runs recursively on plain objects to clean up nested values
- * too — addresses can be deeply nested in custom shapes.
+ * too - addresses can be deeply nested in custom shapes.
  *
  * Returns `undefined` if every field is gone after stripping, so
  * callers can use `?? null` to keep the field present-but-empty in
@@ -54,20 +61,33 @@ export function stripUndefined<T>(value: T | undefined | null): T | undefined {
   return value;
 }
 
-export function subscribeUsers(cb: (users: User[]) => void): Unsubscribe {
+/** Firestore subscription failure handler (permission/offline). */
+export type FeedErrorHandler = (e: unknown) => void;
+
+function logFeedError(scope: string): FeedErrorHandler {
+  return (e) => {
+    console.error(`[${scope}] subscription failed:`, e);
+  };
+}
+
+export function subscribeUsers(
+  cb: (users: User[]) => void,
+  onError: FeedErrorHandler = logFeedError("users"),
+): Unsubscribe {
   return onSnapshot(collection(requireDb(), COLL), (snap) => {
     const users = snap.docs.map((d) => fromFirestore(d.id, d.data()));
     cb(users);
-  });
+  }, onError);
 }
 
 export function subscribeUser(
   uid: string,
   cb: (user: User | null) => void,
+  onError: FeedErrorHandler = logFeedError("users"),
 ): Unsubscribe {
   return onSnapshot(doc(requireDb(), COLL, uid), (snap) => {
     cb(snap.exists() ? fromFirestore(snap.id, snap.data()) : null);
-  });
+  }, onError);
 }
 
 export async function createUser(input: {
@@ -88,22 +108,75 @@ export async function createUser(input: {
     updated_at: Timestamp.now(),
     last_login_at: null,
   });
+  logAudit({
+   action: "user_created",
+   module: "users",
+   record_id: input.uid,
+   record_label: `User ${input.name} (${input.email})`,
+   old_value: null,
+   new_value: `role=${input.role}, status=${input.status ?? "active"}`,
+  });
 }
 
 export async function updateUser(
   uid: string,
   patch: Partial<Pick<User, "name" | "role" | "status" | "address">>,
 ): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, uid)).catch(() => null);
+  const prev = prevSnap?.data() as Record<string, unknown> | undefined;
   await updateDoc(doc(requireDb(), COLL, uid), {
     ...patch,
     updated_at: Timestamp.now(),
   });
+  const label = `User ${(prev?.name as string) ?? uid}`;
+  if (patch.role !== undefined && patch.role !== prev?.role) {
+   logAudit({
+    action: "user_role_updated",
+    module: "users",
+    record_id: uid,
+    record_label: label,
+    old_value: (prev?.role as string) ?? null,
+    new_value: patch.role,
+   });
+  }
+  if (patch.status !== undefined && patch.status !== prev?.status) {
+   logAudit({
+    action: "user_status_updated",
+    module: "users",
+    record_id: uid,
+    record_label: label,
+    old_value: (prev?.status as string) ?? null,
+    new_value: patch.status,
+   });
+  }
+}
+
+/**
+ * Delete a sign-in profile doc. Used when an archived employee is
+ * permanently removed: without a users/{uid} doc the account cannot pass
+ * AuthGate ("Profile not found"). WARNING: mobile self-heals missing docs
+ * by auto-provisioning, so the Firebase Auth account itself must ALSO be
+ * removed in the Firebase Console - the UI says so after delete. Client
+ * SDKs cannot delete other users' Auth accounts.
+ */
+export async function deleteUser(uid: string): Promise<void> {
+  await deleteDoc(doc(requireDb(), COLL, uid));
 }
 
 export async function deactivateUser(uid: string): Promise<void> {
+  const prevSnap = await getDoc(doc(requireDb(), COLL, uid)).catch(() => null);
+  const prev = prevSnap?.data() as Record<string, unknown> | undefined;
   await updateDoc(doc(requireDb(), COLL, uid), {
     status: "inactive",
     updated_at: Timestamp.now(),
+  });
+  logAudit({
+   action: "user_status_updated",
+   module: "users",
+   record_id: uid,
+   record_label: `User ${(prev?.name as string) ?? uid}`,
+   old_value: (prev?.status as string) ?? null,
+   new_value: "inactive",
   });
 }
 
@@ -112,6 +185,20 @@ export async function recordLogin(uid: string): Promise<void> {
     last_login_at: Timestamp.now(),
     updated_at: Timestamp.now(),
   });
+}
+
+/**
+ * Find a sign-in account by email (employee <-> users link for
+ * archive/deactivate login blocking). Returns the uid or null.
+ */
+export async function findUserByEmail(email: string): Promise<string | null> {
+  const q = query(
+    collection(requireDb(), COLL),
+    where("email", "==", email),
+    limit(1),
+  );
+  const snap = await getDocs(q);
+  return snap.empty ? null : snap.docs[0].id;
 }
 
 // ---- internal helpers ----

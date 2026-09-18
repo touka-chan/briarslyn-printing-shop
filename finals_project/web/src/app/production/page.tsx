@@ -4,19 +4,22 @@ import { useEffect, useState } from "react";
 import { Eye, Download, Factory, Check, Inbox } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
- ContentCard,
- FilterToolbar,
- DataTable,
- StatusBadge,
- Button,
- Modal,
- PriorityBadge,
- EmptyState,
- useToast,
+  ContentCard,
+  FilterToolbar,
+  DataTable,
+  StatusBadge,
+  Button,
+  Modal,
+  PriorityBadge,
+  EmptyState,
+  FeedErrorBanner,
+  useToast,
 } from "@/components/ui";
 import { subscribeOrders } from "@/lib/services/orders";
 import { updateOrderStatus } from "@/lib/services/orders";
 import { getPriority, priorityWeight } from "@/lib/derived";
+import { csvRow, downloadCsv } from "@/lib/csv";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import type { Order, ProductionJob } from "@/types";
 
 const STATUSES: ProductionJob["status"][] = [
@@ -46,16 +49,33 @@ export default function ProductionPage() {
  const [search, setSearch] = useState("");
  const [sel, setSel] = useState<ProductionJob | null>(null);
  const [open, setOpen] = useState(false);
- const [saving, setSaving] = useState(false);
- const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsub = subscribeOrders((rows) => {
-   setOrders(rows);
-   setReady(true);
-  });
-  return () => unsub();
- }, []);
+  useEffect(() => {
+   const unsub = subscribeOrders(
+    (rows) => {
+     setOrders(rows);
+     // Keep an open job modal live: re-resolve from the fresh snapshot
+     // so edits from elsewhere (mobile, other tabs) reflect. Falls back
+     // to the last-known snapshot if the row left the queue.
+     setSel((prev) => {
+      if (!prev) return prev;
+      const fresh = rows.find((r) => r.order_id === prev.order_id);
+      if (!fresh) return prev;
+      return { ...prev, ...orderToJob(fresh) };
+     });
+     setReady(true);
+    },
+    (e) => {
+     onFeedError(e);
+     // Don't leave the page on a spinner: render the error state.
+     setReady(true);
+    },
+   );
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
 
  const queue: ProductionJob[] = orders
   .filter(
@@ -101,18 +121,45 @@ export default function ProductionPage() {
    `${p.order_id} ${p.item_type}`.toLowerCase().includes(search.toLowerCase()),
  );
 
- const changeStatus = async (orderId: string, next: ProductionJob["status"]) => {
-  setSel((prev) => (prev && prev.order_id === orderId ? { ...prev, status: next } : prev));
-  setSaving(true);
-  try {
-   await updateOrderStatus(orderId, next);
-   toast.success(`${orderId} → ${next}`);
-  } catch {
-   toast.error("Failed to update status — please try again.");
-  } finally {
-   setSaving(false);
-  }
- };
+  // Stages must be walked in order: jumping forward over "In Production"
+  // skips the recipe auto-deduct (it fires only on entering production).
+  // Same-status, one step forward, and one step back are allowed.
+  const canMove = (
+   from: ProductionJob["status"],
+   to: ProductionJob["status"],
+  ): boolean => {
+   const d = STATUSES.indexOf(to) - STATUSES.indexOf(from);
+   return d === 0 || d === 1 || d === -1;
+  };
+
+   const changeStatus = async (orderId: string, next: ProductionJob["status"]) => {
+    const cur = queue.find((j) => j.order_id === orderId)?.status;
+    if (cur && !canMove(cur, next)) {
+     toast.error(
+      `Move through each stage in order - ${cur} - ${next} would skip stock deduction.`,
+     );
+     return;
+    }
+    const prev = sel && sel.order_id === orderId ? sel.status : undefined;
+   setSel((p) => (p && p.order_id === orderId ? { ...p, status: next } : p));
+   setSaving(true);
+   try {
+    await updateOrderStatus(orderId, next);
+    toast.success(`${orderId} - ${next}`);
+   } catch (e) {
+    // Roll back the optimistic modal so the UI matches the server.
+    if (prev) {
+     setSel((p) => (p && p.order_id === orderId ? { ...p, status: prev } : p));
+    }
+    toast.error(
+     e instanceof Error && e.message
+      ? `Failed to update status: ${e.message}`
+      : "Failed to update status - please try again.",
+    );
+   } finally {
+    setSaving(false);
+   }
+  };
 
  const exportCSV = () => {
   if (searched.length === 0) return;
@@ -120,25 +167,17 @@ export default function ProductionPage() {
   const lines = [
    headers.join(","),
    ...searched.map((r) =>
-    [
+    csvRow([
      r.order_id,
-     `"${r.item_type}"`,
+     r.item_type,
      r.priority,
      r.status,
      r.target_date,
      r.estimated_completion,
-    ].join(","),
+    ]),
    ),
   ];
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `production-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  downloadCsv(`production-${new Date().toISOString().slice(0, 10)}.csv`, lines);
   toast.success(`Exported ${searched.length} jobs`);
  };
 
@@ -180,10 +219,10 @@ export default function ProductionPage() {
       aria-label={`Change status for ${r.order_id}`}
      >
       {STATUSES.map((s) => (
-       <option key={s} value={s}>
-        {s}
-       </option>
-      ))}
+        <option key={s} value={s} disabled={!canMove(r.status, s)}>
+         {s}
+        </option>
+       ))}
      </select>
     </span>
    ),
@@ -230,12 +269,19 @@ export default function ProductionPage() {
  ];
 
  return (
-  <AdminLayout
-   title="Production"
-   subtitle="Production queue by priority"
-   onSearch={setSearch}
-  >
-   <ContentCard title="Production Queue" subtitle={`${searched.length} orders`}>
+   <AdminLayout
+    title="Production"
+    subtitle="Production queue by priority"
+    onSearch={setSearch}
+   >
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={orders.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <ContentCard title="Production Queue" subtitle={`${searched.length} orders`}>
     <FilterToolbar
      tabs={tabs}
      activeTab={active}
@@ -261,16 +307,17 @@ export default function ProductionPage() {
       description="Orders will appear here once they enter Pending or In Production."
      />
     ) : (
-     <DataTable
-      columns={cols}
-      data={searched}
-      keyExtractor={(r) => r.order_id}
-      onRowClick={(r) => {
-       setSel(r);
-       setOpen(true);
-      }}
-      emptyMessage="No production queue"
-     />
+      <DataTable
+       columns={cols}
+       data={searched}
+       keyExtractor={(r) => r.order_id}
+       onRowClick={(r) => {
+        setSel(r);
+        setOpen(true);
+       }}
+       emptyMessage="No production queue"
+       pageSize={25}
+      />
     )}
    </ContentCard>
 
@@ -281,7 +328,7 @@ export default function ProductionPage() {
      setSel(null);
     }}
     title={sel ? `Production ${sel.order_id}` : "Production"}
-    description={sel ? `${sel.item_type} • ${sel.priority}` : undefined}
+    description={sel ? `${sel.item_type} - ${sel.priority}` : undefined}
     icon={<Factory className="w-5 h-5" />}
     size="lg"
     footer={

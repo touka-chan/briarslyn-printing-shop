@@ -1,7 +1,7 @@
 /// Mirrors the web `User` interface. Three roles only (Title 1 VI):
 /// Admin/Owner, POS/Cashier, Production Staff (Firebase Auth).
 ///
-/// Address fields mirror web/src/types/index.ts UserAddress — sourced from
+/// Address fields mirror web/src/types/index.ts UserAddress - sourced from
 /// the PSGC cascade dropdown in the Add/Edit form. All address fields are
 /// optional so legacy data and the Owner row stay valid without an address.
 class AppUser {

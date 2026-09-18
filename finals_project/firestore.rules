@@ -1,9 +1,9 @@
 rules_version = '2';
 
-// PrintFlow — Firestore Security Rules
+// PrintFlow - Firestore Security Rules
 // Deployed via `firebase deploy --only firestore:rules`
 // See SETUP_FIREBASE.md for the role matrix and the ESP32 service-account
-// story (rfid_events is service-account-only — no user can fake a check-out).
+// story (rfid_events is service-account-only - no user can fake a check-out).
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -32,11 +32,16 @@ service cloud.firestore {
     // Three ways a user/{uid} doc can be created:
     //   1. Self-create (you create your own profile; `uid` == auth.uid).
     //   2. First-user bootstrap (the caller has no profile doc yet, so
-    //      we can't read their role to authorize them — let them in).
+    //      we can't read their role to authorize them - let them in).
     //   3. Owner/Admin creates a profile for a teammate.
     // After the doc exists, the normal self/Admin rules apply for updates.
     match /users/{uid} {
       allow read: if isSignedIn();
+      // Forgot-password existence check runs while SIGNED OUT. Allow
+      // single-doc list queries only (limit <= 1, e.g. email lookup):
+      // enough to confirm an account exists, too narrow to dump the
+      // roster. Accepted tradeoff — the reset UI must confirm existence.
+      allow list: if request.query.limit != null && request.query.limit <= 1;
       allow create: if isSignedIn() && (
         request.auth.uid == uid
         || !exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -49,7 +54,7 @@ service cloud.firestore {
     // ---- employees/{employeeId} ----
     // HR records. Any signed-in user can read (the Employees page is
     // a directory). Only Owner/Admin can write. Employees are *not* sign-in
-    // accounts — see /users for that.
+    // accounts - see /users for that.
     match /employees/{employeeId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
@@ -64,11 +69,16 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isSignedIn();
       allow create: if isCashier();
+      // Production flow keys are snake_case - they must match exactly what
+      // the apps write: updateOrderStatus (status/started_at/completed_at),
+      // completeOrder (production_notes/actual_minutes), and the auto-deduct
+      // transaction (stock_deducted/deducted_at). A camelCase list here
+      // silently denies every Production-Staff status update.
       allow update: if isCashier() ||
                        (isProduction() &&
                         request.resource.data.diff(resource.data)
                           .affectedKeys()
-                          .hasOnly(['status', 'startedAt', 'completedAt', 'actualMinutes', 'productionNotes']));
+                          .hasOnly(['status', 'started_at', 'completed_at', 'production_notes', 'actual_minutes', 'stock_deducted', 'deducted_at']));
       allow delete: if false;
     }
 
@@ -89,6 +99,28 @@ service cloud.firestore {
       allow write: if isProduction();
     }
 
+    // ---- bom/{normalizedItemType} ----
+    // Bill of materials: order item_type - material lines consumed per
+    // unit when an order enters production (auto-deduct engine).
+    // Any signed-in user can read (the engine needs it); only
+    // Owner/Admin can change recipes.
+    match /bom/{bomId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---- usage_events/{auto} ----
+    // Immutable audit log of EVERY stock movement: auto-deducts
+    // (confirmed orders), manual logs (wastage/sample/correction) and
+    // RFID/station entries (stock-in taps, check-ins). The single source
+    // of truth behind the forecast model - one entry per movement, so
+    // auto-deduct + manual + tap can never double-count each other.
+    match /usage_events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isProduction();
+      allow update, delete: if false;
+    }
+
     // ---- rfid_events/{auto} ----
     // **Service-account only.** The ESP32 firmware uses a service-account key
     // to write check-out events. No signed-in user (cashier, owner, anyone)
@@ -97,10 +129,32 @@ service cloud.firestore {
     // (a Cloud Function) or via the service account on the ESP32's behalf.
     //
     // For the demo without a Cloud Function yet, this rule can be relaxed
-    // to `allow read: if isSignedIn();` — the data is still write-protected.
+    // to `allow read: if isSignedIn();` - the data is still write-protected.
     match /rfid_events/{eventId} {
       allow read: if isSignedIn();
       allow create, update, delete: if false; // service-account only
+    }
+
+    // ---- audit_logs/{auto} ----
+    // Immutable, append-only trail. Any signed-in staff member's client
+    // may APPEND one well-formed entry per action it performs (the actor
+    // must be the caller - no forging other users' entries). Nobody -
+    // including Owner - can update or delete entries, so history cannot
+    // be rewritten from any client. Reads are Owner-only (page + gate).
+    match /audit_logs/{entryId} {
+      allow read: if isOwner();
+      allow create: if isSignedIn()
+        && request.resource.data.actor_uid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'actor_uid', 'actor_email', 'actor_name', 'actor_role',
+          'action', 'module', 'record_id', 'record_label',
+          'old_value', 'new_value', 'source', 'ip', 'created_at'
+        ])
+        && request.resource.data.actor_uid is string
+        && request.resource.data.action is string
+        && request.resource.data.module is string
+        && request.resource.data.record_id is string;
+      allow update, delete: if false;
     }
 
     // ---- everything else ----

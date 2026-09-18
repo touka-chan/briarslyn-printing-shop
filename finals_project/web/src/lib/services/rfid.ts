@@ -1,7 +1,7 @@
 /**
- * Firestore service — rfid_events + sensors.
+ * Firestore service - rfid_events + sensors.
  *
- * The web reads both. Writes are service-account-only (the ESP32's job) —
+ * The web reads both. Writes are service-account-only (the ESP32's job) -
  * the rules in `firestore.rules` reject client-side create/update on
  * `rfid_events`. The web only ever observes.
  */
@@ -20,10 +20,20 @@ import {
 import { requireDb } from "@/lib/firebase";
 import type { RfidCheckoutEvent } from "@/types";
 
+/** Firestore subscription failure handler (permission/offline). */
+export type FeedErrorHandler = (e: unknown) => void;
+
+function logFeedError(scope: string): FeedErrorHandler {
+  return (e) => {
+    console.error(`[${scope}] subscription failed:`, e);
+  };
+}
+
 /** Subscribe to the latest N RFID events (most recent first). */
 export function subscribeRfidEvents(
   cb: (events: RfidCheckoutEvent[]) => void,
   max = 50,
+  onError: FeedErrorHandler = logFeedError("rfid"),
 ): Unsubscribe {
   const q = query(
     collection(requireDb(), "rfid_events"),
@@ -33,7 +43,7 @@ export function subscribeRfidEvents(
   return onSnapshot(q, (snap) => {
     const events = snap.docs.map((d) => fromFirestore(d.id, d.data()));
     cb(events);
-  });
+  }, onError);
 }
 
 /** Subscribe to RFID events for a specific material variant, newest first. */
@@ -41,6 +51,7 @@ export function subscribeRfidEventsForVariant(
   materialVariantId: string,
   cb: (events: RfidCheckoutEvent[]) => void,
   max = 50,
+  onError: FeedErrorHandler = logFeedError("rfid"),
 ): Unsubscribe {
   const q = query(
     collection(requireDb(), "rfid_events"),
@@ -51,10 +62,10 @@ export function subscribeRfidEventsForVariant(
   return onSnapshot(q, (snap) => {
     const events = snap.docs.map((d) => fromFirestore(d.id, d.data()));
     cb(events);
-  });
+  }, onError);
 }
 
-/** Subscribe to the sensors map (sensorId → online/lastSeen). */
+/** Subscribe to the sensors map (sensorId - online/lastSeen). */
 export function subscribeSensors(
   cb: (sensors: Record<string, { online: boolean; lastSeenAt?: string }>) => void,
 ): Unsubscribe {

@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Download, Package, AlertTriangle } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard } from "@/components/ui";
+import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, FeedErrorBanner, useToast } from "@/components/ui";
+import { csvRow, downloadCsv } from "@/lib/csv";
 import { subscribeInventory } from "@/lib/services/inventory";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import {
   useSparkSeries,
   inventoryCheckoutKey,
@@ -18,14 +20,15 @@ export default function InventoryPage() {
  const [sel, setSel] = useState<InventoryItem | null>(null);
  const [open, setOpen] = useState(false);
  const [kpiModal, setKpiModal] = useState<string | null>(null);
- const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsub = subscribeInventory(setInventory);
-  return () => unsub();
- }, []);
+  useEffect(() => {
+   const unsub = subscribeInventory(setInventory, onFeedError);
+   return () => unsub();
+  }, [feedNonce, onFeedError]);
 
- // Live sparkline series — checkout history per day for the last 7 days.
+ // Live sparkline series - checkout history per day for the last 7 days.
  const totalVariantsSeries = useSparkSeries(inventory, inventoryCheckoutKey, 7);
  const lowStockSeries = useSparkSeries(
   inventory.filter((i) => getInventoryStatus(i) === "Low Stock"),
@@ -106,26 +109,66 @@ export default function InventoryPage() {
     key: "sensor_id",
     header: "Sensor (IoT)",
     render: (r:InventoryItem)=>(
-      <span className="flex items-center gap-1.5 font-mono text-xs text-neutral-600">
+      <span className="flex items-center gap-1.5 font-mono text-xs text-printflow-on-surface-variant">
         {r.sensor_id || 'ESP32-01'}
         <span
-          className={`inline-block w-2 h-2 rounded-full ${r.isStale ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`}
+          className={`inline-block w-2 h-2 rounded-full ${r.isStale ? "bg-zinc-400" : "bg-[#17171c] dark:bg-white animate-pulse"}`}
           title={r.isStale ? "Sync delayed (>12h)" : "Active connection"}
         ></span>
       </span>
     )
   },
-  { key: "current_stock", header: "Stock", render: (r:InventoryItem)=>`${r.current_stock} / thr ${r.threshold}` },
+  { key: "current_stock", header: "Stock", render: (r:InventoryItem)=>`${r.current_stock}` },
   { key: "reorder_point", header: "ROP (dynamic)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point}</span> },
   { key: "forecasted_demand_next_7_days", header: "Forecast 7d" },
   { key: "model", header: "Model", render: (r:InventoryItem)=><span className="text-xs">{r.model}</span> },
-  { key: "status", header: "Status", render: (r:InventoryItem)=><span className="flex items-center gap-1"><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} />{r.isStale&&<span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning">STALE</span>}</span> },
+  { key: "status", header: "Status", render: (r:InventoryItem)=><span className="flex items-center gap-1"><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} />{r.isStale&&<span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning">Delayed</span>}</span> },
   { key: "actions", header: "", render: ()=><Eye className="w-4 h-4" /> },
- ];
+  ];
 
-  return (
+  const toast = useToast();
+
+  const handleExport = () => {
+   if (searched.length === 0) return;
+   const headers = [
+    "material_variant_id",
+    "item_type",
+    "category",
+    "current_stock",
+    "reorder_point",
+    "forecast_7d",
+    "model",
+    "status",
+   ];
+   const lines = [
+    headers.join(","),
+    ...searched.map((i) =>
+     csvRow([
+      i.material_variant_id,
+      i.item_type,
+      i.category,
+      i.current_stock,
+      i.reorder_point,
+      i.forecasted_demand_next_7_days ?? "",
+      i.model ?? "",
+      getInventoryStatus(i),
+     ]),
+    ),
+   ];
+   downloadCsv(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, lines);
+   toast.success(`Exported ${searched.length} materials`);
+  };
+
+   return (
    <AdminLayout title="Inventory" subtitle="Track materials and stock levels" onSearch={setSearch}>
-   <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={inventory.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
     <KpiCard
      label="Total Variants"
      value={inventory.length}
@@ -173,25 +216,25 @@ export default function InventoryPage() {
     />
    </div>
 
-    <Modal isOpen={kpiModal==="total"} onClose={()=>setKpiModal(null)} title="Total Variants" description={`${inventory.length} variants • GET /api/inventory`} icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={cols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No materials" />
+    <Modal isOpen={kpiModal==="total"} onClose={()=>setKpiModal(null)} title="Total Variants" description={`${inventory.length} variants - GET /api/inventory`} icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={cols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No materials" pageSize={10} />
     </Modal>
-    <Modal isOpen={kpiModal==="low"} onClose={()=>setKpiModal(null)} title="Low Stock" description={`${lowStock.length} items • GET /api/inventory?status=Low Stock`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={cols} data={lowStock} keyExtractor={r=>r.material_variant_id} emptyMessage="No low stock" />
+    <Modal isOpen={kpiModal==="low"} onClose={()=>setKpiModal(null)} title="Low Stock" description={`${lowStock.length} items - GET /api/inventory?status=Low Stock`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={cols} data={lowStock} keyExtractor={r=>r.material_variant_id} emptyMessage="No low stock" pageSize={10} />
     </Modal>
-    <Modal isOpen={kpiModal==="insufficient"} onClose={()=>setKpiModal(null)} title="Insufficient Stock" description={`${insufficient.length} items • GET /api/inventory?status=Insufficient`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={cols} data={insufficient} keyExtractor={r=>r.material_variant_id} emptyMessage="No insufficient stock" />
+    <Modal isOpen={kpiModal==="insufficient"} onClose={()=>setKpiModal(null)} title="Insufficient Stock" description={`${insufficient.length} items - GET /api/inventory?status=Insufficient`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={cols} data={insufficient} keyExtractor={r=>r.material_variant_id} emptyMessage="No insufficient stock" pageSize={10} />
     </Modal>
-    <Modal isOpen={kpiModal==="reorder"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${alerts.length} items • stock ≤ ROP`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-     <DataTable columns={cols} data={alerts} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" />
+    <Modal isOpen={kpiModal==="reorder"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${alerts.length} items - stock <= ROP`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+      <DataTable columns={cols} data={alerts} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" pageSize={10} />
     </Modal>
 
-   <ContentCard title="Materials" subtitle={`${searched.length} materials`}>
-    <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search material" onSearchChange={setSearch} searchValue={search} customActions={<Button variant="secondary"><Download className="w-4 h-4" />Export</Button>} />
-    <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} onRowClick={r=>{setSel(r); setOpen(true);}} emptyMessage="No materials" />
+    <ContentCard title="Materials" subtitle={`${searched.length} materials`} className="mb-6">
+    <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search material" onSearchChange={setSearch} searchValue={search} customActions={<Button variant="secondary" onClick={handleExport} disabled={searched.length === 0}><Download className="w-4 h-4" />Export</Button>} />
+     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} onRowClick={r=>{setSel(r); setOpen(true);}} emptyMessage="No materials" pageSize={25} />
    </ContentCard>
 
-   <ContentCard title="Reorder Alerts" subtitle={alerts.length>0 ? `${alerts.length} items need attention • stock ≤ ROP` : undefined}>
+   <ContentCard title="Reorder Alerts" subtitle={alerts.length>0 ? `${alerts.length} items need attention - stock <= ROP` : undefined}>
     {alerts.length===0 ? (
      <div className="flex flex-col items-center justify-center py-10 text-center">
       <div className="w-10 h-10 rounded-full bg-printflow-success-container flex items-center justify-center mb-3"><Package className="w-5 h-5 text-printflow-success" /></div>
@@ -217,7 +260,7 @@ export default function InventoryPage() {
            <div className="min-w-0">
             <p className="font-mono text-[13px] font-semibold text-printflow-on-surface leading-none tracking-tight">{item.material_variant_id}</p>
             <p className="text-[13px] font-medium text-printflow-on-surface leading-tight truncate">{item.item_type}</p>
-            <p className="text-[11px] text-printflow-on-surface-variant">{item.category} • {item.tag_uid}</p>
+            <p className="text-[11px] text-printflow-on-surface-variant">{item.category} - {item.tag_uid}</p>
            </div>
           </div>
           <StatusBadge status={item.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={item.status} />
@@ -226,7 +269,7 @@ export default function InventoryPage() {
          <div className="grid grid-cols-3 gap-2">
           <div className="bg-printflow-surface-container rounded-lg px-3 py-2.5">
            <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant leading-none">STOCK</p>
-           <p className="text-sm font-bold text-printflow-on-surface leading-tight mt-1">{item.current_stock}<span className="font-normal text-printflow-on-surface-variant text-xs"> / {item.threshold}</span></p>
+           <p className="text-sm font-bold text-printflow-on-surface leading-tight mt-1">{item.current_stock}</p>
           </div>
           <div className="bg-printflow-surface-container rounded-lg px-3 py-2.5">
            <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant leading-none">ROP</p>
@@ -240,9 +283,9 @@ export default function InventoryPage() {
          </div>
 
          <div className="h-1.5 bg-printflow-surface-container rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: isInsufficient ? "#ba1a1a" : "#ed6c02" }} />
+          <div className={`h-full rounded-full transition-all ${isInsufficient ? "bg-[#17171c] dark:bg-white" : "bg-zinc-400 dark:bg-zinc-500"}`} style={{ width: `${pct}%` }} />
          </div>
-         <p className="text-[11px] text-printflow-on-surface-variant -mt-1">{pct}% of ROP • {isInsufficient ? "needs urgent reorder" : "below reorder point"}</p>
+         <p className="text-[11px] text-printflow-on-surface-variant -mt-1">{pct}% of ROP - {isInsufficient ? "needs urgent reorder" : "below reorder point"}</p>
         </div>
        );
       })}
@@ -250,7 +293,7 @@ export default function InventoryPage() {
     )}
    </ContentCard>
 
-    <Modal isOpen={open} onClose={()=>{setOpen(false); setSel(null);}} title={sel ? `Variant ${sel.material_variant_id}` : "Variant"} description={sel ? `${sel.item_type} • ${sel.category}` : undefined} icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setOpen(false)}>Close</Button>}>
+    <Modal isOpen={open} onClose={()=>{setOpen(false); setSel(null);}} title={sel ? `Variant ${sel.material_variant_id}` : "Variant"} description={sel ? `${sel.item_type} - ${sel.category}` : undefined} icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setOpen(false)}>Close</Button>}>
      {sel && (
       <div className="space-y-5">
        <div className="flex items-center justify-between p-4 bg-printflow-surface-container/50 rounded-xl border border-printflow-outline-variant/40">
@@ -260,10 +303,10 @@ export default function InventoryPage() {
        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">ITEM TYPE</p><p className="text-sm font-medium mt-1">{sel.item_type}</p></div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">CATEGORY</p><p className="text-sm font-medium mt-1">{sel.category}</p></div>
-        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">CURRENT STOCK</p><p className="text-sm font-bold mt-1">{sel.current_stock} <span className="font-normal text-xs">/ thr {sel.threshold}</span></p></div>
+        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">CURRENT STOCK</p><p className="text-sm font-bold mt-1">{sel.current_stock}</p></div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">REORDER POINT</p><p className="text-sm font-bold mt-1">{sel.reorder_point} <span className="text-xs font-normal text-printflow-on-surface-variant">({sel.model})</span></p></div>
         <div className="p-3.5 bg-printflow-primary/5 rounded-xl border border-printflow-primary/20"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">FORECAST 7D</p><p className="text-sm font-bold text-printflow-primary mt-1">{sel.forecasted_demand_next_7_days}</p></div>
-        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">TAG / SENSOR</p><p className="font-mono text-xs mt-1">{sel.tag_uid} • {sel.sensor_id}</p></div>
+        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">TAG / SENSOR</p><p className="font-mono text-xs mt-1">{sel.tag_uid} - {sel.sensor_id}</p></div>
        </div>
       </div>
      )}

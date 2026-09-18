@@ -28,7 +28,7 @@ import {
 } from "@/lib/address";
 
 interface AddressCascadeProps {
-  /** Current address (display names) — used to pre-select the cascade. */
+  /** Current address (display names) - used to pre-select the cascade. */
   value?: UserAddress | null;
   /** Called whenever the user picks a new region/province/city/barangay/zip. */
   onChange: (next: UserAddress) => void;
@@ -46,14 +46,14 @@ const labelCls =
 
 /**
  * Address cascade for the Philippine address hierarchy
- * (region → province → city → barangay → zip).
+ * (region - province - city - barangay - zip).
  *
  * The component is fully controlled: every selection is reported back to
  * the parent via `onChange`, and the parent passes the canonical address
  * back in via `value`. Whenever `value` changes (e.g. the parent opens a
  * different row's edit modal) the cascade re-resolves the full chain in
  * a single async pass and re-derives the zip from the city code, so the
- * form always shows the correct selection — including when switching
+ * form always shows the correct selection - including when switching
  * between two rows.
  */
 export function AddressCascade({
@@ -64,7 +64,7 @@ export function AddressCascade({
 }: AddressCascadeProps) {
   // --- state --------------------------------------------------------------
   // The codes are the source of truth for the <select> values. The parent
-  // only knows display names, so we resolve names → codes on every change
+  // only knows display names, so we resolve names - codes on every change
   // of `value` (see the resolver effect below).
   const [regionCode, setRegionCode] = useState<string>("");
   const [provinceCode, setProvinceCode] = useState<string>("");
@@ -176,9 +176,9 @@ export function AddressCascade({
 
   // --- resolver -----------------------------------------------------------
   // Single async resolver. Re-runs whenever `value` changes OR any
-  // dataset finally loads. Resolves region → province → city → barangay
+  // dataset finally loads. Resolves region - province - city - barangay
   // in sequence, and re-derives the zip from the resolved city code
-  // (the value's stored zip is overridden — the city_zip_map is the
+  // (the value's stored zip is overridden - the city_zip_map is the
   // authoritative source keyed by city_code, not by name).
   //
   // This replaces the four separate resolver effects which were racy:
@@ -189,12 +189,12 @@ export function AddressCascade({
   useEffect(() => {
     const v = value ?? {};
     // Key off the canonical display names only. The zip is intentionally
-    // not in the key — we re-derive it from the city code every time,
+    // not in the key - we re-derive it from the city code every time,
     // so a stale or wrong zip in the database gets corrected on every
     // open. The `__` reset is so an empty address still re-runs.
     const key = `${v.region ?? ""}|${v.province ?? ""}|${v.city ?? ""}|${v.barangay ?? ""}`;
     // If the parent's value object is a fresh reference but the key
-    // matches the last one, skip — but allow explicit resets (empty
+    // matches the last one, skip - but allow explicit resets (empty
     // value when we previously had content).
     const hadContent = !!lastValueKeyRef.current;
     const hasContent = !!key;
@@ -213,7 +213,7 @@ export function AddressCascade({
       }
       setRegionCode(resolvedRegionCode);
 
-      // Province — needs the resolved region code to disambiguate.
+      // Province - needs the resolved region code to disambiguate.
       let resolvedProvinceCode = "";
       if (v.region && resolvedRegionCode) {
         const p = await findProvinceByName(v.province ?? "", resolvedRegionCode);
@@ -222,7 +222,7 @@ export function AddressCascade({
       }
       setProvinceCode(resolvedProvinceCode);
 
-      // City — needs the resolved province code to disambiguate.
+      // City - needs the resolved province code to disambiguate.
       let resolvedCityCode = "";
       let derivedZip = "";
       if (v.region && v.province && v.city && resolvedProvinceCode) {
@@ -231,7 +231,7 @@ export function AddressCascade({
         if (c) {
           resolvedCityCode = c.city_code;
           // Re-derive the zip from the city code. The value's stored
-          // zip is intentionally overridden — the city_zip_map is the
+          // zip is intentionally overridden - the city_zip_map is the
           // authoritative source and is keyed by city_code, not name.
           try {
             derivedZip = (await findZipByCode(c.city_code)) ?? "";
@@ -245,7 +245,7 @@ export function AddressCascade({
       // whatever the user already had (typed or stored).
       setZip(resolvedCityCode ? derivedZip : v.zip ?? "");
 
-      // Barangay — needs the resolved city code.
+      // Barangay - needs the resolved city code.
       let resolvedBarangayCode = "";
       if (v.region && v.province && v.city && v.barangay && resolvedCityCode) {
         const b = await findBarangayByName(v.barangay, resolvedCityCode);
@@ -326,7 +326,7 @@ export function AddressCascade({
     setBarangayCode("");
     const city = citiesAll.find((c) => c.city_code === next);
     // Always re-derive the zip from the city code. This is the single
-    // source of truth — never trust a stored zip once we know the city.
+    // source of truth - never trust a stored zip once we know the city.
     let nextZip = "";
     if (city) {
       try {
@@ -461,7 +461,7 @@ export function AddressCascade({
         </div>
       </div>
 
-      {/* Zip — full width so it sits under barangay in the 2-col grid. */}
+      {/* Zip - full width so it sits under barangay in the 2-col grid. */}
       <div className="sm:col-span-2">
         <label className={labelCls}>ZIP code</label>
         <div className="relative mt-1.5">

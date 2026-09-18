@@ -1,4 +1,4 @@
-// PrintFlow Mobile — Firestore service for the `orders` collection.
+// PrintFlow Mobile - Firestore service for the `orders` collection.
 //
 // Mirrors the web `web/src/lib/services/orders.ts` contract exactly:
 //   - Reads via `Order.fromJson` use the same snake_case field names the
@@ -9,34 +9,37 @@
 //     to Firestore Timestamps on the way out and back to DateTime on the
 //     way in via `Order.fromJson`'s `toDate()` fallback.
 //
-// Permission-gated writes belong in `OrderService` — this file is the raw
+// Permission-gated writes belong in `OrderService` - this file is the raw
 // Firestore transport only.
 //
-// Field shape (snake_case ↔ Dart):
-//   customer_name       ↔ Order.customerName
-//   customer_email      ↔ Order.customerEmail
-//   customer_phone      ↔ Order.customerPhone
-//   customer_region     ↔ Order.customerRegion
-//   customer_province   ↔ Order.customerProvince
-//   customer_city       ↔ Order.customerCity
-//   customer_barangay   ↔ Order.customerBarangay
-//   customer_zip        ↔ Order.customerZip
-//   item_type           ↔ Order.itemType
-//   quantity            ↔ Order.quantity
-//   layout_file         ↔ Order.layoutFile
-//   target_date         ↔ Order.targetDate (Timestamp)
-//   payment_amount      ↔ Order.paymentAmount
-//   payment_status      ↔ Order.paymentStatus
-//   payment_method      ↔ (not on Order — UI-only, read back as null)
-//   status              ↔ Order.status
-//   priority            ↔ Order.priority
-//   estimated_completion↔ Order.estimatedCompletion (Timestamp)
-//   based_on            ↔ Order.basedOn
-//   created_at          ↔ Order.createdAt (Timestamp)
-//   started_at          ↔ optional Timestamp (added on "In Production")
-//   completed_at        ↔ optional Timestamp (added on "Completed")
-//   cashier_id          ↔ Order.cashierId
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Field shape (snake_case <-> Dart):
+//   customer_name       <-> Order.customerName
+//   customer_email      <-> Order.customerEmail
+//   customer_phone      <-> Order.customerPhone
+//   customer_region     <-> Order.customerRegion
+//   customer_province   <-> Order.customerProvince
+//   customer_city       <-> Order.customerCity
+//   customer_barangay   <-> Order.customerBarangay
+//   customer_zip        <-> Order.customerZip
+//   item_type           <-> Order.itemType
+//   quantity            <-> Order.quantity
+//   layout_file         <-> Order.layoutFile
+//   target_date         <-> Order.targetDate (Timestamp)
+//   payment_amount      <-> Order.paymentAmount
+//   payment_status      <-> Order.paymentStatus
+//   payment_method      <-> Order.paymentMethod ('Cash'|'E-Wallets'|'Bank Transfer')
+//   status              <-> Order.status
+//   priority            <-> Order.priority
+//   estimated_completion<-> Order.estimatedCompletion (Timestamp)
+//   based_on            <-> Order.basedOn
+//   created_at          <-> Order.createdAt (Timestamp)
+//   started_at          <-> optional Timestamp (added on "In Production")
+//   completed_at        <-> optional Timestamp (added on "Completed")
+//   cashier_id          <-> Order.cashierId
+// `hide Order`: newer cloud_firestore versions export an `Order` symbol
+// (query internals) that collides with our domain model below.
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+import 'package:flutter/foundation.dart';
 
 import '../models/order.dart';
 
@@ -54,13 +57,20 @@ Stream<List<Order>> subscribeOrdersStream() {
         (snap) => snap.docs
             .map((doc) {
               // Stamp the doc id onto the data so `Order.fromJson` can read
-              // it as `order_id` — matches the web contract where the doc
+              // it as `order_id` - matches the web contract where the doc
               // id IS the human order id.
               final raw = doc.data();
               raw['order_id'] = raw['order_id'] ?? doc.id;
               raw['id'] = doc.id;
-              return Order.fromJson(raw);
+              try {
+                return Order.fromJson(raw);
+              } catch (e) {
+                // One malformed doc must not kill the whole list.
+                debugPrint('[orders] Skipping malformed doc ${doc.id}: $e');
+                return null;
+              }
             })
+            .whereType<Order>()
             .toList(growable: false),
       );
 }
@@ -77,7 +87,7 @@ Future<String> createOrder(Order order) async {
       order.orderId.isNotEmpty ? order.orderId : db.collection(_kOrdersCollection).doc().id;
 
   // Build the payload with snake_case field names. We omit `id` and
-  // `orderId` from the Dart class — the web service writes `customer_*`
+  // `orderId` from the Dart class - the web service writes `customer_*`
   // fields and never persists the doc id inside the document.
   final Map<String, dynamic> data = {
     'customer_name': order.customerName,
@@ -94,11 +104,15 @@ Future<String> createOrder(Order order) async {
     'target_date': Timestamp.fromDate(order.targetDate),
     'payment_amount': order.paymentAmount,
     'payment_status': order.paymentStatus ?? 'Unpaid',
+    // Null when unknown (mirrors web): Sales excludes method-unknown
+    // rows until the method is recorded. Never invent 'Cash'.
+    'payment_method': order.paymentMethod,
     'status': order.status,
     'priority': order.priority,
     'estimated_completion': Timestamp.fromDate(order.estimatedCompletion),
     'based_on': order.basedOn,
     'cashier_id': order.cashierId,
+    'stock_deducted': false,
     'created_at': FieldValue.serverTimestamp(),
   };
 
@@ -131,7 +145,7 @@ Future<void> updatePaymentStatus(String orderId, String newPaymentStatus) async 
       .update(<String, dynamic>{'payment_status': newPaymentStatus});
 }
 
-/// Marks the order as `Cancelled`. We never delete orders — history is kept.
+/// Marks the order as `Cancelled`. We never delete orders - history is kept.
 Future<void> cancelOrder(String orderId) async {
   await FirebaseFirestore.instance
       .collection(_kOrdersCollection)

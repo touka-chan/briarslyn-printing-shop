@@ -4,20 +4,24 @@ import { useEffect, useState } from "react";
 import { Eye, Download, ShoppingCart, AlertTriangle, MapPin, ShoppingBag } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
- ContentCard,
- FilterToolbar,
- DataTable,
- StatusBadge,
- Button,
- Modal,
- PriorityBadge,
- PaymentBadge,
- EmptyState,
- useToast,
+  ContentCard,
+  FilterToolbar,
+  DataTable,
+  StatusBadge,
+  Button,
+  Modal,
+  PriorityBadge,
+  PaymentBadge,
+  EmptyState,
+  FeedErrorBanner,
+  LayoutPreview,
+  useToast,
 } from "@/components/ui";
 import { toPaymentStatus } from "@/components/ui/PaymentBadge";
 import { subscribeOrders } from "@/lib/services/orders";
 import { subscribeInventory } from "@/lib/services/inventory";
+import { csvRow, downloadCsv } from "@/lib/csv";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import { Order, InventoryItem } from "@/types";
 
 function exportToCSV(rows: Order[]) {
@@ -41,40 +45,32 @@ function exportToCSV(rows: Order[]) {
   "payment_amount",
   "payment_status",
  ];
- const lines = [
-  headers.join(","),
-  ...rows.map((r) =>
-   [
-    r.order_id,
-    `"${r.customer_name}"`,
-    r.customer_phone ?? "",
-    r.customer_email ?? "",
-    r.customer_region ?? "",
-    r.customer_province ?? "",
-    r.customer_city ?? "",
-    r.customer_barangay ?? "",
-    r.customer_zip ?? "",
-    `"${r.item_type}"`,
-    r.quantity,
-    r.target_date,
-    r.priority,
-    r.status,
-    r.estimated_completion,
-    r.based_on ? `"${r.based_on.join("|")}"` : "",
-    r.payment_amount,
-    r.payment_status ?? "Unpaid",
-   ].join(","),
-  ),
- ];
- const blob = new Blob([lines.join("\n")], { type: "text/csv" });
- const url = URL.createObjectURL(blob);
- const a = document.createElement("a");
- a.href = url;
- a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
- document.body.appendChild(a);
- a.click();
- a.remove();
- URL.revokeObjectURL(url);
+  const lines = [
+   headers.join(","),
+   ...rows.map((r) =>
+    csvRow([
+     r.order_id,
+     r.customer_name,
+     r.customer_phone ?? "",
+     r.customer_email ?? "",
+     r.customer_region ?? "",
+     r.customer_province ?? "",
+     r.customer_city ?? "",
+     r.customer_barangay ?? "",
+     r.customer_zip ?? "",
+     r.item_type,
+     r.quantity,
+     r.target_date,
+     r.priority,
+     r.status,
+     r.estimated_completion,
+     r.based_on ? r.based_on.join("|") : "",
+     r.payment_amount,
+     r.payment_status ?? "Unpaid",
+    ]),
+   ),
+  ];
+  downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`, lines);
 }
 
 export default function OrdersPage() {
@@ -84,20 +80,35 @@ export default function OrdersPage() {
  const [searchValue, setSearchValue] = useState("");
  const [selected, setSelected] = useState<Order | null>(null);
  const [open, setOpen] = useState(false);
- const [ready, setReady] = useState(false);
- const toast = useToast();
+  const [ready, setReady] = useState(false);
+  const toast = useToast();
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsubOrders = subscribeOrders((rows) => {
-   setOrders(rows);
-   setReady(true);
-  });
-  const unsubInv = subscribeInventory(setInventory);
-  return () => {
-   unsubOrders();
-   unsubInv();
-  };
- }, []);
+  useEffect(() => {
+   const unsubOrders = subscribeOrders(
+    (rows) => {
+     setOrders(rows);
+     // Keep an open detail modal live: re-resolve the selected order
+     // from the fresh snapshot so status/payment edits reflect without
+     // closing and reopening. Falls back to the last-known snapshot if
+     // the row vanished (e.g. deleted elsewhere).
+     setSelected((prev) =>
+      prev ? rows.find((r) => r.order_id === prev.order_id) ?? prev : prev,
+     );
+     setReady(true);
+    },
+    (e) => {
+     onFeedError(e);
+     // Don't leave the page on a spinner: render the error state.
+     setReady(true);
+    },
+   );
+   const unsubInv = subscribeInventory(setInventory, onFeedError);
+   return () => {
+    unsubOrders();
+    unsubInv();
+   };
+  }, [feedNonce, onFeedError]);
 
  const tabs = [
   { id: "All", label: "All", count: orders.length },
@@ -168,11 +179,7 @@ export default function OrdersPage() {
   {
    key: "layout_file",
    header: "Layout",
-   render: (r: Order) => (
-    <span className="text-xs underline decoration-dotted">
-     {r.layout_file}
-    </span>
-   ),
+   render: (r: Order) => <LayoutPreview value={r.layout_file} size={48} />,
   },
   { key: "target_date", header: "Target Date" },
   {
@@ -247,12 +254,19 @@ export default function OrdersPage() {
  ];
 
  return (
-  <AdminLayout
-   title="Orders"
-   subtitle="Monitor customer orders and priorities"
-   onSearch={setSearchValue}
-  >
-   <ContentCard title="All Orders" subtitle={`${searched.length} orders`}>
+   <AdminLayout
+    title="Orders"
+    subtitle="Monitor customer orders and priorities"
+    onSearch={setSearchValue}
+   >
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={orders.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    <ContentCard title="All Orders" subtitle={`${searched.length} orders`}>
     <FilterToolbar
      tabs={tabs}
      activeTab={activePriority}
@@ -271,19 +285,20 @@ export default function OrdersPage() {
      <EmptyState
       icon={<ShoppingBag className="w-7 h-7" />}
       title="No orders yet"
-      description="Open the Cashier POS app to create the first one — it will appear here in real time."
+      description="Open the Cashier POS app to create the first one - it will appear here in real time."
      />
     ) : (
-     <DataTable
-      columns={cols}
-      data={searched}
-      keyExtractor={(r) => r.order_id}
-      onRowClick={(r) => {
-       setSelected(r);
-       setOpen(true);
-      }}
-      emptyMessage="No orders"
-     />
+      <DataTable
+       columns={cols}
+       data={searched}
+       keyExtractor={(r) => r.order_id}
+       onRowClick={(r) => {
+        setSelected(r);
+        setOpen(true);
+       }}
+       emptyMessage="No orders"
+       pageSize={25}
+      />
     )}
    </ContentCard>
 
@@ -294,7 +309,7 @@ export default function OrdersPage() {
      setSelected(null);
     }}
     title={selected ? `Order ${selected.order_id}` : "Order Details"}
-    description={selected ? `${selected.customer_name} • ${selected.item_type}` : undefined}
+    description={selected ? `${selected.customer_name} - ${selected.item_type}` : undefined}
     icon={<ShoppingCart className="w-5 h-5" />}
     size="lg"
     footer={
@@ -329,9 +344,9 @@ export default function OrdersPage() {
             Insufficient stock indicator
            </p>
            <p className="text-xs text-printflow-on-surface-variant">
-            Material {related.material_variant_id} ({related.item_type}) — stock{" "}
-            {related.current_stock} ≤ ROP {related.reorder_point} (prompts restock
-            per Workflow VII).
+             Material {related.material_variant_id} ({related.item_type}) - stock{" "}
+             {related.current_stock} {"<="} ROP {related.reorder_point} (prompts restock
+             per Workflow VII).
            </p>
           </div>
          </div>
@@ -376,7 +391,7 @@ export default function OrdersPage() {
            EMAIL
           </p>
           <p className="text-sm font-medium text-printflow-on-surface mt-1 truncate">
-           {selected.customer_email || "—"}
+           {selected.customer_email || "-"}
           </p>
          </div>
          <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
@@ -384,7 +399,7 @@ export default function OrdersPage() {
            PHONE
           </p>
           <p className="text-sm font-medium text-printflow-on-surface mt-1">
-           {selected.customer_phone || "—"}
+           {selected.customer_phone || "-"}
           </p>
          </div>
         </div>
@@ -409,7 +424,7 @@ export default function OrdersPage() {
             ]
              .filter((p): p is string => Boolean(p && p.length))
              .join(", ")}
-            {selected.customer_region ? ` • ${selected.customer_region}` : ""}
+            {selected.customer_region ? ` - ${selected.customer_region}` : ""}
            </p>
           </div>
          </div>
@@ -432,14 +447,14 @@ export default function OrdersPage() {
            {selected.quantity.toLocaleString()} pcs
           </p>
          </div>
-         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
-          <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">
-           LAYOUT FILE
-          </p>
-          <p className="text-sm font-medium text-printflow-primary mt-1 underline decoration-dotted cursor-pointer">
-           {selected.layout_file}
-          </p>
-         </div>
+          <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
+           <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">
+            LAYOUT FILE
+           </p>
+           <div className="mt-1">
+            <LayoutPreview value={selected.layout_file} size={96} />
+           </div>
+          </div>
          <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40">
           <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">
            TARGET DATE

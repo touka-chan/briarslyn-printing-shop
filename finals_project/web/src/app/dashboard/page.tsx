@@ -20,6 +20,7 @@ import {
   ChartCard,
   Modal,
   Button,
+  FeedErrorBanner,
 } from "@/components/ui";
 import { subscribeOrders } from "@/lib/services/orders";
 import { subscribeInventory } from "@/lib/services/inventory";
@@ -29,6 +30,7 @@ import {
   inventoryCheckoutKey,
 } from "@/lib/hooks/useSparkSeries";
 import { getInventoryStatus, priorityWeight } from "@/lib/derived";
+import { useFeedStatus } from "@/lib/useFeedStatus";
 import type { Order, InventoryItem, ProductionJob } from "@/types";
 
 export default function DashboardPage() {
@@ -37,17 +39,18 @@ export default function DashboardPage() {
  const [searchValue, setSearchValue] = useState("");
  const [kpiModal, setKpiModal] = useState<string | null>(null);
 
- const [orders, setOrders] = useState<Order[]>([]);
- const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
- useEffect(() => {
-  const unsubOrders = subscribeOrders(setOrders);
-  const unsubInv = subscribeInventory(setInventory);
-  return () => {
-   unsubOrders();
-   unsubInv();
-  };
- }, []);
+  useEffect(() => {
+   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubInv = subscribeInventory(setInventory, onFeedError);
+   return () => {
+    unsubOrders();
+    unsubInv();
+   };
+  }, [feedNonce, onFeedError]);
 
  // Live sparkline series (last 7 days, local TZ).
  const ordersCreatedSeries = useSparkSeries(orders, orderCreatedAtKey, 7);
@@ -63,7 +66,14 @@ export default function DashboardPage() {
   orderCreatedAtKey,
   7,
  );
- const checkoutSeries = useSparkSeries(inventory, inventoryCheckoutKey, 7);
+  const checkoutSeries = useSparkSeries(inventory, inventoryCheckoutKey, 7);
+  // Delayed-sync activity - real per-day checkout events for stale
+  // variants (flat zero = no recent checkouts, not a placeholder).
+  const staleItemsSeries = useSparkSeries(
+   inventory.filter((i) => i.isStale),
+   inventoryCheckoutKey,
+   7,
+  );
  const productionSeries = useSparkSeries(
   orders.filter((o) => o.status === "In Production"),
   orderCreatedAtKey,
@@ -115,26 +125,43 @@ export default function DashboardPage() {
   [inventory],
  );
 
- const filteredByPriority = useMemo(() => {
-  if (activePriority === "All") {
-   return [...orders].sort(
-    (a, b) =>
-     priorityWeight(a.priority) - priorityWeight(b.priority) ||
-     a.target_date.localeCompare(b.target_date),
-   );
-  }
-  return orders
-   .filter((o) => o.priority === activePriority)
-   .sort((a, b) => a.target_date.localeCompare(b.target_date));
- }, [orders, activePriority]);
+  // Header + table search boxes share one query that narrows both main
+  // tables (KPIs and tab counts stay global).
+  const matchesOrder = (o: Order, q: string) =>
+   !q ||
+   `${o.order_id} ${o.customer_name} ${o.item_type}`
+    .toLowerCase()
+    .includes(q);
+  const matchesMaterial = (i: InventoryItem, q: string) =>
+   !q ||
+   `${i.material_variant_id} ${i.item_type}`
+    .toLowerCase()
+    .includes(q);
 
- const filteredInventory = useMemo(
-  () =>
-   activeStockFilter === "All"
-    ? inventory
-    : inventory.filter((i) => getInventoryStatus(i) === activeStockFilter),
-  [inventory, activeStockFilter],
- );
+  const filteredByPriority = useMemo(() => {
+   const q = searchValue.trim().toLowerCase();
+   const base =
+    activePriority === "All"
+     ? orders
+     : orders.filter((o) => o.priority === activePriority);
+   return base
+    .filter((o) => matchesOrder(o, q))
+    .sort((a, b) =>
+     activePriority === "All"
+      ? priorityWeight(a.priority) - priorityWeight(b.priority) ||
+        a.target_date.localeCompare(b.target_date)
+      : a.target_date.localeCompare(b.target_date),
+    );
+  }, [orders, activePriority, searchValue]);
+
+  const filteredInventory = useMemo(() => {
+   const q = searchValue.trim().toLowerCase();
+   const base =
+    activeStockFilter === "All"
+     ? inventory
+     : inventory.filter((i) => getInventoryStatus(i) === activeStockFilter);
+   return base.filter((i) => matchesMaterial(i, q));
+  }, [inventory, activeStockFilter, searchValue]);
 
  const reorderAlerts = useMemo(
   () => inventory.filter((i) => i.current_stock <= i.reorder_point),
@@ -250,7 +277,7 @@ export default function DashboardPage() {
   {
    key: "current_stock",
    header: "Stock",
-   render: (r: InventoryItem) => `${r.current_stock} (thr:${r.threshold})`,
+    render: (r: InventoryItem) => `${r.current_stock}`,
   },
   {
    key: "reorder_point",
@@ -329,11 +356,18 @@ export default function DashboardPage() {
 
  return (
   <AdminLayout
-   title="Briaslyn Printing Shop Dashboard"
-   subtitle="Overview of orders, production and inventory"
-   onSearch={setSearchValue}
-  >
-   {/* Row 1: Key Metrics from dashboard summary */}
+    title="Brialyns Art Sign Dashboard"
+    subtitle="Overview of orders, production and inventory"
+    onSearch={setSearchValue}
+   >
+    {feedError && (
+     <FeedErrorBanner
+      message={feedError}
+      showCached={orders.length > 0 || inventory.length > 0}
+      onRetry={retryFeed}
+     />
+    )}
+    {/* Row 1: Key Metrics from dashboard summary */}
    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-4">
     <KpiCard
      label="Total Orders"
@@ -435,19 +469,19 @@ export default function DashboardPage() {
      change="needs sync"
      changeType="negative"
      trend="up"
-     sparkline={staleItems.length ? [1, 1, 1, 1, 1, 1, 1] : [0, 0, 0, 0, 0, 0, 0]}
+      sparkline={staleItemsSeries}
      sparklineTone="warning"
      lastUpdated="7d"
      onClick={() => setKpiModal("delayed")}
     />
    </div>
 
-   {/* KPI Modals — unified users master style */}
+   {/* KPI Modals - unified users master style */}
    <Modal
     isOpen={kpiModal === "total"}
     onClose={() => setKpiModal(null)}
     title="Total Orders"
-    description={`${totalOrders} orders • GET /api/orders`}
+    description={`${totalOrders} orders - GET /api/orders`}
     icon={<ShoppingCart className="w-5 h-5" />}
     size="lg"
     footer={
@@ -457,12 +491,13 @@ export default function DashboardPage() {
     }
    >
     <div className="space-y-4">
-     <DataTable
-      columns={orderColumns}
-      data={orders}
-      keyExtractor={(r) => r.order_id}
-      emptyMessage="No orders"
-     />
+      <DataTable
+       columns={orderColumns}
+       data={orders}
+       keyExtractor={(r) => r.order_id}
+       emptyMessage="No orders"
+       pageSize={10}
+      />
     </div>
    </Modal>
 
@@ -470,7 +505,7 @@ export default function DashboardPage() {
     isOpen={kpiModal === "pending"}
     onClose={() => setKpiModal(null)}
     title="Pending"
-    description={`${pendingOrders.length} orders • GET /api/orders/queue`}
+    description={`${pendingOrders.length} orders - GET /api/orders/queue`}
     icon={<Clock className="w-5 h-5" />}
     size="lg"
     footer={
@@ -479,19 +514,20 @@ export default function DashboardPage() {
      </Button>
     }
    >
-    <DataTable
-     columns={orderColumns}
-     data={pendingOrders}
-     keyExtractor={(r) => r.order_id}
-     emptyMessage="No pending orders"
-    />
+     <DataTable
+      columns={orderColumns}
+      data={pendingOrders}
+      keyExtractor={(r) => r.order_id}
+      emptyMessage="No pending orders"
+      pageSize={10}
+     />
    </Modal>
 
    <Modal
     isOpen={kpiModal === "completed"}
     onClose={() => setKpiModal(null)}
     title="Completed"
-    description={`${completedOrders.length} orders • GET /api/orders?status=Completed`}
+    description={`${completedOrders.length} orders - GET /api/orders?status=Completed`}
     icon={<CheckCircle className="w-5 h-5" />}
     size="lg"
     footer={
@@ -500,19 +536,20 @@ export default function DashboardPage() {
      </Button>
     }
    >
-    <DataTable
-     columns={orderColumns}
-     data={completedOrders}
-     keyExtractor={(r) => r.order_id}
-     emptyMessage="No completed orders"
-    />
+     <DataTable
+      columns={orderColumns}
+      data={completedOrders}
+      keyExtractor={(r) => r.order_id}
+      emptyMessage="No completed orders"
+      pageSize={10}
+     />
    </Modal>
 
    <Modal
     isOpen={kpiModal === "lowStock"}
     onClose={() => setKpiModal(null)}
     title="Low Stock"
-    description={`${reorderAlerts.length} materials • stock ≤ ROP`}
+    description={`${reorderAlerts.length} materials - stock <= ROP`}
     icon={<AlertTriangle className="w-5 h-5" />}
     size="lg"
     footer={
@@ -521,12 +558,13 @@ export default function DashboardPage() {
      </Button>
     }
    >
-    <DataTable
-     columns={inventoryColumns}
-     data={reorderAlerts}
-     keyExtractor={(r) => r.material_variant_id}
-     emptyMessage="All stocked"
-    />
+     <DataTable
+      columns={inventoryColumns}
+      data={reorderAlerts}
+      keyExtractor={(r) => r.material_variant_id}
+      emptyMessage="All stocked"
+      pageSize={10}
+     />
    </Modal>
 
    <Modal
@@ -539,7 +577,7 @@ export default function DashboardPage() {
         )
       : 0
     }%`}
-    description="GET /api/orders • on time vs overdue"
+    description="GET /api/orders - on time vs overdue"
     icon={<TrendingUp className="w-5 h-5" />}
     size="lg"
     footer={
@@ -578,12 +616,13 @@ export default function DashboardPage() {
        <p className="text-xl font-bold mt-1">{pendingOrders.length}</p>
       </div>
      </div>
-     <DataTable
-      columns={orderColumns}
-      data={overdueOrders}
-      keyExtractor={(r) => r.order_id}
-      emptyMessage="No overdue orders"
-     />
+      <DataTable
+       columns={orderColumns}
+       data={overdueOrders}
+       keyExtractor={(r) => r.order_id}
+       emptyMessage="No overdue orders"
+       pageSize={10}
+      />
     </div>
    </Modal>
 
@@ -591,7 +630,7 @@ export default function DashboardPage() {
     isOpen={kpiModal === "productionPending"}
     onClose={() => setKpiModal(null)}
     title="Pending Production"
-    description={`${productionQueue.length} jobs • priority Overdue/Urgent/Upcoming`}
+    description={`${productionQueue.length} jobs - priority Overdue/Urgent/Upcoming`}
     icon={<Factory className="w-5 h-5" />}
     size="lg"
     footer={
@@ -600,19 +639,20 @@ export default function DashboardPage() {
      </Button>
     }
    >
-    <DataTable
-     columns={productionColumns}
-     data={productionQueue}
-     keyExtractor={(r) => r.order_id}
-     emptyMessage="No jobs"
-    />
+     <DataTable
+      columns={productionColumns}
+      data={productionQueue}
+      keyExtractor={(r) => r.order_id}
+      emptyMessage="No jobs"
+      pageSize={10}
+     />
    </Modal>
 
    <Modal
     isOpen={kpiModal === "delayed"}
     onClose={() => setKpiModal(null)}
     title="Delayed Sync"
-    description={`${staleItems.length} needs sync • ESP32 isStale`}
+    description={`${staleItems.length} needs sync - ESP32 isStale`}
     icon={<AlertTriangle className="w-5 h-5" />}
     size="lg"
     footer={
@@ -622,12 +662,13 @@ export default function DashboardPage() {
     }
    >
     {staleItems.length > 0 ? (
-     <DataTable
-      columns={inventoryColumns}
-      data={staleItems}
-      keyExtractor={(r) => r.material_variant_id}
-      emptyMessage="All synced"
-     />
+      <DataTable
+       columns={inventoryColumns}
+       data={staleItems}
+       keyExtractor={(r) => r.material_variant_id}
+       emptyMessage="All synced"
+       pageSize={10}
+      />
     ) : (
      <p className="text-sm text-printflow-on-surface-variant">
       All materials synced
@@ -693,7 +734,7 @@ export default function DashboardPage() {
         data={ordersTrend}
         xKey="name"
         yKeys={["orders", "completed", "pending"]}
-        colors={["#00535b", "#2e7d32", "#ed6c02"]}
+        colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)", "var(--color-printflow-outline)"]}
         height={280}
        />
        <ChartCard
@@ -702,7 +743,7 @@ export default function DashboardPage() {
         data={onTimeVsOverdue}
         xKey="name"
         yKeys={["value"]}
-        colors={["#2e7d32", "#ba1a1a"]}
+        colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)"]}
         height={280}
        />
       </div>
@@ -713,7 +754,7 @@ export default function DashboardPage() {
         data={materialUsageTrends}
         xKey="name"
         yKeys={["usage"]}
-        colors={["#00535b"]}
+        colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
        />
@@ -723,7 +764,7 @@ export default function DashboardPage() {
         data={productionByPriority}
         xKey="name"
         yKeys={["value"]}
-        colors={["#00535b"]}
+        colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
        />
@@ -753,6 +794,7 @@ export default function DashboardPage() {
         data={filteredByPriority}
         keyExtractor={(r) => r.order_id}
         emptyMessage="No orders"
+        pageSize={25}
        />
       </div>
      </div>
@@ -764,18 +806,21 @@ export default function DashboardPage() {
      className="min-w-0 overflow-hidden w-full"
     >
      <div className="space-y-5">
-      <FilterToolbar
-       tabs={stockTabs}
-       activeTab={activeStockFilter}
-       onTabChange={setActiveStockFilter}
-       searchPlaceholder="Search material"
-      />
+       <FilterToolbar
+        tabs={stockTabs}
+        activeTab={activeStockFilter}
+        onTabChange={setActiveStockFilter}
+        searchPlaceholder="Search material"
+        onSearchChange={setSearchValue}
+        searchValue={searchValue}
+       />
       <div className="overflow-x-auto -mx-6 px-6">
        <DataTable
         columns={inventoryColumns}
         data={filteredInventory}
         keyExtractor={(r) => r.material_variant_id}
         emptyMessage="No materials"
+        pageSize={25}
        />
       </div>
      </div>
@@ -786,12 +831,13 @@ export default function DashboardPage() {
      className="min-w-0 overflow-hidden w-full"
     >
      <div className="overflow-x-auto -mx-6 px-6 py-3">
-      <DataTable
-       columns={productionColumns}
-       data={productionQueue}
-       keyExtractor={(r) => r.order_id}
-       emptyMessage="No jobs"
-      />
+       <DataTable
+        columns={productionColumns}
+        data={productionQueue}
+        keyExtractor={(r) => r.order_id}
+        emptyMessage="No jobs"
+        pageSize={25}
+       />
      </div>
     </ContentCard>
    </div>

@@ -37,7 +37,7 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // PLACEHOLDER VALUES — replace via `flutterfire configure`.
+  // PLACEHOLDER VALUES - replace via `flutterfire configure`.
   // Project: brialyns-art-sign-services
 
   static const FirebaseOptions web = FirebaseOptions(
