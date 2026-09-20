@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, TrendingUp } from "lucide-react";
+import {
+ Download,
+ TrendingUp,
+ ShoppingCart,
+ CheckCircle,
+ Clock,
+ AlertTriangle,
+} from "lucide-react";
 import Link from "next/link";
 import { AdminLayout } from "@/components/layout";
 import {
@@ -11,6 +18,9 @@ import {
  Button,
   KpiCard,
   CountUp,
+  DataTable,
+  StatusBadge,
+  Modal,
   FeedErrorBanner,
   useToast,
 } from "@/components/ui";
@@ -33,6 +43,7 @@ const todayKey = () => {
 
 export default function AnalyticsPage() {
  const [active, setActive] = useState("7d");
+ const [kpiModal, setKpiModal] = useState<string | null>(null);
  const [orders, setOrders] = useState<Order[]>([]);
  const [inventory, setInventory] = useState<InventoryItem[]>([]);
  const [customFrom, setCustomFrom] = useState(() => {
@@ -218,6 +229,118 @@ export default function AnalyticsPage() {
     () => inventory.filter((i) => i.isStale).length,
     [inventory],
   );
+
+  // KPI drilldown datasets.
+  const completedOrders = useMemo(
+   () => orders.filter((o) => o.status === "Completed"),
+   [orders],
+  );
+  const inFlightOrders = useMemo(
+   () =>
+    orders.filter((o) =>
+     ["Pending", "In Production", "Ready for Pickup"].includes(o.status),
+    ),
+   [orders],
+  );
+  const lowStockItems = useMemo(
+   () => inventory.filter((i) => getInventoryStatus(i) !== "In Stock"),
+   [inventory],
+  );
+
+  // Compact modal columns (no eye/action column): 6-7 columns fit the
+  // modal full-view with no bottom scrollbar.
+  const orderModalCols = [
+   {
+    key: "order_id",
+    header: "Order ID",
+    render: (r: Order) => (
+     <span className="font-mono text-xs">{r.order_id}</span>
+    ),
+   },
+   { key: "customer_name", header: "Customer" },
+   { key: "item_type", header: "Item Type" },
+   {
+    key: "quantity",
+    header: "Qty",
+    render: (r: Order) => r.quantity.toLocaleString(),
+   },
+   {
+    key: "priority",
+    header: "Priority",
+    render: (r: Order) => (
+     <span
+      className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
+       r.priority === "Overdue"
+        ? "bg-printflow-error-container text-printflow-on-error-container"
+        : r.priority === "Urgent"
+        ? "bg-printflow-warning-container text-printflow-warning"
+        : "bg-printflow-primary-fixed/20 text-printflow-primary"
+      }`}
+     >
+      {r.priority}
+     </span>
+    ),
+   },
+   {
+    key: "status",
+    header: "Status",
+    render: (r: Order) => (
+     <StatusBadge
+      status={r.status.toLowerCase().replace(/\s+/g, "-") as any}
+      customLabel={r.status}
+     />
+    ),
+   },
+  ];
+
+  const inventoryModalCols = [
+   {
+    key: "material_variant_id",
+    header: "Variant ID",
+    render: (r: InventoryItem) => (
+     <span className="font-mono text-xs">{r.material_variant_id}</span>
+    ),
+   },
+   { key: "item_type", header: "Item Type" },
+   {
+    key: "current_stock",
+    header: "Stock",
+    render: (r: InventoryItem) => `${r.current_stock}`,
+   },
+   {
+    key: "reorder_point",
+    header: "ROP",
+    render: (r: InventoryItem) => (
+     <span
+      className={
+       r.current_stock <= r.reorder_point
+        ? "text-printflow-error font-bold"
+        : ""
+      }
+     >
+      {r.reorder_point}
+     </span>
+    ),
+   },
+   { key: "forecasted_demand_next_7_days", header: "Forecast 7d" },
+   {
+    key: "status",
+    header: "Status",
+    render: (r: InventoryItem) => (
+     <span className="flex flex-wrap items-center gap-1 min-w-0">
+      <StatusBadge
+       status={r.status.toLowerCase().replace(/\s+/g, "-") as any}
+       customLabel={r.status}
+      />
+      {r.isStale && (
+       <span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning whitespace-nowrap">
+        Delayed
+       </span>
+      )}
+     </span>
+    ),
+   },
+  ];
   const onTimePct = useMemo(() => {
     const done = orders.filter((o) => o.status === "Completed").length;
     const inFlight = orders.filter((o) =>
@@ -250,6 +373,7 @@ export default function AnalyticsPage() {
           sparkline={ordersSeries}
           sparklineTone="primary"
           lastUpdated="7d"
+          onClick={() => setKpiModal("orders")}
         />
         <KpiCard
           label="Completed"
@@ -261,6 +385,7 @@ export default function AnalyticsPage() {
           sparkline={completedSeries}
           sparklineTone="success"
           lastUpdated="7d"
+          onClick={() => setKpiModal("completed")}
         />
         <KpiCard
           label="In Flight"
@@ -279,19 +404,34 @@ export default function AnalyticsPage() {
           sparkline={pendingSeries}
           sparklineTone="warning"
           lastUpdated="7d"
+          onClick={() => setKpiModal("inflight")}
         />
         <KpiCard
-          label="Low Stock"
+          label="Need Reorder"
           value={lowStockCount}
           icon="AlertIcon"
-          change="variants"
+          change="low + insufficient"
           changeType="negative"
           trend="up"
           sparkline={lowStockSeries}
           sparklineTone="error"
           lastUpdated="7d"
+          onClick={() => setKpiModal("lowstock")}
         />
       </div>
+
+      <Modal isOpen={kpiModal==="orders"} onClose={()=>setKpiModal(null)} title="Orders" description={`${orders.length} orders - GET /api/orders`} icon={<ShoppingCart className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+        <DataTable columns={orderModalCols} data={orders} keyExtractor={r=>r.order_id} emptyMessage="No orders" pageSize={10} previewLimit={0} scrollable={false} />
+      </Modal>
+      <Modal isOpen={kpiModal==="completed"} onClose={()=>setKpiModal(null)} title="Completed" description={`${completedOrders.length} orders - GET /api/orders?status=Completed`} icon={<CheckCircle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+        <DataTable columns={orderModalCols} data={completedOrders} keyExtractor={r=>r.order_id} emptyMessage="No completed orders" pageSize={10} previewLimit={0} scrollable={false} />
+      </Modal>
+      <Modal isOpen={kpiModal==="inflight"} onClose={()=>setKpiModal(null)} title="In Flight" description={`${inFlightOrders.length} orders - Pending / In Production / Ready for Pickup`} icon={<Clock className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+        <DataTable columns={orderModalCols} data={inFlightOrders} keyExtractor={r=>r.order_id} emptyMessage="No in-flight orders" pageSize={10} previewLimit={0} scrollable={false} />
+      </Modal>
+      <Modal isOpen={kpiModal==="lowstock"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${lowStockItems.length} variants below reorder point (low + insufficient)`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
+        <DataTable columns={inventoryModalCols} data={lowStockItems} keyExtractor={r=>r.material_variant_id} emptyMessage="All stocked" pageSize={10} previewLimit={0} scrollable={false} />
+      </Modal>
 
        <ContentCard className="mb-6">
          <FilterToolbar

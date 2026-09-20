@@ -186,10 +186,27 @@ export default function ReportsPage() {
    return iso >= start && iso <= todayIso();
   };
 
-  const ordersInRange = useMemo(
-   () => orders.filter((o) => rangeFilter(o.target_date)),
-   // eslint-disable-next-line react-hooks/exhaustive-deps
-   [orders, activeRange, customOn, customFrom, customTo],
+   const ordersInRange = useMemo(
+    // Range by CREATED date (when the order was placed) - never by
+    // target_date: upcoming orders carry future deadlines and a
+    // `<= today` cutoff would silently drop them from every KPI/modal.
+    () =>
+     orders.filter((o) =>
+      rangeFilter((o.created_at ?? o.target_date ?? "").slice(0, 10)),
+     ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orders, activeRange, customOn, customFrom, customTo],
+   );
+  // Card numbers follow the selected range (same pool the modals list),
+  // so the KPI value always matches the modal row count.
+  const totalInRange = ordersInRange.length;
+  const pendingInRange = useMemo(
+   () => ordersInRange.filter((o) => o.status === "Pending").length,
+   [ordersInRange],
+  );
+  const completedInRange = useMemo(
+   () => ordersInRange.filter((o) => o.status === "Completed").length,
+   [ordersInRange],
   );
  const inventoryInRange = useMemo(
   () =>
@@ -339,35 +356,38 @@ export default function ReportsPage() {
   },
  ];
 
- const kpiMeta: Record<
-  NonNullable<typeof kpiModal>,
-  { title: string; desc: string; icon: ReactNode; count: number }
- > = {
-  total: {
-   title: "Total Orders",
-   desc: `${drillDown.length} orders in selected range`,
-   icon: <ShoppingCart className="w-5 h-5" />,
-   count: drillDown.length,
-  },
-  pending: {
-   title: "Pending Orders",
-   desc: `${drillDown.length} orders awaiting production`,
-   icon: <Clock className="w-5 h-5" />,
-   count: drillDown.length,
-  },
-  completed: {
-   title: "Completed Orders",
-   desc: `${drillDown.length} orders fulfilled in range`,
-   icon: <Check className="w-5 h-5" />,
-   count: drillDown.length,
-  },
-  lowStock: {
-   title: "Low Stock Items",
-   desc: `${drillDown.length} materials below reorder point`,
-   icon: <AlertTriangle className="w-5 h-5" />,
-   count: drillDown.length,
-  },
- };
+  const pluralOrders = (n: number) =>
+   n === 1 ? "1 order" : `${n} orders`;
+
+  const kpiMeta: Record<
+   NonNullable<typeof kpiModal>,
+   { title: string; desc: string; icon: ReactNode; count: number }
+  > = {
+   total: {
+    title: "Total Orders",
+    desc: `${pluralOrders(drillDown.length)} in selected range`,
+    icon: <ShoppingCart className="w-5 h-5" />,
+    count: drillDown.length,
+   },
+   pending: {
+    title: "Pending Orders",
+    desc: `${pluralOrders(drillDown.length)} awaiting production in range`,
+    icon: <Clock className="w-5 h-5" />,
+    count: drillDown.length,
+   },
+   completed: {
+    title: "Completed Orders",
+    desc: `${pluralOrders(drillDown.length)} fulfilled in range`,
+    icon: <Check className="w-5 h-5" />,
+    count: drillDown.length,
+   },
+   lowStock: {
+    title: "Need Reorder",
+    desc: `${drillDown.length} materials below reorder point (low + insufficient)`,
+    icon: <AlertTriangle className="w-5 h-5" />,
+    count: drillDown.length,
+   },
+  };
 
   return (
    <AdminLayout
@@ -544,46 +564,46 @@ export default function ReportsPage() {
     </div>
 
     <ContentCard title="Key Metrics">
-     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-      <KpiCard
-       label="Total Orders"
-       value={orders.length}
-       icon="ShoppingCart"
-       sparkline={ordersSpark}
-       sparklineTone="primary"
-       lastUpdated="Live"
-       onClick={() => setKpiModal("total")}
-      />
-      <KpiCard
-       label="Pending"
-       value={pending}
-       icon="Clock"
-       sparkline={pendingSpark}
-       sparklineTone="warning"
-       lastUpdated="Live"
-       onClick={() => setKpiModal("pending")}
-      />
-      <KpiCard
-       label="Completed"
-       value={completed}
-       icon="Check"
-       sparkline={completedSpark}
-       sparklineTone="success"
-       lastUpdated="Live"
-       onClick={() => setKpiModal("completed")}
-      />
-      <KpiCard
-       label="Low Stock Items"
-       value={lowStock}
-       icon="AlertTriangle"
-       change={lowStock > 0 ? "needs attention" : "all stocked"}
-       changeType={lowStock > 0 ? "negative" : "positive"}
-       sparkline={lowStockSpark}
-       sparklineTone="error"
-       lastUpdated="Live"
-       onClick={() => setKpiModal("lowStock")}
-      />
-     </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+       <KpiCard
+        label="Total Orders"
+        value={totalInRange}
+        icon="ShoppingCart"
+        sparkline={ordersSpark}
+        sparklineTone="primary"
+        lastUpdated="Live"
+        onClick={() => setKpiModal("total")}
+       />
+       <KpiCard
+        label="Pending"
+        value={pendingInRange}
+        icon="Clock"
+        sparkline={pendingSpark}
+        sparklineTone="warning"
+        lastUpdated="Live"
+        onClick={() => setKpiModal("pending")}
+       />
+       <KpiCard
+        label="Completed"
+        value={completedInRange}
+        icon="Check"
+        sparkline={completedSpark}
+        sparklineTone="success"
+        lastUpdated="Live"
+        onClick={() => setKpiModal("completed")}
+       />
+       <KpiCard
+        label="Need Reorder"
+        value={lowStock}
+        icon="AlertTriangle"
+        change={lowStock > 0 ? "low + insufficient" : "all stocked"}
+        changeType={lowStock > 0 ? "negative" : "positive"}
+        sparkline={lowStockSpark}
+        sparklineTone="error"
+        lastUpdated="Live"
+        onClick={() => setKpiModal("lowStock")}
+       />
+      </div>
     </ContentCard>
 
     <ContentCard title="Recent Generated Reports">

@@ -303,6 +303,45 @@
     overflow-wrap: anywhere;
   }
 
+  /* Modal tables: full-view, no bottom scrollbar. Cells wrap instead of
+     forcing nowrap overflow, so every column stays visible inside KPI
+     modals without horizontal scrolling. */
+  .modal-body .data-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+  }
+  .modal-body .data-table th,
+  .modal-body .data-table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    padding: 8px 10px;
+    font-size: 12px;
+    vertical-align: middle;
+  }
+  .modal-body .data-table th {
+    padding: 8px 10px;
+  }
+  /* Kill the bottom scrollbar inside modals: the DataTable wrapper
+     defaults to overflow-x-auto (needed on full pages for mobile),
+     but inside a modal it must never scroll horizontally. */
+  .modal-body .overflow-x-auto {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  .modal-body .status-badge {
+    white-space: nowrap;
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  /* Any modal containing a table automatically widens (xl) so all
+     columns fit full-view with no bottom scrollbar. Applies to every
+     KPI/drilldown modal app-wide, present and future. NOTE: this must
+     live in a top-level utilities layer (see bottom of file), NOT nested
+     here — nested @layer would lose to Tailwind's max-w-* utilities. */
+
   .data-table tr:hover {
     @apply bg-printflow-surface-container/50;
   }
@@ -338,6 +377,7 @@
 
   .modal-body {
     @apply p-7 overflow-y-auto flex-1;
+    overflow-x: clip;
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
@@ -487,5 +527,16 @@
   .float-panel {
     height: auto !important;
     overflow: visible !important;
+  }
+}
+
+/* Top-level utilities layer (NOT nested): any modal containing a table
+   gets a moderate width so tables fit full-view with no bottom
+   scrollbar — without going near-fullscreen. Applies to every
+   KPI/drilldown modal app-wide. */
+@layer utilities {
+  .modal-content:has(.data-table) {
+    max-width: min(62rem, calc(100vw - 2rem));
+    width: 100%;
   }
 }

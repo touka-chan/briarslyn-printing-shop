@@ -109,10 +109,10 @@ export default function InventoryPage() {
     key: "sensor_id",
     header: "Sensor (IoT)",
     render: (r:InventoryItem)=>(
-      <span className="flex items-center gap-1.5 font-mono text-xs text-printflow-on-surface-variant">
+      <span className="flex flex-wrap items-center gap-1.5 font-mono text-xs text-printflow-on-surface-variant min-w-0">
         {r.sensor_id || 'ESP32-01'}
         <span
-          className={`inline-block w-2 h-2 rounded-full ${r.isStale ? "bg-zinc-400" : "bg-[#17171c] dark:bg-white animate-pulse"}`}
+          className={`inline-block w-2 h-2 rounded-full shrink-0 ${r.isStale ? "bg-zinc-400" : "bg-[#17171c] dark:bg-white animate-pulse"}`}
           title={r.isStale ? "Sync delayed (>12h)" : "Active connection"}
         ></span>
       </span>
@@ -121,10 +121,16 @@ export default function InventoryPage() {
   { key: "current_stock", header: "Stock", render: (r:InventoryItem)=>`${r.current_stock}` },
   { key: "reorder_point", header: "ROP (dynamic)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point}</span> },
   { key: "forecasted_demand_next_7_days", header: "Forecast 7d" },
-  { key: "model", header: "Model", render: (r:InventoryItem)=><span className="text-xs">{r.model}</span> },
-  { key: "status", header: "Status", render: (r:InventoryItem)=><span className="flex items-center gap-1"><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} />{r.isStale&&<span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning">Delayed</span>}</span> },
-  { key: "actions", header: "", render: ()=><Eye className="w-4 h-4" /> },
-  ];
+  { key: "model", header: "Model", render: (r:InventoryItem)=><span className="text-xs break-words">{r.model}</span> },
+  { key: "status", header: "Status", render: (r:InventoryItem)=><span className="flex flex-wrap items-center gap-1 min-w-0"><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} />{r.isStale&&<span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning whitespace-nowrap">Delayed</span>}</span> },
+   { key: "actions", header: "", render: ()=><Eye className="w-4 h-4" /> },
+   ];
+  // KPI modals: compact columns only (no eye, no Tag UID, no Sensor —
+  // those live in the row detail modal). 7 columns fit the modal
+  // full-view with no bottom scrollbar.
+  const modalCols = cols.filter(
+   (c) => c.key !== "actions" && c.key !== "tag_uid" && c.key !== "sensor_id",
+  );
 
   const toast = useToast();
 
@@ -217,16 +223,16 @@ export default function InventoryPage() {
    </div>
 
     <Modal isOpen={kpiModal==="total"} onClose={()=>setKpiModal(null)} title="Total Variants" description={`${inventory.length} variants - GET /api/inventory`} icon={<Package className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-      <DataTable columns={cols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No materials" pageSize={10} />
+      <DataTable columns={modalCols} data={inventory} keyExtractor={r=>r.material_variant_id} emptyMessage="No materials" pageSize={10} previewLimit={0} scrollable={false} />
     </Modal>
     <Modal isOpen={kpiModal==="low"} onClose={()=>setKpiModal(null)} title="Low Stock" description={`${lowStock.length} items - GET /api/inventory?status=Low Stock`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-      <DataTable columns={cols} data={lowStock} keyExtractor={r=>r.material_variant_id} emptyMessage="No low stock" pageSize={10} />
+      <DataTable columns={modalCols} data={lowStock} keyExtractor={r=>r.material_variant_id} emptyMessage="No low stock" pageSize={10} previewLimit={0} scrollable={false} />
     </Modal>
     <Modal isOpen={kpiModal==="insufficient"} onClose={()=>setKpiModal(null)} title="Insufficient Stock" description={`${insufficient.length} items - GET /api/inventory?status=Insufficient`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-      <DataTable columns={cols} data={insufficient} keyExtractor={r=>r.material_variant_id} emptyMessage="No insufficient stock" pageSize={10} />
+      <DataTable columns={modalCols} data={insufficient} keyExtractor={r=>r.material_variant_id} emptyMessage="No insufficient stock" pageSize={10} previewLimit={0} scrollable={false} />
     </Modal>
     <Modal isOpen={kpiModal==="reorder"} onClose={()=>setKpiModal(null)} title="Need Reorder" description={`${alerts.length} items - stock <= ROP`} icon={<AlertTriangle className="w-5 h-5" />} size="lg" footer={<Button variant="secondary" onClick={()=>setKpiModal(null)}>Close</Button>}>
-      <DataTable columns={cols} data={alerts} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" pageSize={10} />
+      <DataTable columns={modalCols} data={alerts} keyExtractor={r=>r.material_variant_id} emptyMessage="No reorder needed" pageSize={10} previewLimit={0} scrollable={false} />
     </Modal>
 
     <ContentCard title="Materials" subtitle={`${searched.length} materials`} className="mb-6">

@@ -12,8 +12,14 @@ interface DataTableProps<T> {
  emptyMessage?: string;
  loading?: boolean;
  className?: string;
- /** When set, only this many rows render per page with a pager footer. */
- pageSize?: number;
+  /** When set, only this many rows render per page with a pager footer. */
+  pageSize?: number;
+  /**
+   * When false, the table never creates a bottom (horizontal) scrollbar —
+   * the wrapper clips instead of scrolling. Use inside modals where the
+   * table must fit full-view. Defaults to true (pages keep mobile scroll).
+   */
+  scrollable?: boolean;
  /**
   * Collapsed preview: show only the first N rows with a "Show more"
   * expander (default 10). Set to 0 to disable the preview and always
@@ -32,6 +38,7 @@ export function DataTable<T>({
  className = "",
  pageSize,
  previewLimit = 10,
+ scrollable = true,
 }: DataTableProps<T>) {
  const [page, setPage] = useState(0);
  const [expanded, setExpanded] = useState(false);
@@ -54,10 +61,10 @@ export function DataTable<T>({
   ? Math.min(data.length, safePage * (pageSize as number) + (pageSize as number))
   : data.length;
 
- if (loading) {
-  return (
-   <div className="overflow-x-auto">
-    <table className="data-table">
+  if (loading) {
+   return (
+    <div className={scrollable ? "overflow-x-auto" : "overflow-x-clip max-w-full"}>
+     <table className="data-table">
      <thead>
       <tr>
        {columns.map((col) => (
@@ -95,10 +102,10 @@ export function DataTable<T>({
   );
  }
 
-  return (
-   <div className={className}>
-    <div className="overflow-x-auto">
-     <table className="data-table">
+   return (
+    <div className={className}>
+     <div className={scrollable ? "overflow-x-auto" : "overflow-x-clip max-w-full"}>
+      <table className="data-table">
       <thead>
        <tr>
         {columns.map((col) => (
