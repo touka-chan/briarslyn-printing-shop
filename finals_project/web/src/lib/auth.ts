@@ -103,11 +103,43 @@ export interface AuthState {
   configured: boolean;
 }
 
+/**
+ * Shared last-known auth snapshot (module scope, SPA lifetime).
+ *
+ * Every page renders its own AdminLayout, so Sidebar/Header remount on
+ * every navigation and each `useAuth()` instance starts from its own
+ * `useState(null)` + refetch - a null window that unmounts Owner-gated
+ * nav items (Audit Log) and shifts the rest (Settings) on every page
+ * change. New hook instances seed from this cache, so after the first
+ * load there is no null window. The wrappers inside `useAuth` keep it
+ * in sync; sign-out / web-restriction paths write null through the
+ * same wrappers, clearing it.
+ */
+let lastKnownFirebaseUser: FirebaseUser | null = null;
+let lastKnownUser: User | null = null;
+
 export function useAuth(): AuthState {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(firebaseReady);
+  const [firebaseUser, setFirebaseUserState] =
+    useState<FirebaseUser | null>(lastKnownFirebaseUser);
+  const [user, setUserState] = useState<User | null>(lastKnownUser);
+  const [loading, setLoading] = useState<boolean>(
+    firebaseReady && !lastKnownUser,
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // Wrappers keep the module-level snapshot in sync so a freshly
+  // mounted hook (new Sidebar/Header on every page navigation) starts
+  // from the last confirmed user instead of a null window that makes
+  // Owner-gated nav items flicker. Sign-out / restriction paths set
+  // null, which clears the cache through the same wrappers.
+  const setFirebaseUser = (fb: FirebaseUser | null) => {
+    lastKnownFirebaseUser = fb;
+    setFirebaseUserState(fb);
+  };
+  const setUser = (u: User | null) => {
+    lastKnownUser = u;
+    setUserState(u);
+  };
 
   useEffect(() => {
     if (!auth) {

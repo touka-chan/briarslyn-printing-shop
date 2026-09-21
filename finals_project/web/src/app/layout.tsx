@@ -29,15 +29,16 @@ export const metadata: Metadata = {
  * otherwise land AFTER first paint).
  *
  * The script mirrors Header.tsx's applyTheme() - same key
- * ("printflow-theme"), same class name ("dark"), same fallback to the
- * OS preference via matchMedia. If the value is "light" we leave the
- * <html> alone (no class) and let the dark CSS block stay inactive.
+ * ("printflow-theme"). Default is ALWAYS light: dark mode applies only
+ * when the user explicitly chose it (stored "dark"). The OS color
+ * scheme is deliberately ignored so a dark-mode OS never forces the
+ * admin panel dark on first visit.
  *
  * `dangerouslySetInnerHTML` is intentional - Next would otherwise
  * escape the script body. The string is static; no user input flows
  * through it.
  */
-const themeScript = `(function(){try{var s=localStorage.getItem('printflow-theme');var d=s==='dark'||(!s&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d){document.documentElement.classList.add('dark');}}catch(e){}})();`;
+const themeScript = `(function(){try{var s=localStorage.getItem('printflow-theme');if(s==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

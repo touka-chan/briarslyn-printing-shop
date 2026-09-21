@@ -163,8 +163,18 @@ export default function SettingsPage() {
         const prefers = window.matchMedia("(prefers-color-scheme: dark)").matches;
         root.classList.toggle("dark", prefers);
       }
+      // Share the resolved value with the header bootstrap + toggle:
+      // "system" is resolved here at write time so "printflow-theme"
+      // only ever holds "dark" | "light" (both treat anything else as
+      // light). An explicit "System" choice still follows the OS.
+      const resolved =
+        s.theme === "system"
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light"
+          : s.theme;
       try {
-        window.localStorage.setItem("printflow-theme", s.theme);
+        window.localStorage.setItem("printflow-theme", resolved);
       } catch {
         /* ignore */
       }

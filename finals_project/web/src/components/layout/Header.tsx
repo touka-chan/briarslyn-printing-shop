@@ -38,18 +38,16 @@ interface HeaderProps {
 type Theme = "light" | "dark";
 
 function readStoredTheme(): Theme {
- if (typeof window === "undefined") return "light";
- try {
-  const t = localStorage.getItem("printflow-theme");
-  if (t === "dark" || t === "light") return t;
- } catch {}
- if (
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-color-scheme: dark)").matches
- ) {
-  return "dark";
- }
- return "light";
+  if (typeof window === "undefined") return "light";
+  try {
+    const t = localStorage.getItem("printflow-theme");
+    if (t === "dark" || t === "light") return t;
+  } catch {}
+  // Default is ALWAYS light. The OS color scheme is deliberately
+  // ignored - a dark-mode OS must never force the panel dark.
+  // Dark applies only when the user explicitly picks it (moon toggle
+  // or Settings > Appearance), which stores "dark".
+  return "light";
 }
 
 function applyTheme(theme: Theme) {
@@ -453,10 +451,10 @@ export function Header({
  return (
   <>
    <header className="sticky top-3 z-30 bg-printflow-surface/80 backdrop-blur-sm border-b border-printflow-outline-variant rounded-t-2xl">
-   <div className="flex items-center justify-between h-16 px-6 gap-4">
-    {/* Left: Title */}
-    <div className="flex-1 min-w-0">
-      <h1 className="font-display text-xl font-semibold text-printflow-on-surface truncate">
+    <div className="flex items-center justify-between h-14 px-5 gap-4">
+     {/* Left: Title */}
+     <div className="flex-1 min-w-0">
+       <h1 className="font-display text-lg font-semibold text-printflow-on-surface truncate">
        {title}
       </h1>
      {subtitle && (

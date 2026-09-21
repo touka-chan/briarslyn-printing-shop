@@ -8,9 +8,16 @@
  * happy), verify the code to reveal the account email, then let the user
  * set a new password + confirm (with eye toggles) via
  * confirmPasswordReset.
+ *
+ * Layout mirrors the login page (split floating card: dark brand panel
+ * with paint-splash + form side) so the flow feels like one product.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Poppins } from "next/font/google";
+
+/** Bold display face for brand + headlines (matches login). */
+const poppins = Poppins({ subsets: ["latin"], weight: ["700", "800"] });
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +25,9 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  LayoutDashboard,
+  Package,
+  Factory,
 } from "lucide-react";
 import {
   confirmPasswordReset,
@@ -26,7 +36,7 @@ import {
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui";
 
-type Status = "loading" | "ready" | "done" | "error";
+type Status = "loading" | "ready" | "done" | "error" | "info";
 
 export default function ResetPasswordPage() {
   const [status, setStatus] = useState<Status>("loading");
@@ -50,8 +60,11 @@ export default function ResetPasswordPage() {
     const mode = params.get("mode");
     const oobCode = params.get("oobCode");
     if (mode !== "resetPassword" || !oobCode) {
-      setFatal("This reset link is invalid. Request a new one from the login page.");
-      setStatus("error");
+      // No code in the URL. This happens when the user opens this page
+      // directly, OR when Firebase's default email-link handler finishes
+      // the reset and redirects to our continue URL. Either way, show a
+      // friendly finish screen instead of a dead-end error.
+      setStatus("info");
       return;
     }
     setCode(oobCode);
@@ -101,137 +114,266 @@ export default function ResetPasswordPage() {
     "absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-printflow-on-surface-variant hover:text-printflow-on-surface";
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-printflow-bg px-4 py-10">
-      <div className="w-full max-w-md bg-printflow-surface rounded-2xl border border-printflow-outline-variant/40 p-8 shadow-[0_24px_70px_rgba(0,0,0,0.16)]">
-        {status === "loading" && (
-          <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <Loader2 className="w-8 h-8 text-printflow-primary animate-spin" />
-            <p className="text-sm text-printflow-on-surface-variant">
-              Verifying your reset link…
-            </p>
-          </div>
-        )}
+    <div className="min-h-screen flex flex-col items-center justify-center bg-printflow-bg px-4 py-10 sm:px-6 relative overflow-hidden">
+      {/* Backdrop wash - neutral gray to match the admin canvas (same as login). */}
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(40rem 22rem at 12% 0%, rgba(0,0,0,0.05) 0%, transparent 55%), radial-gradient(44rem 24rem at 88% 0%, rgba(0,0,0,0.06) 0%, transparent 55%)",
+        }}
+      />
 
-        {status === "error" && (
-          <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-error/10">
-              <AlertTriangle className="w-7 h-7 text-printflow-error" />
-            </span>
-            <h1 className="text-xl font-bold text-printflow-on-surface">
-              Link problem
-            </h1>
-            <p className="text-sm text-printflow-on-surface-variant">{fatal}</p>
-            <Link href="/login" className="mt-2">
-              <Button variant="primary">Back to login</Button>
-            </Link>
-          </div>
-        )}
+      {/* Mobile-only brand row (the illustration panel is hidden on mobile) */}
+      <div className="md:hidden relative mb-6 flex items-center gap-3">
+        <img
+          src="/logo.jpg"
+          alt=""
+          width={40}
+          height={40}
+          className="w-10 h-10 rounded-full object-cover ring-2 ring-black/80 shadow-sm"
+        />
+        <div className="flex flex-col leading-tight">
+          <span className={`text-base font-bold tracking-[0.14em] text-printflow-on-surface ${poppins.className}`}>
+            BRIALYNS ART SIGN
+          </span>
+          <span className="text-xs text-printflow-on-surface-variant">
+            Print Shop Management
+          </span>
+        </div>
+      </div>
 
-        {status === "ready" && (
-          <>
-            <div className="flex flex-col items-center gap-2 text-center">
-              <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-primary-fixed">
-                <KeyRound className="w-7 h-7 text-printflow-primary" />
+      {/* Floating card */}
+      <div
+        className="relative w-full max-w-6xl grid md:grid-cols-[5fr_6fr]
+                   bg-printflow-surface rounded-2xl overflow-hidden
+                   border border-printflow-outline-variant/40
+                   shadow-[0_24px_70px_rgba(0,0,0,0.18),0_8px_24px_rgba(0,0,0,0.08)]"
+      >
+        {/* ----------------- LEFT: BRAND + LOGO (same as login) ----------------- */}
+        <aside
+          className="hidden md:flex flex-col justify-between
+                     bg-[#17171c] text-white
+                     px-12 py-12 relative overflow-hidden"
+          aria-label="Brialyns Art Sign brand panel"
+        >
+          {/* Faint top light for depth - monochrome like the admin. */}
+          <div
+            aria-hidden
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(circle at 80% 0%, rgba(255,255,255,0.08) 0%, transparent 50%)",
+            }}
+          />
+
+          <header className="relative z-10 flex items-center gap-3">
+            <img
+              src="/logo.jpg"
+              alt=""
+              width={44}
+              height={44}
+              className="w-11 h-11 rounded-full object-cover ring-2 ring-white/80 shadow-sm"
+            />
+            <div className="flex flex-col leading-tight">
+              <span className={`text-lg font-bold tracking-[0.14em] ${poppins.className}`}>BRIALYNS ART SIGN</span>
+              <span className="text-xs text-white/70">
+                Print Shop Management
               </span>
-              <h1 className="text-xl font-bold text-printflow-on-surface">
-                Choose a new password
-              </h1>
-              <p className="text-sm text-printflow-on-surface-variant">
-                For <span className="font-medium">{email}</span>
-              </p>
             </div>
-            <div className="space-y-4 mt-6">
-              {formError && (
-                <div
-                  role="alert"
-                  className="px-4 py-3 rounded-xl bg-printflow-error/10 border border-printflow-error/30 text-printflow-error text-sm"
-                >
-                  {formError}
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-printflow-on-surface-variant mb-1">
-                  New password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showNew ? "text" : "password"}
-                    value={pwNew}
-                    onChange={(e) => setPwNew(e.target.value)}
-                    autoComplete="new-password"
-                    placeholder="At least 8 characters"
-                    className={`${inputCls} pr-10`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNew((v) => !v)}
-                    className={toggleCls}
-                    aria-label={showNew ? "Hide password" : "Show password"}
-                  >
-                    {showNew ? (
-                      <Eye className="w-4 h-4" />
-                    ) : (
-                      <EyeOff className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-printflow-on-surface-variant mb-1">
-                  Confirm new password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showConfirm ? "text" : "password"}
-                    value={pwConfirm}
-                    onChange={(e) => setPwConfirm(e.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Repeat the password"
-                    className={`${inputCls} pr-10`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirm((v) => !v)}
-                    className={toggleCls}
-                    aria-label={showConfirm ? "Hide password" : "Show password"}
-                  >
-                    {showConfirm ? (
-                      <Eye className="w-4 h-4" />
-                    ) : (
-                      <EyeOff className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-              <Button
-                variant="primary"
-                onClick={() => void handleSubmit()}
-                className="w-full py-3"
-                loading={saving}
-                disabled={saving}
-              >
-                {saving ? "Updating…" : "Set new password"}
-              </Button>
-            </div>
-          </>
-        )}
+          </header>
 
-        {status === "done" && (
-          <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-success-container/50">
-              <CheckCircle2 className="w-7 h-7 text-printflow-success" />
-            </span>
-            <h1 className="text-xl font-bold text-printflow-on-surface">
-              Password updated
-            </h1>
-            <p className="text-sm text-printflow-on-surface-variant">
-              Sign in with your new password.
-            </p>
-            <Link href="/login" className="mt-2">
-              <Button variant="primary">Back to login</Button>
-            </Link>
+          <div className="relative z-10 py-6" aria-hidden>
+            <img
+              src="/login-splash.png"
+              alt=""
+              loading="eager"
+              decoding="async"
+              width={880}
+              height={502}
+              className="w-full h-auto login-float"
+            />
           </div>
-        )}
+
+          <footer className="relative z-10 space-y-3">
+            <p className="text-sm text-white/70 leading-relaxed max-w-xs">
+              Integrated POS, IoT inventory, and order workflow for Brialyns Art Sign,
+              Sta. Cruz, Laguna.
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {[
+                { icon: LayoutDashboard, label: "POS" },
+                { icon: Package, label: "Inventory" },
+                { icon: Factory, label: "Production" },
+              ].map(({ icon: Icon, label }) => (
+                <li
+                  key={label}
+                  className="inline-flex items-center gap-1.5
+                             px-3 py-1.5 rounded-full
+                             bg-white/10
+                             border border-white/15
+                             text-xs font-medium text-white/90"
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden />
+                  {label}
+                </li>
+              ))}
+            </ul>
+          </footer>
+        </aside>
+
+        {/* ----------------- RIGHT: FORM ----------------- */}
+        <main className="flex items-center justify-center px-6 py-12 sm:px-14">
+          <div className="w-full max-w-md">
+            {status === "loading" && (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <Loader2 className="w-8 h-8 text-printflow-primary animate-spin" />
+                <p className="text-sm text-printflow-on-surface-variant">
+                  Verifying your reset link…
+                </p>
+              </div>
+            )}
+
+            {status === "error" && (
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-error/10">
+                  <AlertTriangle className="w-7 h-7 text-printflow-error" />
+                </span>
+                <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
+                  Link problem
+                </h1>
+                <p className="type-body text-printflow-on-surface-variant">{fatal}</p>
+                <Link href="/login" className="mt-2">
+                  <Button variant="primary">Back to login</Button>
+                </Link>
+              </div>
+            )}
+
+            {status === "info" && (
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-primary-fixed">
+                  <KeyRound className="w-7 h-7 text-printflow-primary" />
+                </span>
+                <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
+                  Finish password reset
+                </h1>
+                <p className="type-body text-printflow-on-surface-variant">
+                  Open the reset link from your email to choose a new password
+                  and confirm it. If you already completed the reset in your
+                  email tab, your password is updated — sign in with your new
+                  password.
+                </p>
+                <Link href="/login" className="mt-2">
+                  <Button variant="primary">Back to login</Button>
+                </Link>
+              </div>
+            )}
+
+            {status === "ready" && (
+              <>
+                <header className="mb-7">
+                  <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
+                    Choose a new password
+                  </h1>
+                  <p className="type-body text-printflow-on-surface-variant mt-2">
+                    For <span className="font-medium">{email}</span>
+                  </p>
+                </header>
+                <div className="space-y-5">
+                  {formError && (
+                    <div
+                      role="alert"
+                      className="px-4 py-3 rounded-xl bg-printflow-error/10 border border-printflow-error/30 text-printflow-error text-sm"
+                    >
+                      {formError}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block type-label font-semibold text-printflow-on-surface-variant mb-1.5">
+                      New password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNew ? "text" : "password"}
+                        value={pwNew}
+                        onChange={(e) => setPwNew(e.target.value)}
+                        autoComplete="new-password"
+                        placeholder="At least 8 characters"
+                        className={`${inputCls} pr-10`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNew((v) => !v)}
+                        className={toggleCls}
+                        aria-label={showNew ? "Hide password" : "Show password"}
+                      >
+                        {showNew ? (
+                          <Eye className="w-4 h-4" />
+                        ) : (
+                          <EyeOff className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block type-label font-semibold text-printflow-on-surface-variant mb-1.5">
+                      Confirm new password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirm ? "text" : "password"}
+                        value={pwConfirm}
+                        onChange={(e) => setPwConfirm(e.target.value)}
+                        autoComplete="new-password"
+                        placeholder="Repeat the password"
+                        className={`${inputCls} pr-10`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirm((v) => !v)}
+                        className={toggleCls}
+                        aria-label={showConfirm ? "Hide password" : "Show password"}
+                      >
+                        {showConfirm ? (
+                          <Eye className="w-4 h-4" />
+                        ) : (
+                          <EyeOff className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    onClick={() => void handleSubmit()}
+                    className="w-full py-3"
+                    loading={saving}
+                    disabled={saving}
+                  >
+                    {saving ? "Updating…" : "Set new password"}
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {status === "done" && (
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <span className="flex items-center justify-center w-14 h-14 rounded-full bg-printflow-success-container/50">
+                  <CheckCircle2 className="w-7 h-7 text-printflow-success" />
+                </span>
+                <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
+                  Password updated
+                </h1>
+                <p className="type-body text-printflow-on-surface-variant">
+                  Sign in with your new password.
+                </p>
+                <Link href="/login" className="mt-2">
+                  <Button variant="primary">Back to login</Button>
+                </Link>
+              </div>
+            )}
+          </div>
+        </main>
       </div>
     </div>
   );

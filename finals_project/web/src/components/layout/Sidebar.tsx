@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Poppins } from "next/font/google";
@@ -83,7 +83,14 @@ const navigation: NavSection[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
-  const isOwner = user?.role === "Owner";
+  // Remember the last confirmed Owner state so the Owner-only Audit Log
+  // doesn't unmount mid-navigation while the auth profile reloads
+  // (user is briefly null between route changes).
+  const [wasOwner, setWasOwner] = useState(false);
+  useEffect(() => {
+    if (user) setWasOwner(user.role === "Owner");
+  }, [user]);
+  const isOwner = user ? user.role === "Owner" : wasOwner;
 
   return (
    <aside
@@ -92,33 +99,34 @@ export function Sidebar() {
    >
     <div className="flex flex-col h-full relative">
      {/* Logo */}
-     <div className="relative flex items-center h-16 px-5">
-      <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0" aria-label="Brialyns Art Sign Panel">
-       <img
-        src="/logo.jpg"
-        alt=""
-        width={32}
-        height={32}
-        className="w-8 h-8 rounded-full object-cover ring-2 ring-white/80 shrink-0"
-       />
-       <span className={`font-bold text-[13px] text-white leading-tight ${poppins.className}`}>
-        Brialyns Art Sign <span className="text-white/40 font-semibold">| Panel</span>
-       </span>
-      </Link>
+      <div className="relative flex items-center h-14 px-5">
+       <Link href="/dashboard" className="flex items-center gap-2 min-w-0" aria-label="Brialyns Art Sign Panel">
+        <img
+          src="/logo.jpg"
+          alt=""
+          width={32}
+          height={32}
+          className="w-8 h-8 rounded-full object-cover ring-2 ring-white/80 shrink-0"
+        />
+        <span className={`font-bold text-xs text-white leading-tight whitespace-nowrap ${poppins.className}`}>
+          Brialyns Art Sign <span className="text-white/40 font-semibold">| Panel</span>
+        </span>
+       </Link>
      </div>
 
-     {/* Navigation - grouped by section titles */}
-     <nav className="relative flex-1 py-2 overflow-y-auto no-scrollbar" aria-label="Main navigation">
-       {navigation.map((section) => {
-        const items = section.items.filter(
-         (item) => !item.ownerOnly || isOwner,
-        );
-        if (items.length === 0) return null;
-        return (
-        <div key={section.title} className="mb-3 last:mb-0">
-         <h2 className="px-6 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
-          {section.title}
-         </h2>
+      {/* Navigation - grouped by section titles. Thin visible scrollbar
+          (not hidden) so the System section below the fold is discoverable. */}
+      <nav className="relative flex-1 py-2 overflow-y-auto scrollbar-thin" aria-label="Main navigation">
+        {navigation.map((section) => {
+          const items = section.items.filter(
+            (item) => !item.ownerOnly || isOwner,
+          );
+          if (items.length === 0) return null;
+          return (
+          <div key={section.title} className="mb-2 last:mb-0">
+          <h2 className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+            {section.title}
+          </h2>
          <ul className="space-y-1 px-3" role="list">
           {items.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -127,7 +135,7 @@ export function Sidebar() {
            <li key={item.href}>
              <Link
               href={item.href}
-              className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-200 text-[13px] ${
+               className={`group flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-[13px] ${
                isActive
                 ? "bg-white text-black shadow-sm"
                 : "text-white/60 hover:bg-white/10 hover:text-white"
@@ -172,12 +180,12 @@ export function MobileSidebarOverlay({ isOpen, onClose, children }: { isOpen: bo
 
   return (
    <>
-    <div
-     className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-     onClick={onClose}
-     aria-hidden="true"
-    />
-    <aside className="sidebar m-3 h-[calc(100vh-24px)] rounded-2xl bg-[#17171c] border-white/10 w-64 z-50 lg:hidden transform transition-transform duration-300 ease-in-out">
+     <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden"
+      onClick={onClose}
+      aria-hidden="true"
+     />
+    <aside className="sidebar m-3 h-[calc(100vh-24px)] rounded-2xl bg-[#17171c] border-white/10 w-60 z-50 lg:hidden transform transition-transform duration-300 ease-in-out">
      {children}
      <button
       onClick={onClose}

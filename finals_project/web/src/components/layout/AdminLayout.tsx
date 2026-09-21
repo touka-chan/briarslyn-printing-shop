@@ -40,10 +40,10 @@ export function AdminLayout({ children, title, subtitle, headerActions, onSearch
        onSearch={onSearch}
       />
 
-      {/* Page Content */}
-      <div className="p-6">
-       {children}
-      </div>
+       {/* Page Content */}
+       <div className="p-4">
+        {children}
+       </div>
      </div>
     </main>
   </div>

@@ -121,10 +121,10 @@ export function KpiCard({
   >
    <div className="flex items-start justify-between gap-3">
     <div className="flex-1 min-w-0">
-     <p className="text-sm font-medium text-printflow-on-surface-variant mb-1">
-      {label}
-     </p>
-       <p className="font-display text-3xl font-bold text-printflow-on-surface tabular-nums">
+      <p className="text-[13px] font-medium text-printflow-on-surface-variant mb-1">
+       {label}
+      </p>
+        <p className="font-display text-2xl font-bold text-printflow-on-surface tabular-nums">
         <CountUp value={value} />
        </p>
      {change && (
@@ -159,7 +159,7 @@ export function KpiCard({
       </div>
      )}
     </div>
-     <div className="p-3 bg-black/[0.05] dark:bg-white/10 rounded-xl text-black dark:text-white shrink-0">
+      <div className="p-2 bg-black/[0.05] dark:bg-white/10 rounded-lg text-black dark:text-white shrink-0">
      {typeof icon === "string" && <Icon name={icon as IconName} />}
      {typeof icon !== "string" && icon}
     </div>

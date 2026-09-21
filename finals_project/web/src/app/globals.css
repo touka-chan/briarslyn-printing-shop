@@ -181,15 +181,15 @@
     line-height: 1.2;
   }
 
-  h1 { font-size: 2rem; }
-  h2 { font-size: 1.5rem; }
-  h3 { font-size: 1.25rem; }
-  h4 { font-size: 1.125rem; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.125rem; }
+  h4 { font-size: 1rem; }
 }
 
 @layer components {
   .sidebar {
-    @apply w-64 bg-printflow-surface border-r border-printflow-outline-variant h-screen fixed top-0 left-0 z-40 transition-transform duration-300;
+    @apply w-60 bg-printflow-surface border-r border-printflow-outline-variant h-screen fixed top-0 left-0 z-40 transition-transform duration-300;
   }
 
   .sidebar-collapsed {
@@ -200,7 +200,7 @@
     @apply flex-1 min-h-screen transition-all duration-300;
     /* Cool-gray canvas (admin only) so white cards visibly float. */
     background: #e2e5e9;
-    margin-left: 16rem;
+    margin-left: 15rem;
   }
   /* Dark mode = light canvas + dark floating panels (panel, cards,
      sidebar stay dark; only the backdrop is light). */
@@ -213,7 +213,7 @@
   }
 
   .page-header {
-    @apply px-6 py-4 bg-printflow-surface border-b border-printflow-outline-variant;
+    @apply px-5 py-3 bg-printflow-surface border-b border-printflow-outline-variant;
   }
 
   /* Display face (Poppins) for headings/KPI values — matches login. */
@@ -222,21 +222,21 @@
   }
 
   .kpi-card {
-    @apply bg-printflow-surface rounded-2xl p-6 border border-printflow-outline-variant;
+    @apply bg-printflow-surface rounded-xl p-4 border border-printflow-outline-variant;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .content-card {
-    @apply bg-printflow-surface rounded-2xl border border-printflow-outline-variant overflow-hidden min-w-0;
+    @apply bg-printflow-surface rounded-xl border border-printflow-outline-variant overflow-hidden min-w-0;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .filter-toolbar {
-    @apply flex flex-wrap items-center gap-3 p-4 bg-printflow-surface rounded-2xl border border-printflow-outline-variant mb-6;
+    @apply flex flex-wrap items-center gap-2 p-3 bg-printflow-surface rounded-xl border border-printflow-outline-variant mb-4;
   }
 
   .filter-tab {
-    @apply px-4 py-2 text-sm font-medium rounded-full transition-all duration-200;
+    @apply px-3 py-1.5 text-sm font-medium rounded-full transition-all duration-200;
   }
 
   .filter-tab-active {
@@ -248,15 +248,15 @@
   }
 
   .search-input {
-    @apply flex-1 max-w-md px-4 py-2.5 text-sm bg-printflow-surface-container rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent transition-all;
+    @apply flex-1 max-w-md px-4 py-2 text-sm bg-printflow-surface-container rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent transition-all;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold text-white bg-[#17171c] rounded-lg hover:bg-black focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 transition-all duration-200 dark:bg-white dark:text-black dark:hover:bg-white/90 dark:focus:ring-white;
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-[#17171c] rounded-lg hover:bg-black focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 transition-all duration-200 dark:bg-white dark:text-black dark:hover:bg-white/90 dark:focus:ring-white;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-printflow-on-surface bg-printflow-surface-container rounded-lg border border-printflow-outline-variant hover:bg-printflow-surface-container-high focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:ring-offset-2 transition-all duration-200;
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-printflow-on-surface bg-printflow-surface-container rounded-lg border border-printflow-outline-variant hover:bg-printflow-surface-container-high focus:outline-none focus:ring-2 focus:ring-printflow-primary focus:ring-offset-2 transition-all duration-200;
   }
 
   .btn-ghost {
@@ -264,7 +264,7 @@
   }
 
   .status-badge {
-    @apply inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full whitespace-nowrap;
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap;
   }
 
   .status-pending {
@@ -291,15 +291,15 @@
      wrapping cells, and slightly smaller type so every column stays
      viewable. Badges stay one-line via .status-badge nowrap. */
   .data-table {
-    @apply w-full text-[13px];
+    @apply w-full text-xs;
   }
 
   .data-table th {
-    @apply px-3 py-2.5 text-left font-semibold text-printflow-on-surface-variant bg-printflow-surface-container border-b border-printflow-outline-variant whitespace-normal;
+    @apply px-2.5 py-2 text-left font-semibold text-printflow-on-surface-variant bg-printflow-surface-container border-b border-printflow-outline-variant whitespace-normal;
   }
 
   .data-table td {
-    @apply px-3 py-2.5 border-b border-printflow-outline-variant/40 align-middle;
+    @apply px-2.5 py-2 border-b border-printflow-outline-variant/40 align-middle;
     overflow-wrap: anywhere;
   }
 
@@ -353,9 +353,9 @@
 
   .modal-overlay {
     @apply fixed inset-0 z-50 flex items-center justify-center p-4;
-    background: rgba(27, 28, 25, 0.08);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+    background: rgba(27, 28, 25, 0.28);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .modal-content {

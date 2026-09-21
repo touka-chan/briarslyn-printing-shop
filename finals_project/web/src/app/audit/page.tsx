@@ -5,7 +5,6 @@ import { Download, ScrollText, ShieldAlert } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import {
   ContentCard,
-  FilterToolbar,
   DataTable,
   Button,
   EmptyState,
@@ -258,14 +257,38 @@ export default function AuditPage() {
         className="mb-6"
       >
         <div className="space-y-5">
-          <FilterToolbar
-            tabs={moduleTabs}
-            activeTab={activeModule}
-            onTabChange={setActiveModule}
-            searchPlaceholder="Search record or ID"
-            onSearchChange={setSearch}
-            searchValue={search}
-          />
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[200px] flex-1">
+              <label className="block text-xs text-printflow-on-surface-variant mb-1">
+                Search record or ID
+              </label>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search record or ID"
+                className={`${inputCls} w-full`}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-printflow-on-surface-variant mb-1">
+                Module
+              </label>
+              <select
+                value={activeModule}
+                onChange={(e) => setActiveModule(e.target.value)}
+                className={selectCls}
+              >
+                {moduleTabs.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.id === "All"
+                      ? `All modules (${t.count})`
+                      : `${t.label} (${t.count})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs text-printflow-on-surface-variant mb-1">
