@@ -8,12 +8,12 @@ import {
  CheckCircle,
  Clock,
  AlertTriangle,
+ Check,
 } from "lucide-react";
 import Link from "next/link";
 import { AdminLayout } from "@/components/layout";
 import {
  ContentCard,
- FilterToolbar,
  ChartCard,
  Button,
   KpiCard,
@@ -44,20 +44,31 @@ const todayKey = () => {
 export default function AnalyticsPage() {
  const [active, setActive] = useState("7d");
  const [kpiModal, setKpiModal] = useState<string | null>(null);
- const [orders, setOrders] = useState<Order[]>([]);
- const [inventory, setInventory] = useState<InventoryItem[]>([]);
- const [customFrom, setCustomFrom] = useState(() => {
-  const d = new Date();
-  d.setDate(d.getDate() - 13);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
- });
- const [customTo, setCustomTo] = useState(todayKey);
- const [customOn, setCustomOn] = useState(false);
- const toast = useToast();
- const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [ready, setReady] = useState(false);
+  const [customFrom, setCustomFrom] = useState(() => {
+   const d = new Date();
+   d.setDate(d.getDate() - 13);
+   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [customTo, setCustomTo] = useState(todayKey);
+  const [customOn, setCustomOn] = useState(false);
+  const toast = useToast();
+  const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-    const unsubOrders = subscribeOrders(setOrders, onFeedError);
+    const unsubOrders = subscribeOrders(
+      (rows) => {
+        setOrders(rows);
+        setReady(true);
+      },
+      (e) => {
+        onFeedError(e);
+        // Never leave the page on a skeleton: render the error state.
+        setReady(true);
+      },
+    );
     const unsubInv = subscribeInventory(setInventory, onFeedError);
     return () => {
      unsubOrders();
@@ -374,6 +385,7 @@ export default function AnalyticsPage() {
           sparklineTone="primary"
           lastUpdated="7d"
           onClick={() => setKpiModal("orders")}
+          loading={!ready}
         />
         <KpiCard
           label="Completed"
@@ -386,6 +398,7 @@ export default function AnalyticsPage() {
           sparklineTone="success"
           lastUpdated="7d"
           onClick={() => setKpiModal("completed")}
+          loading={!ready}
         />
         <KpiCard
           label="In Flight"
@@ -405,6 +418,7 @@ export default function AnalyticsPage() {
           sparklineTone="warning"
           lastUpdated="7d"
           onClick={() => setKpiModal("inflight")}
+          loading={!ready}
         />
         <KpiCard
           label="Need Reorder"
@@ -417,6 +431,7 @@ export default function AnalyticsPage() {
           sparklineTone="error"
           lastUpdated="7d"
           onClick={() => setKpiModal("lowstock")}
+          loading={!ready}
         />
       </div>
 
@@ -434,43 +449,62 @@ export default function AnalyticsPage() {
       </Modal>
 
        <ContentCard className="mb-6">
-         <FilterToolbar
-           tabs={ranges}
-           activeTab={active}
-           onTabChange={setActive}
-           customActions={
-             <div className="flex flex-wrap items-center gap-2">
-               <input
-                 type="date"
-                 value={customFrom}
-                 max={customTo}
-                 onChange={(e) => setCustomFrom(e.target.value)}
-                 aria-label="Custom range start"
-                 className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
-               />
-               <span className="text-sm text-printflow-on-surface-variant">-</span>
-               <input
-                 type="date"
-                 value={customTo}
-                 min={customFrom}
-                 onChange={(e) => setCustomTo(e.target.value)}
-                 aria-label="Custom range end"
-                 className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
-               />
-               <Button variant="secondary" onClick={applyCustom}>
-                 Apply
-               </Button>
-               <Button
-                 variant="secondary"
-                 onClick={handleExport}
-                 disabled={rangedOrders.length === 0}
-               >
-                 <Download className="w-4 h-4" />
-                 Export
-               </Button>
-             </div>
-           }
-         />
+         <div className="flex flex-wrap items-end gap-3">
+           <div>
+             <label className="block text-xs text-printflow-on-surface-variant mb-1">
+               Period
+             </label>
+             <select
+               value={active}
+               onChange={(e) => setActive(e.target.value)}
+               className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+             >
+               {ranges.map((r) => (
+                 <option key={r.id} value={r.id}>
+                   {r.label}
+                 </option>
+               ))}
+             </select>
+           </div>
+           <div>
+             <label className="block text-xs text-printflow-on-surface-variant mb-1">
+               From
+             </label>
+             <input
+               type="date"
+               value={customFrom}
+               max={customTo}
+               onChange={(e) => setCustomFrom(e.target.value)}
+               aria-label="Custom range start"
+               className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+             />
+           </div>
+           <div>
+             <label className="block text-xs text-printflow-on-surface-variant mb-1">
+               To
+             </label>
+             <input
+               type="date"
+               value={customTo}
+               min={customFrom}
+               onChange={(e) => setCustomTo(e.target.value)}
+               aria-label="Custom range end"
+               className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+             />
+           </div>
+           <Button variant="primary" onClick={applyCustom}>
+             <Check className="w-4 h-4" />
+             Apply
+           </Button>
+           <Button
+             variant="secondary"
+             onClick={handleExport}
+             disabled={rangedOrders.length === 0}
+           >
+             <Download className="w-4 h-4" />
+             Export
+           </Button>
+         </div>
        </ContentCard>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -487,6 +521,7 @@ export default function AnalyticsPage() {
           yKeys={["orders", "completed", "pending"]}
           colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)", "var(--color-printflow-outline)"]}
           height={320}
+          loading={!ready}
         />
         <ChartCard
           title="On-time vs Overdue Completion Rates"
@@ -497,6 +532,7 @@ export default function AnalyticsPage() {
           yKeys={["value"]}
           colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)"]}
           height={320}
+          loading={!ready}
         />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -509,6 +545,7 @@ export default function AnalyticsPage() {
           colors={["var(--color-printflow-on-surface)"]}
           height={320}
           showLegend={false}
+          loading={!ready}
         />
         <ContentCard
           title="Restock Forecast"

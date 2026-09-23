@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, AlertTriangle, TrendingUp, Package } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
-import { ContentCard, FilterToolbar, DataTable, ChartCard, Button, KpiCard, Modal, StatusBadge, FeedErrorBanner, useToast } from "@/components/ui";
+import { ContentCard, DataTable, ChartCard, Button, KpiCard, Modal, StatusBadge, FeedErrorBanner, useToast } from "@/components/ui";
 import { csvRow, downloadCsv } from "@/lib/csv";
 import { subscribeInventory } from "@/lib/services/inventory";
 import { subscribeRfidEvents } from "@/lib/services/rfid";
@@ -26,10 +26,21 @@ export default function ForecastingPage() {
    const [inventory, setInventory] = useState<InventoryItem[]>([]);
    const [events, setEvents] = useState<RfidCheckoutEvent[]>([]);
    const [usage, setUsage] = useState<UsageEvent[]>([]);
+   const [ready, setReady] = useState(false);
    const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-   const unsub = subscribeInventory(setInventory, onFeedError);
+   const unsub = subscribeInventory(
+     (rows) => {
+       setInventory(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    return () => unsub();
   }, [feedNonce, onFeedError]);
 
@@ -246,6 +257,7 @@ export default function ForecastingPage() {
       sparklineTone="error"
       lastUpdated="7d"
       onClick={() => setKpiModal("reorder")}
+      loading={!ready}
      />
      <KpiCard
       label="Insufficient Stock"
@@ -258,6 +270,7 @@ export default function ForecastingPage() {
       sparklineTone="error"
       lastUpdated="7d"
       onClick={() => setKpiModal("insufficient")}
+      loading={!ready}
      />
      <KpiCard
       label="Forecast Model"
@@ -270,6 +283,7 @@ export default function ForecastingPage() {
       sparklineTone="primary"
       lastUpdated="7d"
       onClick={() => setKpiModal("model")}
+      loading={!ready}
      />
      <KpiCard
       label="Forecast"
@@ -282,6 +296,7 @@ export default function ForecastingPage() {
       sparklineTone="primary"
       lastUpdated="7d"
       onClick={() => setKpiModal("forecast")}
+      loading={!ready}
      />
     </div>
 
@@ -305,7 +320,7 @@ export default function ForecastingPage() {
     </Modal>
 
    <div className="mb-6">
-    <ChartCard title="Forecast vs Reorder Point" type="bar" data={liveInventory.map(i=>({name:i.material_variant_id, stock:i.current_stock, rop:i.reorder_point, forecast:i.forecasted_demand_next_7_days}))} xKey="name" yKeys={["stock","rop","forecast"]} colors={["var(--color-printflow-on-surface)","var(--color-printflow-on-surface-variant)","var(--color-printflow-outline)"]} height={340} />
+    <ChartCard title="Forecast vs Reorder Point" type="bar" data={liveInventory.map(i=>({name:i.material_variant_id, stock:i.current_stock, rop:i.reorder_point, forecast:i.forecasted_demand_next_7_days}))} xKey="name" yKeys={["stock","rop","forecast"]} colors={["var(--color-printflow-on-surface)","var(--color-printflow-on-surface-variant)","var(--color-printflow-outline)"]} height={340} loading={!ready} />
     <div className="mt-3">
      <button onClick={()=>setShowSource(!showSource)} className="text-xs px-3 py-1.5 rounded-full border border-printflow-outline-variant bg-printflow-surface hover:bg-printflow-surface-container">
       {showSource ? "Hide Details" : "Show Details"}
@@ -365,8 +380,37 @@ export default function ForecastingPage() {
    </div>
 
    <ContentCard title="Demand Forecast" subtitle={`${searched.length} materials`}>
-    <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search material" onSearchChange={setSearch} searchValue={search} />
-     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" pageSize={25} />
+    <div className="flex flex-wrap items-end gap-3 mb-4">
+     <div className="min-w-[200px] flex-1">
+      <label className="block text-xs text-printflow-on-surface-variant mb-1">
+       Search
+      </label>
+      <input
+       type="text"
+       value={search}
+       onChange={(e) => setSearch(e.target.value)}
+       placeholder="Search material"
+       className="w-full px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+      />
+     </div>
+     <div>
+      <label className="block text-xs text-printflow-on-surface-variant mb-1">
+       Category
+      </label>
+      <select
+       value={active}
+       onChange={(e) => setActive(e.target.value)}
+       className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+      >
+       {tabs.map((t) => (
+        <option key={t.id} value={t.id}>
+         {t.id === "All" ? `All (${t.count})` : `${t.label} (${t.count})`}
+        </option>
+       ))}
+      </select>
+     </div>
+    </div>
+     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} emptyMessage="No forecast" pageSize={25} loading={!ready} />
    </ContentCard>
   </AdminLayout>
  );

@@ -41,6 +41,8 @@ interface ChartCardProps {
   className?: string;
   emptyMessage?: string;
   emptyDescription?: string;
+  /** First-load shimmer: renders a skeleton block instead of the chart. */
+  loading?: boolean;
 }
 
 /**
@@ -74,6 +76,7 @@ export function ChartCard({
   className = "",
   emptyMessage = "No data yet",
   emptyDescription = "Data will appear here once there is activity.",
+  loading = false,
 }: ChartCardProps) {
   // Degenerate renders (empty array, or every value zero) produce
   // misleading artifacts in some chart types - show an intentional
@@ -175,7 +178,11 @@ export function ChartCard({
       {subtitle && <p className="text-sm text-printflow-on-surface-variant mt-0.5">{subtitle}</p>}
      </div>
     )}
-    {!hasData ? (
+    {loading ? (
+     <div style={{ height }} className="w-full" aria-busy="true">
+      <div className="loading-skeleton h-full w-full rounded-xl" />
+     </div>
+    ) : !hasData ? (
      <div style={{ height }} className="w-full flex items-center justify-center">
       <EmptyState
        icon={<Inbox className="w-7 h-7" />}

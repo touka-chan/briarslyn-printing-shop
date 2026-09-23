@@ -18,7 +18,6 @@ import {
 import { AdminLayout } from "@/components/layout";
 import {
  ContentCard,
- FilterToolbar,
  Button,
  ChartCard,
  KpiCard,
@@ -148,11 +147,22 @@ export default function SalesPage() {
  const [selSale, setSelSale] = useState<Sale | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [ready, setReady] = useState(false);
   const toast = useToast();
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubOrders = subscribeOrders(
+     (rows) => {
+       setOrders(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    const unsubUsers = subscribeUsers(setUsers, onFeedError);
    return () => {
     unsubOrders();
@@ -588,6 +598,19 @@ export default function SalesPage() {
      subtitle="Revenue and transaction overview from cashier activity"
      onSearch={setSearch}
     >
+    {/* Print-only report header (hidden on screen; see globals.css). */}
+    <div className="print-only mb-6">
+     <p className="font-display text-lg font-bold text-printflow-on-surface">
+      Brialyns Art Sign
+     </p>
+     <p className="text-sm text-printflow-on-surface-variant">
+      Sales Report -{" "}
+      {activeRange === "custom"
+       ? `${customFrom} to ${customTo}`
+       : rangeTabs.find((t) => t.id === activeRange)?.label ?? "This Month"}{" "}
+      - generated {new Date().toLocaleString("en-PH")}
+     </p>
+    </div>
     {feedError && (
      <FeedErrorBanner
       message={feedError}
@@ -605,6 +628,7 @@ export default function SalesPage() {
       sparklineTone="primary"
       lastUpdated="Live"
       onClick={() => setKpiModal("revenue")}
+      loading={!ready}
      />
      <KpiCard
       label="Transactions"
@@ -616,6 +640,7 @@ export default function SalesPage() {
       sparklineTone="success"
       lastUpdated="Live"
       onClick={() => setKpiModal("txns")}
+      loading={!ready}
      />
      <KpiCard
       label="Avg Transaction"
@@ -627,6 +652,7 @@ export default function SalesPage() {
       sparklineTone="primary"
       lastUpdated="Live"
       onClick={() => setKpiModal("avg")}
+      loading={!ready}
      />
      <KpiCard
       label="Top Cashier"
@@ -638,68 +664,82 @@ export default function SalesPage() {
       sparklineTone="warning"
       lastUpdated="Live"
       onClick={() => setKpiModal("topCashier")}
+      loading={!ready}
      />
     </div>
 
-    <ContentCard title="Filters">
-     <FilterToolbar
-      tabs={rangeTabs}
-      activeTab={activeRange}
-      onTabChange={setActiveRange}
-      searchPlaceholder="Search order, customer, or cashier"
-      onSearchChange={setSearch}
-      searchValue={search}
-      customActions={
-       <Button variant="secondary" onClick={handleReset}>
-        <X className="w-4 h-4" />
-        Reset
-       </Button>
-      }
-     />
-     <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">
-        CUSTOM RANGE
-       </p>
-       <div className="flex flex-wrap items-end gap-3">
-        <div>
-         <label className="block text-xs text-printflow-on-surface-variant mb-1">
-          From
-         </label>
-         <input
-          type="date"
-          value={customFrom}
-          onChange={(e) => setCustomFrom(e.target.value)}
-          className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant focus:outline-none focus:ring-2 focus:ring-printflow-primary"
-         />
-        </div>
-        <div>
-         <label className="block text-xs text-printflow-on-surface-variant mb-1">
-          To
-         </label>
-         <input
-          type="date"
-          value={customTo}
-          onChange={(e) => setCustomTo(e.target.value)}
-          className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant focus:outline-none focus:ring-2 focus:ring-printflow-primary"
-         />
-        </div>
-        <Button variant="primary" onClick={handleCustomRangeApply}>
-         <Check className="w-4 h-4" />
-         Apply
-        </Button>
-       </div>
+    <ContentCard title="Filters" className="print:hidden">
+     <div className="flex flex-wrap items-end gap-3">
+      <div className="min-w-[200px] flex-1">
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        Search
+       </label>
+       <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search order, customer, or cashier"
+        className="w-full px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+       />
       </div>
       <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">
-        CASHIER
-       </p>
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        Period
+       </label>
+       <select
+        value={activeRange}
+        onChange={(e) => setActiveRange(e.target.value)}
+        className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+       >
+        {rangeTabs.map((t) => (
+         <option key={t.id} value={t.id}>
+          {`${t.label} (${t.count})`}
+         </option>
+        ))}
+       </select>
+      </div>
+      <Button variant="secondary" onClick={handleReset}>
+       <X className="w-4 h-4" />
+       Reset
+      </Button>
+     </div>
+     <div className="mt-4 flex flex-wrap items-end gap-3">
+      <div>
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        From
+       </label>
+       <input
+        type="date"
+        value={customFrom}
+        onChange={(e) => setCustomFrom(e.target.value)}
+        className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+       />
+      </div>
+      <div>
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        To
+       </label>
+       <input
+        type="date"
+        value={customTo}
+        onChange={(e) => setCustomTo(e.target.value)}
+        className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+       />
+      </div>
+      <Button variant="primary" onClick={handleCustomRangeApply}>
+       <Check className="w-4 h-4" />
+       Apply
+      </Button>
+      <div className="min-w-[180px]">
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        Cashier
+       </label>
        <div className="relative">
         <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
         <select
          value={cashierId}
          onChange={(e) => setCashierId(e.target.value)}
-         className="w-full pl-10 pr-4 py-2.5 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary appearance-none"
+         className="w-full pl-10 pr-4 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary appearance-none"
         >
          <option value="all">All cashiers</option>
          {cashiers.length === 0 ? (
@@ -716,16 +756,16 @@ export default function SalesPage() {
         </select>
        </div>
       </div>
-      <div>
-       <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">
-        PAYMENT METHOD
-       </p>
+      <div className="min-w-[180px]">
+       <label className="block text-xs text-printflow-on-surface-variant mb-1">
+        Payment method
+       </label>
        <div className="relative">
         <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-printflow-on-surface-variant pointer-events-none" />
         <select
          value={method}
          onChange={(e) => setMethod(e.target.value as "all" | PaymentMethod)}
-         className="w-full pl-10 pr-4 py-2.5 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary appearance-none"
+         className="w-full pl-10 pr-4 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary appearance-none"
         >
          <option value="all">All methods</option>
          <option value="Cash">Cash</option>
@@ -759,6 +799,7 @@ export default function SalesPage() {
         colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
+        loading={!ready}
        />
       </div>
      </ContentCard>
@@ -780,6 +821,7 @@ export default function SalesPage() {
          paymentMethodColor["Bank Transfer"],
         ]}
         height={260}
+        loading={!ready}
        />
       </div>
      </ContentCard>
@@ -790,26 +832,27 @@ export default function SalesPage() {
       subtitle={`${filtered.length} paid sales`}
      className="min-w-0 overflow-hidden w-full"
     >
-     <FilterToolbar
-      tabs={[]}
-      activeTab=""
-      onTabChange={() => {}}
-      searchPlaceholder="Search transactions"
-      onSearchChange={setSearch}
-      searchValue={search}
-      customActions={
-       <div className="flex items-center gap-2">
-        <Button variant="secondary" onClick={handleDownloadPDF}>
-         <FileText className="w-4 h-4" />
-         Download PDF
-        </Button>
-        <Button variant="primary" onClick={handleExportCSV} disabled={filtered.length === 0}>
-         <Download className="w-4 h-4" />
-         Export CSV
-        </Button>
-       </div>
-      }
-     />
+     <div className="flex flex-wrap items-center gap-3 mb-4 print:hidden">
+      <div className="min-w-[220px] flex-1">
+       <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search transactions"
+        className="w-full px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+       />
+      </div>
+      <div className="flex items-center gap-2">
+       <Button variant="secondary" onClick={handleDownloadPDF}>
+        <FileText className="w-4 h-4" />
+        Download PDF
+       </Button>
+       <Button variant="primary" onClick={handleExportCSV} disabled={filtered.length === 0}>
+        <Download className="w-4 h-4" />
+        Export CSV
+       </Button>
+      </div>
+     </div>
      <div className="mt-5 overflow-x-auto -mx-6 px-6">
       {filtered.length === 0 ? (
        <EmptyState
@@ -825,6 +868,7 @@ export default function SalesPage() {
         emptyMessage="No sales in this range"
         onRowClick={(s) => setSelSale(s)}
         pageSize={25}
+        loading={!ready}
        />
       )}
       </div>
@@ -854,6 +898,7 @@ export default function SalesPage() {
          emptyMessage="No outstanding payments"
          onRowClick={(s) => setSelSale(s)}
          pageSize={25}
+         loading={!ready}
         />
        )}
       </div>

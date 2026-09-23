@@ -82,6 +82,7 @@ export default function ReportsPage() {
   const [customOn, setCustomOn] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [ready, setReady] = useState(false);
   const toast = useToast();
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
@@ -100,7 +101,17 @@ export default function ReportsPage() {
     : `${rangeStart(activeRange)} to ${todayIso()}`;
 
   useEffect(() => {
-   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubOrders = subscribeOrders(
+     (rows) => {
+       setOrders(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    const unsubInv = subscribeInventory(setInventory, onFeedError);
    return () => {
     unsubOrders();
@@ -394,6 +405,16 @@ export default function ReportsPage() {
     title="Reports"
     subtitle="Generate and download operational reports"
    >
+    {/* Print-only report header (hidden on screen; see globals.css). */}
+    <div className="print-only mb-6">
+     <p className="font-display text-lg font-bold text-printflow-on-surface">
+      Brialyns Art Sign
+     </p>
+     <p className="text-sm text-printflow-on-surface-variant">
+      Operational Reports - {rangeLabel()} - generated{" "}
+      {new Date().toLocaleString("en-PH")}
+     </p>
+    </div>
     {feedError && (
      <FeedErrorBanner
       message={feedError}
@@ -402,7 +423,7 @@ export default function ReportsPage() {
      />
     )}
     <div className="space-y-8">
-    <ContentCard title="Generate Report">
+    <ContentCard title="Generate Report" className="print:hidden">
      <FilterToolbar
       tabs={timeRanges}
       activeTab={activeRange}
@@ -442,11 +463,11 @@ export default function ReportsPage() {
         </Button>
        </div>
       </div>
-      <div>
+      <div className="flex flex-col">
        <p className="text-[11px] font-semibold tracking-widest text-printflow-on-surface-variant mb-3">
         QUICK DOWNLOAD
        </p>
-       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-auto">
         <Button
          variant="primary"
          onClick={() => handleDownloadPDF("Orders Report")}
@@ -480,7 +501,7 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       {orders.length === 0 ? (
+       {orders.length === 0 && ready ? (
         <EmptyChart />
        ) : (
         <ChartCard
@@ -492,12 +513,13 @@ export default function ReportsPage() {
          colors={["var(--color-printflow-on-surface)"]}
          height={260}
          showLegend={false}
+         loading={!ready}
         />
        )}
       </div>
       <Button
        variant="secondary"
-       className="mt-6 w-full"
+       className="mt-6 w-full print:hidden"
        onClick={() => handleDownloadCSV(orders, "Orders PDF")}
       >
        <Download className="w-4 h-4" />
@@ -510,7 +532,7 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       {inventory.length === 0 ? (
+       {inventory.length === 0 && ready ? (
         <EmptyChart />
        ) : (
         <ChartCard
@@ -520,12 +542,13 @@ export default function ReportsPage() {
          xKey="name"
          yKeys={["value"]}
          height={260}
+         loading={!ready}
         />
        )}
       </div>
       <Button
        variant="secondary"
-       className="mt-6 w-full"
+       className="mt-6 w-full print:hidden"
        onClick={() => handleDownloadCSV(inventory, "Inventory CSV")}
       >
        <Download className="w-4 h-4" />
@@ -538,7 +561,7 @@ export default function ReportsPage() {
       className="min-w-0 overflow-hidden"
      >
       <div className="pt-3">
-       {orders.length === 0 ? (
+       {orders.length === 0 && ready ? (
         <EmptyChart />
        ) : (
         <ChartCard
@@ -549,12 +572,13 @@ export default function ReportsPage() {
          yKeys={["value"]}
          colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)", "var(--color-printflow-outline)"]}
          height={260}
+         loading={!ready}
         />
        )}
       </div>
       <Button
        variant="secondary"
-       className="mt-6 w-full"
+       className="mt-6 w-full print:hidden"
        onClick={() => handleDownloadPDF("Production PDF")}
       >
        <Download className="w-4 h-4" />
@@ -573,6 +597,7 @@ export default function ReportsPage() {
         sparklineTone="primary"
         lastUpdated="Live"
         onClick={() => setKpiModal("total")}
+        loading={!ready}
        />
        <KpiCard
         label="Pending"
@@ -582,6 +607,7 @@ export default function ReportsPage() {
         sparklineTone="warning"
         lastUpdated="Live"
         onClick={() => setKpiModal("pending")}
+        loading={!ready}
        />
        <KpiCard
         label="Completed"
@@ -591,6 +617,7 @@ export default function ReportsPage() {
         sparklineTone="success"
         lastUpdated="Live"
         onClick={() => setKpiModal("completed")}
+        loading={!ready}
        />
        <KpiCard
         label="Need Reorder"
@@ -602,11 +629,12 @@ export default function ReportsPage() {
         sparklineTone="error"
         lastUpdated="Live"
         onClick={() => setKpiModal("lowStock")}
+        loading={!ready}
        />
       </div>
     </ContentCard>
 
-    <ContentCard title="Recent Generated Reports">
+    <ContentCard title="Recent Generated Reports" className="print:hidden">
      <div className="space-y-3 text-sm">
       {(
        [

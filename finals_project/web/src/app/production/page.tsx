@@ -307,17 +307,18 @@ export default function ProductionPage() {
       description="Orders will appear here once they enter Pending or In Production."
      />
     ) : (
-      <DataTable
-       columns={cols}
-       data={searched}
-       keyExtractor={(r) => r.order_id}
-       onRowClick={(r) => {
-        setSel(r);
-        setOpen(true);
-       }}
-       emptyMessage="No production queue"
-       pageSize={25}
-      />
+       <DataTable
+        columns={cols}
+        data={searched}
+        keyExtractor={(r) => r.order_id}
+        onRowClick={(r) => {
+         setSel(r);
+         setOpen(true);
+        }}
+        emptyMessage="No production queue"
+        pageSize={25}
+        loading={!ready}
+       />
     )}
    </ContentCard>
 

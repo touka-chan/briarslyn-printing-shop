@@ -27,7 +27,7 @@ export function FeedErrorBanner({
   return (
     <div
       role="alert"
-      className={`mb-6 px-4 py-3 rounded-xl bg-printflow-error/10 border border-printflow-error/30 text-printflow-error text-sm flex flex-wrap items-center gap-3 ${className}`}
+      className={`mb-6 px-4 py-3 rounded-xl bg-printflow-error/10 border border-printflow-error/30 text-printflow-error text-sm flex flex-wrap items-center gap-3 print:hidden ${className}`}
     >
       <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />
       <span className="flex-1 min-w-52">

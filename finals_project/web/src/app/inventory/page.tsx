@@ -21,10 +21,21 @@ export default function InventoryPage() {
  const [open, setOpen] = useState(false);
  const [kpiModal, setKpiModal] = useState<string | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [ready, setReady] = useState(false);
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-   const unsub = subscribeInventory(setInventory, onFeedError);
+   const unsub = subscribeInventory(
+     (rows) => {
+       setInventory(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    return () => unsub();
   }, [feedNonce, onFeedError]);
 
@@ -183,6 +194,7 @@ export default function InventoryPage() {
      sparklineTone="primary"
      lastUpdated="7d"
      onClick={() => setKpiModal("total")}
+     loading={!ready}
     />
     <KpiCard
      label="Low Stock"
@@ -195,6 +207,7 @@ export default function InventoryPage() {
      sparklineTone="warning"
      lastUpdated="7d"
      onClick={() => setKpiModal("low")}
+     loading={!ready}
     />
     <KpiCard
      label="Insufficient"
@@ -207,6 +220,7 @@ export default function InventoryPage() {
      sparklineTone="error"
      lastUpdated="7d"
      onClick={() => setKpiModal("insufficient")}
+     loading={!ready}
     />
     <KpiCard
      label="Need Reorder"
@@ -219,6 +233,7 @@ export default function InventoryPage() {
      sparklineTone={stale.length ? "error" : "primary"}
      lastUpdated="7d"
      onClick={() => setKpiModal("reorder")}
+     loading={!ready}
     />
    </div>
 
@@ -237,7 +252,7 @@ export default function InventoryPage() {
 
     <ContentCard title="Materials" subtitle={`${searched.length} materials`} className="mb-6">
     <FilterToolbar tabs={tabs} activeTab={active} onTabChange={setActive} searchPlaceholder="Search material" onSearchChange={setSearch} searchValue={search} customActions={<Button variant="secondary" onClick={handleExport} disabled={searched.length === 0}><Download className="w-4 h-4" />Export</Button>} />
-     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} onRowClick={r=>{setSel(r); setOpen(true);}} emptyMessage="No materials" pageSize={25} />
+     <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} onRowClick={r=>{setSel(r); setOpen(true);}} emptyMessage="No materials" pageSize={25} loading={!ready} />
    </ContentCard>
 
    <ContentCard title="Reorder Alerts" subtitle={alerts.length>0 ? `${alerts.length} items need attention - stock <= ROP` : undefined}>

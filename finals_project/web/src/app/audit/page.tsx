@@ -59,6 +59,7 @@ export default function AuditPage() {
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   const [rows, setRows] = useState<AuditLogEntry[]>([]);
+  const [ready, setReady] = useState(false);
   const [activeModule, setActiveModule] = useState("All");
   const [actionFilter, setActionFilter] = useState("All");
   const [fromDate, setFromDate] = useState(monthAgoIso);
@@ -68,7 +69,18 @@ export default function AuditPage() {
 
   useEffect(() => {
     if (!isOwner) return;
-    const unsub = subscribeAuditLogs(setRows, 500, onFeedError);
+    const unsub = subscribeAuditLogs(
+      (entries) => {
+        setRows(entries);
+        setReady(true);
+      },
+      500,
+      (e) => {
+        onFeedError(e);
+        // Never leave the page on a skeleton: render the error state.
+        setReady(true);
+      },
+    );
     return () => unsub();
   }, [isOwner, feedNonce, onFeedError]);
 
@@ -163,7 +175,7 @@ export default function AuditPage() {
       key: "actor",
       header: "User",
       render: (r: AuditLogEntry) => (
-        <div className="flex flex-col min-w-0">
+        <div className="flex flex-col min-w-0 max-w-[150px]">
           <span className="text-sm font-medium truncate">
             {r.actor_name || r.actor_email}
           </span>
@@ -186,14 +198,22 @@ export default function AuditPage() {
       key: "record",
       header: "Record",
       render: (r: AuditLogEntry) => (
-        <span className="text-xs font-mono break-all">{r.record_label}</span>
+        <span
+          className="inline-block max-w-[170px] align-middle text-xs font-mono truncate"
+          title={r.record_label}
+        >
+          {r.record_label}
+        </span>
       ),
     },
     {
       key: "change",
       header: "Old - New",
       render: (r: AuditLogEntry) => (
-        <span className="text-xs break-all">
+        <span
+          className="inline-block max-w-[140px] align-middle text-xs truncate"
+          title={`${formatAuditValue(r.old_value)} - ${formatAuditValue(r.new_value)}`}
+        >
           {formatAuditValue(r.old_value)}
           <span className="text-printflow-on-surface-variant"> - </span>
           {formatAuditValue(r.new_value)}
@@ -205,7 +225,9 @@ export default function AuditPage() {
       key: "ip",
       header: "IP",
       render: (r: AuditLogEntry) => (
-        <span className="text-xs font-mono">{r.ip ?? "-"}</span>
+        <span className="text-xs font-mono whitespace-nowrap">
+          {r.ip ?? "-"}
+        </span>
       ),
     },
   ];
@@ -355,6 +377,7 @@ export default function AuditPage() {
               keyExtractor={(r) => r.id ?? `${r.created_at}-${r.record_id}-${r.action}`}
               emptyMessage="No audit entries match these filters"
               pageSize={25}
+              loading={!ready}
             />
           </div>
         </div>

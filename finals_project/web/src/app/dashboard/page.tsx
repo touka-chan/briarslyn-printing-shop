@@ -41,10 +41,21 @@ export default function DashboardPage() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [ready, setReady] = useState(false);
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-   const unsubOrders = subscribeOrders(setOrders, onFeedError);
+   const unsubOrders = subscribeOrders(
+     (rows) => {
+       setOrders(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    const unsubInv = subscribeInventory(setInventory, onFeedError);
    return () => {
     unsubOrders();
@@ -379,6 +390,7 @@ export default function DashboardPage() {
      sparklineTone="primary"
      lastUpdated="7d"
      onClick={() => setKpiModal("total")}
+     loading={!ready}
     />
     <KpiCard
      label="Pending"
@@ -391,6 +403,7 @@ export default function DashboardPage() {
      sparklineTone="warning"
      lastUpdated="7d"
      onClick={() => setKpiModal("pending")}
+     loading={!ready}
     />
     <KpiCard
      label="Completed"
@@ -403,6 +416,7 @@ export default function DashboardPage() {
      sparklineTone="success"
      lastUpdated="7d"
      onClick={() => setKpiModal("completed")}
+     loading={!ready}
     />
     <KpiCard
      label="Low Stock Items"
@@ -415,6 +429,7 @@ export default function DashboardPage() {
      sparklineTone="error"
      lastUpdated="7d"
      onClick={() => setKpiModal("lowStock")}
+     loading={!ready}
     />
    </div>
 
@@ -437,6 +452,7 @@ export default function DashboardPage() {
      sparklineTone="success"
      lastUpdated="7d"
      onClick={() => setKpiModal("onTime")}
+     loading={!ready}
     />
     <KpiCard
      label="In Production"
@@ -449,6 +465,7 @@ export default function DashboardPage() {
      sparklineTone="warning"
      lastUpdated="7d"
      onClick={() => setKpiModal("productionPending")}
+     loading={!ready}
     />
     <KpiCard
      label="Low Stock"
@@ -461,6 +478,7 @@ export default function DashboardPage() {
      sparklineTone="error"
      lastUpdated="7d"
      onClick={() => setKpiModal("lowStock")}
+     loading={!ready}
     />
     <KpiCard
      label="Delayed Sync"
@@ -473,6 +491,7 @@ export default function DashboardPage() {
      sparklineTone="warning"
      lastUpdated="7d"
      onClick={() => setKpiModal("delayed")}
+     loading={!ready}
     />
    </div>
 
@@ -736,6 +755,7 @@ export default function DashboardPage() {
         yKeys={["orders", "completed", "pending"]}
         colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)", "var(--color-printflow-outline)"]}
         height={280}
+        loading={!ready}
        />
        <ChartCard
         title="On-time vs Overdue"
@@ -745,6 +765,7 @@ export default function DashboardPage() {
         yKeys={["value"]}
         colors={["var(--color-printflow-on-surface)", "var(--color-printflow-on-surface-variant)"]}
         height={280}
+        loading={!ready}
        />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -757,6 +778,7 @@ export default function DashboardPage() {
         colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
+        loading={!ready}
        />
        <ChartCard
         title="Production by Priority"
@@ -767,6 +789,7 @@ export default function DashboardPage() {
         colors={["var(--color-printflow-on-surface)"]}
         height={260}
         showLegend={false}
+        loading={!ready}
        />
       </div>
      </>
@@ -789,13 +812,14 @@ export default function DashboardPage() {
        searchValue={searchValue}
       />
       <div className="overflow-x-auto -mx-6 px-6">
-       <DataTable
-        columns={orderColumns}
-        data={filteredByPriority}
-        keyExtractor={(r) => r.order_id}
-        emptyMessage="No orders"
-        pageSize={25}
-       />
+        <DataTable
+         columns={orderColumns}
+         data={filteredByPriority}
+         keyExtractor={(r) => r.order_id}
+         emptyMessage="No orders"
+         pageSize={25}
+         loading={!ready}
+        />
       </div>
      </div>
     </ContentCard>
@@ -815,13 +839,14 @@ export default function DashboardPage() {
         searchValue={searchValue}
        />
       <div className="overflow-x-auto -mx-6 px-6">
-       <DataTable
-        columns={inventoryColumns}
-        data={filteredInventory}
-        keyExtractor={(r) => r.material_variant_id}
-        emptyMessage="No materials"
-        pageSize={25}
-       />
+        <DataTable
+         columns={inventoryColumns}
+         data={filteredInventory}
+         keyExtractor={(r) => r.material_variant_id}
+         emptyMessage="No materials"
+         pageSize={25}
+         loading={!ready}
+        />
       </div>
      </div>
     </ContentCard>
@@ -831,13 +856,14 @@ export default function DashboardPage() {
      className="min-w-0 overflow-hidden w-full"
     >
      <div className="overflow-x-auto -mx-6 px-6 py-3">
-       <DataTable
-        columns={productionColumns}
-        data={productionQueue}
-        keyExtractor={(r) => r.order_id}
-        emptyMessage="No jobs"
-        pageSize={25}
-       />
+        <DataTable
+         columns={productionColumns}
+         data={productionQueue}
+         keyExtractor={(r) => r.order_id}
+         emptyMessage="No jobs"
+         pageSize={25}
+         loading={!ready}
+        />
      </div>
     </ContentCard>
    </div>

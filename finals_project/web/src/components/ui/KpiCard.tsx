@@ -14,6 +14,8 @@ interface KpiCardProps extends Omit<KpiData, "icon"> {
  sparklineTone?: "primary" | "success" | "warning" | "error";
  /** Tiny "last updated" footnote (e.g. "Live" or "Aug 28"). */
  lastUpdated?: string;
+ /** First-load shimmer: renders skeleton bars instead of live values. */
+ loading?: boolean;
 }
 
 const TONE_STROKE: Record<NonNullable<KpiCardProps["sparklineTone"]>, string> = {
@@ -107,9 +109,24 @@ export function KpiCard({
  sparkline,
  sparklineTone = "primary",
  lastUpdated,
+ loading = false,
  className = "",
  onClick,
 }: KpiCardProps) {
+ if (loading) {
+  return (
+   <div className={`kpi-card ${className}`} aria-busy="true">
+    <div className="flex items-start justify-between gap-3">
+     <div className="flex-1 min-w-0">
+      <div className="loading-skeleton h-3 w-1/3 rounded mb-3" />
+      <div className="loading-skeleton h-7 w-1/2 rounded mb-3" />
+      <div className="loading-skeleton h-3 w-2/3 rounded" />
+     </div>
+     <div className="loading-skeleton w-9 h-9 rounded-lg shrink-0" />
+    </div>
+   </div>
+  );
+ }
  return (
   <div
    onClick={onClick}

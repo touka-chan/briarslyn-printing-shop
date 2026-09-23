@@ -37,7 +37,6 @@ import {
 import { AdminLayout } from "@/components/layout";
 import {
   ContentCard,
-  FilterToolbar,
   DataTable,
   StatusBadge,
   Button,
@@ -132,6 +131,7 @@ function deriveBirthdateFromAge(age: number | undefined): string {
 
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [ready, setReady] = useState(false);
   const [active, setActive] = useState("All");
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState<Employee | null>(null);
@@ -194,7 +194,17 @@ export default function EmployeesPage() {
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
   useEffect(() => {
-   const unsub = subscribeEmployees(setEmployees, onFeedError);
+   const unsub = subscribeEmployees(
+     (rows) => {
+       setEmployees(rows);
+       setReady(true);
+     },
+     (e) => {
+       onFeedError(e);
+       // Never leave the page on a skeleton: render the error state.
+       setReady(true);
+     },
+   );
    return () => unsub();
   }, [feedNonce, onFeedError]);
 
@@ -1135,6 +1145,7 @@ export default function EmployeesPage() {
           sparklineTone="primary"
           lastUpdated="Live"
           onClick={() => setKpiModal("all")}
+          loading={!ready}
         />
         <KpiCard
           label="Admin"
@@ -1144,6 +1155,7 @@ export default function EmployeesPage() {
           sparklineTone="primary"
           lastUpdated="Live"
           onClick={() => setKpiModal("Admin")}
+          loading={!ready}
         />
         <KpiCard
           label="POS/Cashier"
@@ -1153,6 +1165,7 @@ export default function EmployeesPage() {
           sparklineTone="success"
           lastUpdated="Live"
           onClick={() => setKpiModal("POS_Cashier")}
+          loading={!ready}
         />
         <KpiCard
           label="Production Staff"
@@ -1164,6 +1177,7 @@ export default function EmployeesPage() {
           sparklineTone="warning"
           lastUpdated="Live"
           onClick={() => setKpiModal("Production Staff")}
+          loading={!ready}
         />
       </div>
 
@@ -1171,20 +1185,40 @@ export default function EmployeesPage() {
         title="Team Roster"
         subtitle={`${filtered.length} employees`}
       >
-        <FilterToolbar
-          tabs={tabs}
-          activeTab={active}
-          onTabChange={setActive}
-          searchPlaceholder="Search name, ID, contact, or role"
-          onSearchChange={setSearch}
-          searchValue={search}
-          customActions={
-            <Button variant="primary" onClick={openCreate}>
-              <Plus className="w-4 h-4" />
-              Add Employee
-            </Button>
-          }
-        />
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          <div className="min-w-[200px] flex-1">
+            <label className="block text-xs text-printflow-on-surface-variant mb-1">
+              Search
+            </label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, ID, contact, or role"
+              className="w-full px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-printflow-on-surface-variant mb-1">
+              Role
+            </label>
+            <select
+              value={active}
+              onChange={(e) => setActive(e.target.value)}
+              className="px-3 py-2 text-sm bg-printflow-surface-container rounded-lg border border-printflow-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-printflow-primary"
+            >
+              {tabs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.id === "All" ? `All (${t.count})` : `${t.label} (${t.count})`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button variant="primary" onClick={openCreate}>
+            <Plus className="w-4 h-4" />
+            Add Employee
+          </Button>
+        </div>
         {filtered.length === 0 ? (
           <div className="py-12">
             <EmptyState
@@ -1201,6 +1235,7 @@ export default function EmployeesPage() {
             onRowClick={openView}
             emptyMessage="No employees"
             pageSize={25}
+            loading={!ready}
           />
         )}
       </ContentCard>

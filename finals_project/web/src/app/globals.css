@@ -521,12 +521,53 @@
   }
 }
 
-/* Print: expand the floating panel so window.print() captures the
-   whole page instead of only the visible scroll area. */
+/* Print-only block: hidden on screen, revealed by the print block below.
+   Sales + Reports use it for the report header (brand + range + date). */
+.print-only {
+  display: none;
+}
+
+/* Print: expand the floating panel so window.print() captures the whole
+   page, hide the app chrome (sidebar/header/overlays/filters), reclaim
+   the sidebar margin, and keep KPI/chart cards from splitting across
+   pages. Pages tag their own noise with Tailwind's `print:hidden`. */
 @media print {
+  @page {
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  .sidebar,
+  header,
+  .modal-overlay,
+  .no-print {
+    display: none !important;
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+
   .float-panel {
     height: auto !important;
     overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  .kpi-card,
+  .chart-card {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  .print-only {
+    display: block !important;
   }
 }
 

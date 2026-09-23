@@ -127,7 +127,7 @@ export function DataTable<T>({
      </table>
     </div>
      {(collapsed || (paginated && totalPages > 1)) && (
-      <div className="flex items-center justify-between gap-3 px-1 pt-3 text-sm text-printflow-on-surface-variant">
+      <div className="flex items-center justify-between gap-3 px-1 pt-3 text-sm text-printflow-on-surface-variant print:hidden">
        <p>
         {collapsed
          ? `Showing latest ${rows.length} of ${data.length}`

@@ -16,7 +16,10 @@ const displayFont = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Brialyns Art Sign",
+  title: {
+    default: "Brialyns Art Sign",
+    template: "%s | Brialyns Art Sign",
+  },
   description: "Brialyns Art Sign Management System",
   icons: [{ rel: "icon", url: "/logo.jpg" }],
 };

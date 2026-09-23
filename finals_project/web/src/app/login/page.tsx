@@ -92,6 +92,14 @@ export default function LoginPage() {
    * in our users collection (Firebase itself never confirms this, to
    * avoid user enumeration — we check OUR database instead), then send
    * a reset link that lands on /reset-password.
+   *
+   * `handleCodeInApp: true` makes Firebase put the oobCode directly on
+   * our continue URL instead of routing through the Google-owned
+   * `firebaseapp.com/__/auth/action` widget. The email link therefore
+   * opens OUR branded page (split card, confirm password + eye
+   * toggles) - no console "customize action URL" needed. The domain
+   * must be in Authentication > Settings > Authorized domains, which
+   * `.web.app` is.
    */
   const RESET_URL =
    typeof window !== "undefined"
@@ -118,7 +126,7 @@ export default function LoginPage() {
     }
     await sendPasswordResetEmail(auth, em, {
      url: RESET_URL,
-     handleCodeInApp: false,
+     handleCodeInApp: true,
     });
     setForgotSent(true);
    } catch (e) {

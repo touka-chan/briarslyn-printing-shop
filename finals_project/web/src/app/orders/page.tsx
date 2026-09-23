@@ -288,17 +288,18 @@ export default function OrdersPage() {
       description="Open the Cashier POS app to create the first one - it will appear here in real time."
      />
     ) : (
-      <DataTable
-       columns={cols}
-       data={searched}
-       keyExtractor={(r) => r.order_id}
-       onRowClick={(r) => {
-        setSelected(r);
-        setOpen(true);
-       }}
-       emptyMessage="No orders"
-       pageSize={25}
-      />
+       <DataTable
+        columns={cols}
+        data={searched}
+        keyExtractor={(r) => r.order_id}
+        onRowClick={(r) => {
+         setSelected(r);
+         setOpen(true);
+        }}
+        emptyMessage="No orders"
+        pageSize={25}
+        loading={!ready}
+       />
     )}
    </ContentCard>
 
