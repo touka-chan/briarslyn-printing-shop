@@ -29,17 +29,16 @@ import {
   LogIn,
   Eye,
   EyeOff,
-  Package,
-  LayoutDashboard,
-  Factory,
+  Activity,
+  ShieldCheck,
+  ScrollText,
   Check,
   Mail,
   KeyRound,
 } from "lucide-react";
-import { sendPasswordResetEmail } from "firebase/auth";
 import { Modal, Button } from "@/components/ui";
-import { auth } from "@/lib/firebase";
-import { findUserByEmail } from "@/lib/services/users";
+import { findUserForPasswordReset } from "@/lib/services/users";
+import { requestPasswordReset } from "@/lib/services/password-reset";
 import { useAuth } from "@/lib/auth";
 
 
@@ -90,44 +89,41 @@ export default function LoginPage() {
   /**
    * Forgot-password flow: validate the email, confirm an account exists
    * in our users collection (Firebase itself never confirms this, to
-   * avoid user enumeration — we check OUR database instead), then send
-   * a reset link that lands on /reset-password.
+   * avoid user enumeration — we check OUR database instead), then ask
+   * the Apps Script webhook to email a reset link.
    *
-   * `handleCodeInApp: true` makes Firebase put the oobCode directly on
-   * our continue URL instead of routing through the Google-owned
-   * `firebaseapp.com/__/auth/action` widget. The email link therefore
-   * opens OUR branded page (split card, confirm password + eye
-   * toggles) - no console "customize action URL" needed. The domain
-   * must be in Authentication > Settings > Authorized domains, which
-   * `.web.app` is.
+   * The webhook (see lib/services/password-reset.ts) bypasses the
+   * Google-owned `firebaseapp.com/__/auth/action` widget: it generates
+   * the oobCode via the Admin API and sends OUR branded email whose
+   * link points straight at /reset-password (split card, confirm
+   * password + eye toggles).
    */
-  const RESET_URL =
-   typeof window !== "undefined"
-    ? `${window.location.origin}/reset-password`
-    : "";
-
   const handleForgotSend = async () => {
    const em = forgotEmail.trim();
    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
     setForgotError("Enter a valid email address.");
     return;
    }
-   if (!auth) {
-    setForgotError("Firebase is not configured.");
-    return;
-   }
    setForgotBusy(true);
    setForgotError(null);
    try {
-    const uid = await findUserByEmail(em).catch(() => null);
-    if (!uid) {
+    // Look the account up in OUR database: the match gates the send,
+    // the stored full name personalises the branded email greeting,
+    // and the role keeps this web-only flow for Owner/Admin accounts.
+    const account = await findUserForPasswordReset(em).catch(() => null);
+    if (!account) {
      setForgotError("No account found for that email.");
      return;
     }
-    await sendPasswordResetEmail(auth, em, {
-     url: RESET_URL,
-     handleCodeInApp: true,
-    });
+    // Cashier and Production accounts sign in on the mobile app and
+    // must reset their password there.
+    if (account.role !== "Owner" && account.role !== "Admin") {
+     setForgotError(
+      "This account signs in on the Cashier/Production app - reset its password from the mobile app instead.",
+     );
+     return;
+    }
+    await requestPasswordReset(em, account.name);
     setForgotSent(true);
    } catch (e) {
     setForgotError(
@@ -171,7 +167,7 @@ export default function LoginPage() {
 
     {/* Floating card */}
     <div
-     className="relative w-full max-w-6xl grid md:grid-cols-[5fr_6fr]
+     className="relative w-full max-w-5xl grid md:grid-cols-[5fr_6fr]
                 bg-printflow-surface rounded-2xl overflow-hidden
                 border border-printflow-outline-variant/40
                 shadow-[0_24px_70px_rgba(0,0,0,0.18),0_8px_24px_rgba(0,0,0,0.08)]"
@@ -181,18 +177,32 @@ export default function LoginPage() {
       data-login-brand
        className="hidden md:flex flex-col justify-between
                   bg-[#17171c] text-white
-                  px-12 py-12 relative overflow-hidden"
+                   px-10 py-10 relative overflow-hidden"
       aria-label="Brialyns Art Sign brand panel"
      >
-      {/* Faint top light for depth - monochrome like the admin. */}
-      <div
-       aria-hidden
-       className="absolute inset-0 pointer-events-none"
-       style={{
-        background:
-         "radial-gradient(circle at 80% 0%, rgba(255,255,255,0.08) 0%, transparent 50%)",
-       }}
-      />
+      {/* Aurora + grid backdrop (replaces the static splash photo):
+          three drifting brand-tinted glows behind a faint grid, faded
+          into the panel with a vignette. Pure CSS - no image payload. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+       <div className="login-blob login-blob-a absolute -left-24 top-1/4 h-80 w-80 rounded-full bg-[#ff8a3d]/20 blur-[70px]" />
+       <div className="login-blob login-blob-b absolute -right-20 top-[6%] h-72 w-72 rounded-full bg-[#ff4d8d]/20 blur-[80px]" />
+       <div className="login-blob login-blob-c absolute -bottom-24 left-1/4 h-96 w-96 rounded-full bg-[#3d8bff]/20 blur-[90px]" />
+       <div
+        className="absolute inset-0 opacity-[0.05]"
+        style={{
+         backgroundImage:
+          "linear-gradient(rgba(255,255,255,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.7) 1px, transparent 1px)",
+         backgroundSize: "44px 44px",
+        }}
+       />
+       <div
+        className="absolute inset-0"
+        style={{
+         background:
+          "radial-gradient(120% 90% at 50% 0%, transparent 35%, #17171c 100%)",
+        }}
+       />
+      </div>
 
       <header className="relative z-10 flex items-center gap-3">
        <img
@@ -210,21 +220,27 @@ export default function LoginPage() {
        </div>
       </header>
 
+      {/* Hero: kinetic word cycle ("One system for ..."). The stack
+          holds 4 words + a clone of the first for a seamless loop. */}
       <div className="relative z-10 py-6" aria-hidden>
-        {/* Real paint-splash photography (free license, self-hosted).
-            Background keyed to transparent. No radius, no shadow, no
-            border — so it melts seamlessly into the dark brand panel
-            with zero box edges. */}
-        <img
-          src="/login-splash.png"
-          alt=""
-          loading="eager"
-          decoding="async"
-          fetchPriority="high"
-          width={880}
-          height={502}
-          className="w-full h-auto login-float"
-        />
+       <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-white/40">
+        One system for
+       </p>
+       <div className="mt-3 h-16 overflow-hidden">
+        <div className="login-word-cycle flex flex-col">
+         {["ORDERS", "INVENTORY", "PRODUCTION", "INSIGHTS", "ORDERS"].map(
+          (word, i) => (
+           <span
+            key={`${word}-${i}`}
+            className={`flex h-16 items-center whitespace-nowrap text-3xl font-extrabold tracking-tight text-white lg:text-5xl ${poppins.className}`}
+           >
+            {word}
+           </span>
+          ),
+         )}
+        </div>
+       </div>
+       <div className="mt-6 h-px w-44 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
       </div>
 
       <footer className="relative z-10 space-y-3">
@@ -234,9 +250,9 @@ export default function LoginPage() {
        </p>
        <ul className="flex flex-wrap gap-2">
         {[
-         { icon: LayoutDashboard, label: "POS" },
-         { icon: Package, label: "Inventory" },
-         { icon: Factory, label: "Production" },
+         { icon: Activity, label: "Live sync" },
+         { icon: ShieldCheck, label: "Role-based access" },
+         { icon: ScrollText, label: "Audit trail" },
         ].map(({ icon: Icon, label }) => (
          <li
           key={label}
@@ -255,7 +271,7 @@ export default function LoginPage() {
      </aside>
 
      {/* ----------------- RIGHT: FORM ----------------- */}
-     <main className="flex items-center justify-center px-6 py-12 sm:px-14">
+     <main className="flex items-center justify-center px-6 py-10 sm:px-12">
       <div className="w-full max-w-md">
        <header className="mb-7">
         <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>

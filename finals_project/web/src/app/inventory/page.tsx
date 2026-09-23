@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Download, Package, AlertTriangle } from "lucide-react";
+import { Eye, Download, Package, AlertTriangle, ChevronRight } from "lucide-react";
 import { AdminLayout } from "@/components/layout";
 import { ContentCard, FilterToolbar, DataTable, StatusBadge, Button, Modal, KpiCard, FeedErrorBanner, useToast } from "@/components/ui";
 import { csvRow, downloadCsv } from "@/lib/csv";
@@ -263,7 +263,7 @@ export default function InventoryPage() {
       <p className="text-xs text-printflow-on-surface-variant">No materials below reorder point</p>
      </div>
     ) : (
-     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+     <div className="flex flex-col divide-y divide-printflow-outline-variant/40">
       {alerts.map(item=> {
        const pct = Math.min(100, Math.round((item.current_stock / Math.max(item.reorder_point,1))*100));
        const isInsufficient = item.status==="Insufficient Stock";
@@ -271,42 +271,52 @@ export default function InventoryPage() {
         <div
          key={item.material_variant_id}
          onClick={()=>{setSel(item); setOpen(true);}}
-         className="group flex flex-col gap-3 p-4 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40 hover:border-printflow-outline-variant hover:shadow-sm hover:bg-printflow-surface-container/30 cursor-pointer transition-all"
+         title={`${item.material_variant_id} - ${pct}% of ROP (${isInsufficient ? "needs urgent reorder" : "below reorder point"})`}
+         className="group flex items-center gap-3 sm:gap-4 py-3.5 px-2 -mx-2 rounded-lg first:pt-1 last:pb-1 cursor-pointer transition-colors hover:bg-printflow-surface-container/50"
         >
-         <div className="flex items-start justify-between gap-3">
-          <div className="flex gap-3 min-w-0">
-           <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isInsufficient ? "bg-printflow-error-container text-printflow-error" : "bg-printflow-warning-container text-printflow-warning"}`}>
-            <AlertTriangle className="w-4 h-4" />
-           </div>
-           <div className="min-w-0">
-            <p className="font-mono text-[13px] font-semibold text-printflow-on-surface leading-none tracking-tight">{item.material_variant_id}</p>
-            <p className="text-[13px] font-medium text-printflow-on-surface leading-tight truncate">{item.item_type}</p>
-            <p className="text-[11px] text-printflow-on-surface-variant">{item.category} - {item.tag_uid}</p>
-           </div>
+         {/* Severity icon */}
+         <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isInsufficient ? "bg-printflow-error-container text-printflow-error" : "bg-printflow-warning-container text-printflow-warning"}`}>
+          <AlertTriangle className="w-4 h-4" />
+         </div>
+
+         {/* Identity + category/model */}
+         <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0">
+           <span className="font-mono text-[13px] font-semibold text-printflow-on-surface truncate">{item.material_variant_id}</span>
+           <span className="text-[13px] font-medium text-printflow-on-surface truncate">{item.item_type}</span>
           </div>
+          <p className="text-[11px] text-printflow-on-surface-variant truncate mt-0.5">{item.category} - {item.model}</p>
+         </div>
+
+         {/* Health bar */}
+         <div className="hidden lg:flex flex-col gap-1 w-[150px] shrink-0">
+          <div className="h-1.5 bg-printflow-surface-container rounded-full overflow-hidden">
+           <div className={`h-full rounded-full ${isInsufficient ? "bg-printflow-error" : "bg-printflow-warning"}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-printflow-on-surface-variant tabular-nums">{pct}% of ROP</p>
+         </div>
+
+         {/* Metrics */}
+         <div className="hidden md:flex items-center gap-5 shrink-0">
+          <div className="text-right min-w-[44px]">
+           <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant">STOCK</p>
+           <p className="text-sm font-bold text-printflow-on-surface tabular-nums leading-tight">{item.current_stock}</p>
+          </div>
+          <div className="text-right min-w-[44px]">
+           <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant">ROP</p>
+           <p className="text-sm font-bold text-printflow-on-surface tabular-nums leading-tight">{item.reorder_point}</p>
+          </div>
+          <div className="text-right min-w-[44px]">
+           <p className="text-[10px] font-medium tracking-wide text-printflow-on-surface-variant">FCST 7D</p>
+           <p className="text-sm font-bold text-printflow-on-surface tabular-nums leading-tight">{item.forecasted_demand_next_7_days}</p>
+          </div>
+         </div>
+
+         {/* Status + affordance */}
+         <div className="flex items-center gap-2 shrink-0">
           <StatusBadge status={item.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={item.status} />
+          <ChevronRight className="w-4 h-4 text-printflow-on-surface-variant/40 group-hover:text-printflow-on-surface-variant transition-colors" />
          </div>
-
-         <div className="grid grid-cols-3 gap-2">
-          <div className="bg-printflow-surface-container rounded-lg px-3 py-2.5">
-           <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant leading-none">STOCK</p>
-           <p className="text-sm font-bold text-printflow-on-surface leading-tight mt-1">{item.current_stock}</p>
-          </div>
-          <div className="bg-printflow-surface-container rounded-lg px-3 py-2.5">
-           <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant leading-none">ROP</p>
-           <p className="text-sm font-bold text-printflow-on-surface leading-tight mt-1">{item.reorder_point}</p>
-           <p className="text-[10px] text-printflow-on-surface-variant leading-none">{item.model}</p>
-          </div>
-          <div className="bg-printflow-surface-container rounded-lg px-3 py-2.5">
-           <p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant leading-none">FORECAST 7D</p>
-           <p className="text-sm font-bold text-printflow-on-surface leading-tight mt-1">{item.forecasted_demand_next_7_days}</p>
-          </div>
-         </div>
-
-         <div className="h-1.5 bg-printflow-surface-container rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${isInsufficient ? "bg-[#17171c] dark:bg-white" : "bg-zinc-400 dark:bg-zinc-500"}`} style={{ width: `${pct}%` }} />
-         </div>
-         <p className="text-[11px] text-printflow-on-surface-variant -mt-1">{pct}% of ROP - {isInsufficient ? "needs urgent reorder" : "below reorder point"}</p>
         </div>
        );
       })}

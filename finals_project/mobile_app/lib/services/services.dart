@@ -12,3 +12,4 @@ export 'firebase_orders.dart';
 export 'firebase_inventory.dart';
 export 'firebase_rfid.dart';
 export 'firebase_users.dart';
+export 'password_reset_service.dart';

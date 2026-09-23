@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../models/app_user.dart';
 import '../services/audit_service.dart';
 import '../services/firebase_users.dart' as fb_users;
+import '../services/password_reset_service.dart';
 import 'role.dart';
 
 /// Permissions that can be granted to roles.
@@ -303,20 +304,13 @@ class AuthService extends ChangeNotifier {
     }();
   }
 
-  /// Send a password reset email. The link opens the shared web
-  /// reset page (works for mobile users too — tap in Gmail, set the
-  /// new password in the browser, sign back in on the app).
-  static const String passwordResetUrl =
-      'https://brialyns-art-sign-services.web.app/reset-password';
-
-  Future<void> sendPasswordResetEmail(String email) async {
-    await _auth.sendPasswordResetEmail(
-      email: email,
-      actionCodeSettings: fb.ActionCodeSettings(
-        url: passwordResetUrl,
-        handleCodeInApp: false,
-      ),
-    );
+  /// Send a branded password reset email through the Apps Script
+  /// webhook (same flow as the web app). The script emails a link that
+  /// opens the shared web reset page directly - no unbranded Firebase
+  /// handler page. [name] is the requester's full name from the users
+  /// collection (personalises the email greeting).
+  Future<void> sendPasswordResetEmail(String email, {String name = ''}) async {
+    await requestPasswordReset(email, name: name);
   }
 
   /// Sign out and clear profile.

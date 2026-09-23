@@ -201,6 +201,32 @@ export async function findUserByEmail(email: string): Promise<string | null> {
   return snap.empty ? null : snap.docs[0].id;
 }
 
+/**
+ * Account lookup for the web forgot-password flow: uid (existence
+ * gate), stored display name (personalises the reset email) and role.
+ *
+ * The web panel only serves Owner/Admin accounts - Cashier and
+ * Production accounts reset their password from the mobile app - so
+ * the caller uses `role` to gate the request.
+ */
+export async function findUserForPasswordReset(
+  email: string,
+): Promise<{ uid: string; name: string; role: User["role"] } | null> {
+  const q = query(
+    collection(requireDb(), COLL),
+    where("email", "==", email),
+    limit(1),
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  const data = snap.docs[0].data();
+  return {
+    uid: snap.docs[0].id,
+    name: ((data.name as string) ?? "").trim(),
+    role: (data.role as User["role"]) ?? "POS_Cashier",
+  };
+}
+
 // ---- internal helpers ----
 
 function fromFirestore(uid: string, data: Record<string, unknown>): User {

@@ -24,9 +24,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // for every check below.
   const pathname = rawPathname?.replace(/\/+$/, "") || "/";
   const isLogin = pathname === "/login";
+  // Public pages that MUST render while signed out:
+  //   - /login (the sign-in form itself)
+  //   - /reset-password (the landing page of the password-reset email
+  //     link - the user is by definition signed out when they open it)
+  // Without this, the gate redirected the email link straight back to
+  // /login, so the reset form never appeared.
+  const isPublicPage = isLogin || pathname === "/reset-password";
 
   useEffect(() => {
-    if (!loading && !firebaseUser && !isLogin) {
+    if (!loading && !firebaseUser && !isPublicPage) {
       // Skip the redirect when the Add Employee flow has just swapped
       // the SDK session via createUserWithEmailAndPassword. The
       // brief null state is intentional - the re-sign-in modal on
@@ -40,9 +47,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
       // No state to set here - the redirect itself is the state change.
       router.replace("/login");
     }
-  }, [loading, firebaseUser, user, pathname, isLogin, router]);
+  }, [loading, firebaseUser, user, pathname, isPublicPage, router]);
 
-  if (isLogin) return <>{children}</>;
+  if (isPublicPage) return <>{children}</>;
 
   if (!configured) {
     return (

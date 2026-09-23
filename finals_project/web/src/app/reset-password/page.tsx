@@ -25,9 +25,9 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
-  LayoutDashboard,
-  Package,
-  Factory,
+  Activity,
+  ShieldCheck,
+  ScrollText,
 } from "lucide-react";
 import {
   confirmPasswordReset,
@@ -146,7 +146,7 @@ export default function ResetPasswordPage() {
 
       {/* Floating card */}
       <div
-        className="relative w-full max-w-6xl grid md:grid-cols-[5fr_6fr]
+        className="relative w-full max-w-5xl grid md:grid-cols-[5fr_6fr]
                    bg-printflow-surface rounded-2xl overflow-hidden
                    border border-printflow-outline-variant/40
                    shadow-[0_24px_70px_rgba(0,0,0,0.18),0_8px_24px_rgba(0,0,0,0.08)]"
@@ -155,18 +155,31 @@ export default function ResetPasswordPage() {
         <aside
           className="hidden md:flex flex-col justify-between
                      bg-[#17171c] text-white
-                     px-12 py-12 relative overflow-hidden"
+                     px-10 py-10 relative overflow-hidden"
           aria-label="Brialyns Art Sign brand panel"
         >
-          {/* Faint top light for depth - monochrome like the admin. */}
-          <div
-            aria-hidden
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background:
-                "radial-gradient(circle at 80% 0%, rgba(255,255,255,0.08) 0%, transparent 50%)",
-            }}
-          />
+          {/* Aurora + grid backdrop (same as login): three drifting
+              brand-tinted glows behind a faint grid. Pure CSS. */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="login-blob login-blob-a absolute -left-24 top-1/4 h-80 w-80 rounded-full bg-[#ff8a3d]/20 blur-[70px]" />
+            <div className="login-blob login-blob-b absolute -right-20 top-[6%] h-72 w-72 rounded-full bg-[#ff4d8d]/20 blur-[80px]" />
+            <div className="login-blob login-blob-c absolute -bottom-24 left-1/4 h-96 w-96 rounded-full bg-[#3d8bff]/20 blur-[90px]" />
+            <div
+              className="absolute inset-0 opacity-[0.05]"
+              style={{
+                backgroundImage:
+                  "linear-gradient(rgba(255,255,255,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.7) 1px, transparent 1px)",
+                backgroundSize: "44px 44px",
+              }}
+            />
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "radial-gradient(120% 90% at 50% 0%, transparent 35%, #17171c 100%)",
+              }}
+            />
+          </div>
 
           <header className="relative z-10 flex items-center gap-3">
             <img
@@ -184,16 +197,26 @@ export default function ResetPasswordPage() {
             </div>
           </header>
 
+          {/* Hero: kinetic word cycle (same as login). */}
           <div className="relative z-10 py-6" aria-hidden>
-            <img
-              src="/login-splash.png"
-              alt=""
-              loading="eager"
-              decoding="async"
-              width={880}
-              height={502}
-              className="w-full h-auto login-float"
-            />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-white/40">
+              One system for
+            </p>
+            <div className="mt-3 h-16 overflow-hidden">
+              <div className="login-word-cycle flex flex-col">
+                {["ORDERS", "INVENTORY", "PRODUCTION", "INSIGHTS", "ORDERS"].map(
+                  (word, i) => (
+                    <span
+                      key={`${word}-${i}`}
+                      className={`flex h-16 items-center whitespace-nowrap text-3xl font-extrabold tracking-tight text-white lg:text-5xl ${poppins.className}`}
+                    >
+                      {word}
+                    </span>
+                  ),
+                )}
+              </div>
+            </div>
+            <div className="mt-6 h-px w-44 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           </div>
 
           <footer className="relative z-10 space-y-3">
@@ -203,9 +226,9 @@ export default function ResetPasswordPage() {
             </p>
             <ul className="flex flex-wrap gap-2">
               {[
-                { icon: LayoutDashboard, label: "POS" },
-                { icon: Package, label: "Inventory" },
-                { icon: Factory, label: "Production" },
+                { icon: Activity, label: "Live sync" },
+                { icon: ShieldCheck, label: "Role-based access" },
+                { icon: ScrollText, label: "Audit trail" },
               ].map(({ icon: Icon, label }) => (
                 <li
                   key={label}
@@ -224,7 +247,7 @@ export default function ResetPasswordPage() {
         </aside>
 
         {/* ----------------- RIGHT: FORM ----------------- */}
-        <main className="flex items-center justify-center px-6 py-12 sm:px-14">
+        <main className="flex items-center justify-center px-6 py-10 sm:px-12">
           <div className="w-full max-w-md">
             {status === "loading" && (
               <div className="flex flex-col items-center gap-3 py-8 text-center">

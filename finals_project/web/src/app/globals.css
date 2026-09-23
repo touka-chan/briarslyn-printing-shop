@@ -519,6 +519,55 @@
       animation: none;
     }
   }
+
+  /* Login brand panel - animated aurora backdrop (replaces the static
+     splash photo). Three soft brand-tinted blobs drift behind a faint
+     grid; all three respect reduced-motion. */
+  @keyframes login-blob-a {
+    0%, 100% { transform: translate3d(-6%, -4%, 0) scale(1); }
+    50% { transform: translate3d(7%, 9%, 0) scale(1.18); }
+  }
+  @keyframes login-blob-b {
+    0%, 100% { transform: translate3d(8%, 5%, 0) scale(1.12); }
+    50% { transform: translate3d(-7%, -9%, 0) scale(0.92); }
+  }
+  @keyframes login-blob-c {
+    0%, 100% { transform: translate3d(0, 9%, 0) scale(0.94); }
+    50% { transform: translate3d(9%, -7%, 0) scale(1.22); }
+  }
+
+  .login-blob {
+    animation-duration: 20s;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+    will-change: transform;
+  }
+  .login-blob-a { animation-name: login-blob-a; }
+  .login-blob-b { animation-name: login-blob-b; animation-duration: 26s; }
+  .login-blob-c { animation-name: login-blob-c; animation-duration: 32s; }
+
+  /* Hero word slider (the panel's "One system for ..." statement).
+     The stack holds 4 words + a clone of the first; -20% steps slide
+     exactly one row (5 rows of 64px). */
+  @keyframes login-word-cycle {
+    0%, 20% { transform: translateY(0); }
+    25%, 45% { transform: translateY(-20%); }
+    50%, 70% { transform: translateY(-40%); }
+    75%, 95% { transform: translateY(-60%); }
+    100% { transform: translateY(-80%); }
+  }
+
+  .login-word-cycle {
+    animation: login-word-cycle 14s cubic-bezier(0.7, 0, 0.3, 1) infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .login-blob,
+    .login-word-cycle {
+      animation: none;
+    }
+  }
 }
 
 /* Print-only block: hidden on screen, revealed by the print block below.

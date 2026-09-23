@@ -440,8 +440,9 @@ class _LoginScreenState extends State<LoginScreen>
   }
 }
 
-/// Modal sheet for the password-reset flow. Calls Firebase
-/// `sendPasswordResetEmail`; the user receives a real reset link by email.
+/// Modal sheet for the password-reset flow. Calls the Apps Script
+/// webhook (same branded flow as the web app); the user receives a real
+/// reset link by email that opens the shared web reset page directly.
 class _ForgotPasswordSheet extends StatefulWidget {
   const _ForgotPasswordSheet();
 
@@ -469,32 +470,28 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     final auth = AuthProvider.of(context);
     String? errorMessage;
     try {
-      // Existence check first: our users collection is the source of
-      // truth (Firebase itself never confirms addresses).
-      final uid = await fb_users.findUserByEmail(email);
-      if (uid == null) {
+      // Look the account up in OUR database: the match gates the send,
+      // the stored full name personalises the branded email greeting,
+      // and the role keeps this app-only flow for Cashier/Production
+      // accounts (Owner/Admin reset on the web panel).
+      final match = await fb_users.findUserByEmailAndName(email);
+      if (match == null) {
         errorMessage = 'No account found for that email.';
+      } else if (match.role != 'POS_Cashier' &&
+          match.role != 'Production Staff') {
+        errorMessage =
+            'Owner and Admin accounts reset their password on the web panel instead.';
       } else {
-        await auth.sendPasswordResetEmail(email);
-      }
-    } on fb.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'invalid-email':
-          errorMessage = 'Enter a valid email address.';
-          break;
-        case 'user-not-found':
-          // Don't reveal whether the account exists; tell the user the
-          // email was sent if the address is valid.
-          break;
-        case 'network-request-failed':
-          errorMessage = 'Network error. Check your connection and try again.';
-          break;
-        default:
-          errorMessage = e.message ?? 'Could not send reset email.';
+        await auth.sendPasswordResetEmail(email, name: match.name);
       }
     } catch (e) {
-      errorMessage = 'Could not send reset email. Try again in a moment.';
-      debugPrint('[login] sendPasswordResetEmail failed: $e');
+      // The webhook client throws friendly messages; strip the
+      // "Exception: " prefix Dart adds.
+      final msg = e.toString().replaceFirst('Exception: ', '').trim();
+      errorMessage = msg.isNotEmpty
+          ? msg
+          : 'Could not send reset email. Try again in a moment.';
+      debugPrint('[login] password reset failed: $e');
     }
 
     if (!mounted) return;

@@ -82,6 +82,44 @@ Future<String?> findUserByEmail(String email) async {
   }
 }
 
+/// Result of an email lookup: the account uid, stored display name and
+/// role (`Owner` | `Admin` | `POS_Cashier` | `Production Staff`).
+class UserEmailMatch {
+  const UserEmailMatch({
+    required this.uid,
+    required this.name,
+    required this.role,
+  });
+
+  final String uid;
+  final String name;
+  final String role;
+}
+
+/// Same lookup as [findUserByEmail], but also returns the account's
+/// display name and role. Used by the forgot-password flow: the name
+/// personalises the branded reset email, and the role keeps the reset
+/// flow on the app for Cashier/Production accounts only (Owner/Admin
+/// accounts reset on the web panel).
+Future<UserEmailMatch?> findUserByEmailAndName(String email) async {
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection(_kUsersCollection)
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    final data = snap.docs.first.data();
+    return UserEmailMatch(
+      uid: snap.docs.first.id,
+      name: (data['name'] as String? ?? '').trim(),
+      role: data['role'] as String? ?? 'POS_Cashier',
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Subscribes to the live `users` collection.
 ///
 /// Emits an empty list until the first snapshot arrives. Note: the
