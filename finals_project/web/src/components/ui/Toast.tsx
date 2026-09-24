@@ -18,12 +18,14 @@ interface ToastItem {
  id: string;
  message: string;
  variant: ToastVariant;
+ /** Optional heading override (defaults to the variant's title). */
+ title?: string;
 }
 
 interface ToastContextValue {
- success: (message: string) => void;
- error: (message: string) => void;
- info: (message: string) => void;
+ success: (message: string, title?: string) => void;
+ error: (message: string, title?: string) => void;
+ info: (message: string, title?: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -76,15 +78,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }
  }, []);
 
- const push = useCallback(
-  (variant: ToastVariant, message: string) => {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  setToasts((prev) => [...prev, { id, message, variant }]);
-  const handle = setTimeout(() => dismiss(id), DEFAULT_DURATION);
-  timers.current.set(id, handle);
-  },
-  [dismiss],
- );
+  const push = useCallback(
+   (variant: ToastVariant, message: string, title?: string) => {
+   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+   setToasts((prev) => [...prev, { id, message, variant, title }]);
+   const handle = setTimeout(() => dismiss(id), DEFAULT_DURATION);
+   timers.current.set(id, handle);
+   },
+   [dismiss],
+  );
 
  useEffect(() => {
   return () => {
@@ -93,14 +95,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   };
  }, []);
 
- const value = useMemo<ToastContextValue>(
-  () => ({
-  success: (m) => push("success", m),
-  error: (m) => push("error", m),
-  info: (m) => push("info", m),
-  }),
-  [push],
- );
+  const value = useMemo<ToastContextValue>(
+   () => ({
+   success: (m, t) => push("success", m, t),
+   error: (m, t) => push("error", m, t),
+   info: (m, t) => push("info", m, t),
+   }),
+   [push],
+  );
 
  return (
   <ToastContext.Provider value={value}>
@@ -126,10 +128,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       >
        <Icon className="w-5 h-5" />
       </span>
-      <div className="flex-1 min-w-0">
-       <p className="text-[13px] font-bold text-printflow-on-surface leading-tight">
-        {style.title}
-       </p>
+       <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold text-printflow-on-surface leading-tight">
+         {t.title ?? style.title}
+        </p>
        <p className="mt-0.5 text-sm text-printflow-on-surface-variant leading-snug">
         {t.message}
        </p>

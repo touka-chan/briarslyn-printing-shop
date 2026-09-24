@@ -5,6 +5,7 @@ import '../auth/auth_service.dart';
 import '../models/inventory_item.dart';
 import 'audit_service.dart';
 import 'firebase_inventory.dart' as fb;
+import 'live_activity_marks.dart';
 
 /// Service layer for inventory operations with permission enforcement.
 ///
@@ -34,6 +35,7 @@ class InventoryService {
     final prev = await _readVariant(materialVariantId);
     try {
       await fb.updateStock(materialVariantId, newStock);
+      LiveActivityMarks.mark('inventory', materialVariantId);
       debugPrint('[InventoryService] Updated stock for $materialVariantId to $newStock');
       AuditService.log(
         actor: auth.currentUser,
@@ -62,6 +64,7 @@ class InventoryService {
     final prev = await _readVariant(materialVariantId);
     try {
       await fb.updateReorderPoint(materialVariantId, newReorderPoint);
+      LiveActivityMarks.mark('inventory', materialVariantId);
       debugPrint('[InventoryService] Updated reorder point for $materialVariantId to $newReorderPoint');
       AuditService.log(
         actor: auth.currentUser,
@@ -87,6 +90,7 @@ class InventoryService {
     auth.assertCan(Permission.inventoryCreate);
     try {
       await fb.createVariant(item);
+      LiveActivityMarks.mark('inventory', item.materialVariantId);
       debugPrint('[InventoryService] Created new variant ${item.materialVariantId}');
       AuditService.log(
         actor: auth.currentUser,
@@ -112,6 +116,7 @@ class InventoryService {
     final prev = await _readVariant(materialVariantId);
     try {
       await fb.deleteVariant(materialVariantId);
+      LiveActivityMarks.mark('inventory', materialVariantId);
       debugPrint('[InventoryService] Deleted variant $materialVariantId');
       AuditService.log(
         actor: auth.currentUser,

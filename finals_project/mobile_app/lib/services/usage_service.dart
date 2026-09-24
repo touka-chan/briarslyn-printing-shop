@@ -21,6 +21,7 @@ import '../auth/auth_service.dart';
 import '../models/bom.dart';
 import 'audit_service.dart';
 import 'firebase_usage.dart' as fb_usage;
+import 'live_activity_marks.dart';
 
 const String _kInventoryCollection = 'inventory';
 const String _kOrdersCollection = 'orders';
@@ -95,6 +96,7 @@ class UsageService {
       );
     });
     debugPrint('[UsageService] Stock IN $qty x $materialVariantId');
+    LiveActivityMarks.mark('inventory', materialVariantId);
     AuditService.log(
       actor: auth.currentUser,
       action: 'stock_in',
@@ -160,6 +162,7 @@ class UsageService {
       );
     });
     debugPrint('[UsageService] Manual OUT $qty x $materialVariantId ($reason)');
+    LiveActivityMarks.mark('inventory', materialVariantId);
     AuditService.log(
       actor: auth.currentUser,
       action: 'stock_usage',
@@ -251,6 +254,7 @@ class UsageService {
     });
     debugPrint('[UsageService] Auto-deducted $orderId: $consumption');
     for (final m in moves) {
+      LiveActivityMarks.mark('inventory', m['id'] as String);
       AuditService.log(
         actor: auth.currentUser,
         action: 'stock_deducted_auto',

@@ -18,6 +18,7 @@ import {
  type Unsubscribe,
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
+import { markLocalActivity } from "@/lib/live-activity";
 import type { RfidCheckoutEvent } from "@/types";
 
 /** Firestore subscription failure handler (permission/offline). */
@@ -65,21 +66,33 @@ export function subscribeRfidEventsForVariant(
   }, onError);
 }
 
-/** Subscribe to the sensors map (sensorId - online/lastSeen). */
+/** Live sensor state used by the header's live-activity diff. */
+export interface SensorState {
+  online: boolean;
+  /** Mobile tap mode: 'check-in' | 'stock-in' | 'stock-out'. */
+  tapMode?: string;
+  lastSeenAt?: string;
+}
+
+/** Subscribe to the sensors map (sensorId - online/tapMode/lastSeen). */
 export function subscribeSensors(
-  cb: (sensors: Record<string, { online: boolean; lastSeenAt?: string }>) => void,
+  cb: (sensors: Record<string, SensorState>) => void,
+  onError?: FeedErrorHandler,
 ): Unsubscribe {
   return onSnapshot(collection(requireDb(), "sensors"), (snap) => {
-    const out: Record<string, { online: boolean; lastSeenAt?: string }> = {};
+    const out: Record<string, SensorState> = {};
     snap.docs.forEach((d) => {
       const data = d.data();
       out[d.id] = {
-        online: (data.online as boolean) ?? false,
+        // The mobile toggle writes `is_online`; the web console `online`.
+        online:
+          (data.is_online as boolean) ?? (data.online as boolean) ?? false,
+        tapMode: (data.tap_mode as string) ?? undefined,
         lastSeenAt: fromTimestamp(data.last_seen_at),
       };
     });
     cb(out);
-  });
+  }, onError);
 }
 
 /** Toggle a sensor's online state (production staff + admin only). */
@@ -91,6 +104,7 @@ export async function setSensorOnline(
     online,
     last_seen_at: Timestamp.now(),
   }, { merge: true });
+  markLocalActivity("sensor", sensorId);
 }
 
 // ---- internal helpers ----

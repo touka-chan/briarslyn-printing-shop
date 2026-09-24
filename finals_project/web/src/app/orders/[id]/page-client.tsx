@@ -296,7 +296,7 @@ export default function OrderDetailPage() {
       <p className="text-xs text-printflow-on-surface-variant">Created</p>
       <p className="text-sm flex items-center gap-2">
        <Clock className="w-4 h-4" />
-       {order.created_at ?? order.target_date}
+       {(order.created_at ?? order.target_date).slice(0, 10)}
       </p>
      </div>
      <div className="mt-5 pt-5 border-t border-printflow-outline-variant/40 space-y-2">
@@ -362,7 +362,7 @@ export default function OrderDetailPage() {
          </p>
           {done && (
            <p className="text-xs text-printflow-on-surface-variant">
-            {STEP_DATES[s](shown)}
+            {STEP_DATES[s](shown).slice(0, 10)}
            </p>
           )}
         </div>

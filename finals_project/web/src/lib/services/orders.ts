@@ -40,6 +40,7 @@ import {
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
 import { logAudit } from "@/lib/services/audit";
+import { markLocalActivity } from "@/lib/live-activity";
 import type { Order } from "@/types";
 import {
   completedUnitsLast7d,
@@ -155,6 +156,7 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
     cashier_id: input.cashier_id ?? null,
   };
   await setDoc(doc(requireDb(), COLL, orderId), doc_);
+  markLocalActivity("order", orderId);
   logAudit({
    action: "order_created",
    module: "orders",
@@ -185,6 +187,7 @@ export async function updateOrderStatus(
   if (status === "In Production") patch.started_at = Timestamp.now();
   if (status === "Completed") patch.completed_at = Timestamp.now();
   await updateDoc(doc(requireDb(), COLL, id), patch);
+  markLocalActivity("order", id);
   logAudit({
    action: "order_status_updated",
    module: "orders",
@@ -215,6 +218,7 @@ export async function updatePaymentStatus(
   const patch: Record<string, unknown> = { payment_status: paymentStatus };
   if (paymentMethod) patch.payment_method = paymentMethod;
   await updateDoc(doc(requireDb(), COLL, id), patch);
+  markLocalActivity("order", id);
   logAudit({
    action: "payment_updated",
    module: "payments",
@@ -231,6 +235,7 @@ export async function cancelOrder(id: string): Promise<void> {
   const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
   const prevStatus = (prevSnap?.data()?.status as string | undefined) ?? null;
   await updateDoc(doc(requireDb(), COLL, id), { status: "Cancelled" });
+  markLocalActivity("order", id);
   logAudit({
    action: "order_cancelled",
    module: "orders",
@@ -271,15 +276,15 @@ function fromFirestore(id: string, data: Record<string, unknown>): Order {
     payment_method: (data.payment_method as Order["payment_method"]) ?? undefined,
     cashier_id: (data.cashier_id as string) ?? undefined,
     stock_deducted: (data.stock_deducted as boolean) ?? false,
-    deducted_at: fromTimestamp(data.deducted_at),
+    deducted_at: fromDateTime(data.deducted_at),
     status: (data.status as Order["status"]) ?? "Pending",
     priority: (data.priority as Order["priority"]) ?? "Upcoming",
     estimated_completion:
       fromTimestamp(data.estimated_completion) ?? new Date().toISOString().slice(0, 10),
     based_on: (data.based_on as Order["based_on"]) ?? [],
-    created_at: fromTimestamp(data.created_at),
-    started_at: fromTimestamp(data.started_at),
-    completed_at: fromTimestamp(data.completed_at),
+    created_at: fromDateTime(data.created_at),
+    started_at: fromDateTime(data.started_at),
+    completed_at: fromDateTime(data.completed_at),
   };
 }
 
@@ -288,6 +293,10 @@ function toTimestamp(value: string | Date): Timestamp {
   return Timestamp.fromDate(d);
 }
 
+/**
+ * DATE-ONLY conversion (YYYY-MM-DD) for planning fields: `target_date`
+ * and `estimated_completion`. Those are calendar days, not instants.
+ */
 function fromTimestamp(value: unknown): string | undefined {
   if (!value) return undefined;
   if (value instanceof Timestamp) return value.toDate().toISOString().slice(0, 10);
@@ -295,6 +304,26 @@ function fromTimestamp(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value === "object" && value && "toDate" in (value as Record<string, unknown>)) {
     return ((value as { toDate: () => Date }).toDate().toISOString().slice(0, 10));
+  }
+  return undefined;
+}
+
+/**
+ * Full ISO instant (with time-of-day) for datetime fields: `created_at`,
+ * `started_at`, `completed_at`, `deducted_at`.
+ *
+ * The time matters: the notification centre renders "4 minutes ago",
+ * the 7-day sparkline bucketing and staleness windows compare instants.
+ * Date-only truncation here made a just-created order read "2 hours
+ * ago" (midnight UTC vs now).
+ */
+function fromDateTime(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value && "toDate" in (value as Record<string, unknown>)) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
   }
   return undefined;
 }

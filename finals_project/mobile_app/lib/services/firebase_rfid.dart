@@ -21,6 +21,7 @@ import 'package:flutter/foundation.dart';
 import '../models/app_user.dart';
 import '../models/rfid_event.dart';
 import 'audit_service.dart';
+import 'live_activity_marks.dart';
 
 const String _kRfidEventsCollection = 'rfid_events';
 const String _kSensorsCollection = 'sensors';
@@ -69,6 +70,37 @@ Stream<String> subscribeTapModeStream(String sensorId) {
       .map((snap) => (snap.data()?['tap_mode'] as String?) ?? 'check-in');
 }
 
+/// Live sensor states keyed by sensor id (online + tap mode).
+///
+/// Used by [LiveActivityService] to announce staff toggles made from
+/// another device; the Sensor screen keeps its own per-sensor stream.
+Stream<Map<String, SensorState>> subscribeSensorsStream() {
+  return FirebaseFirestore.instance
+      .collection(_kSensorsCollection)
+      .snapshots()
+      .map((snap) {
+        final out = <String, SensorState>{};
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          out[doc.id] = SensorState(
+            online: (data['is_online'] as bool?) ??
+                (data['online'] as bool?) ??
+                false,
+            tapMode: (data['tap_mode'] as String?) ?? '',
+          );
+        }
+        return out;
+      });
+}
+
+/// Snapshot of one sensor doc used for change detection.
+class SensorState {
+  const SensorState({required this.online, required this.tapMode});
+
+  final bool online;
+  final String tapMode;
+}
+
 /// Persists the station tap mode. Merge-write: safe on first use when
 /// the sensor doc does not exist yet.
 Future<void> setTapMode(String sensorId, String mode,
@@ -85,6 +117,7 @@ Future<void> setTapMode(String sensorId, String mode,
     'tap_mode': mode,
     'last_event_at': FieldValue.serverTimestamp(),
   }, SetOptions(merge: true));
+  LiveActivityMarks.mark('sensor', sensorId);
   AuditService.log(
     actor: actor,
     action: 'sensor_toggled',
@@ -109,6 +142,7 @@ Future<void> setSensorOnline(String sensorId, bool online,
     'is_online': online,
     'last_event_at': FieldValue.serverTimestamp(),
   }, SetOptions(merge: true));
+  LiveActivityMarks.mark('sensor', sensorId);
   AuditService.log(
     actor: actor,
     action: 'sensor_toggled',

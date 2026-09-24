@@ -72,7 +72,11 @@ function rangeStart(range: string): string {
 }
 
 function orderDate(o: Order): string {
- return o.created_at ?? o.target_date;
+ // Calendar day of the order (creation day, falling back to the target
+ // day). `created_at` carries a full ISO instant, so trim to date-only -
+ // range comparisons are string-based (`date <= todayIso()`) and would
+ // otherwise drop today's orders.
+ return (o.created_at ?? o.target_date).slice(0, 10);
 }
 
 interface Sale {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, ReactNode } from "react";
+import { useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import {
   Bell,
   Search,
@@ -10,22 +10,41 @@ import {
   Sun,
   Package,
   AlertTriangle,
-  ShoppingBag,
   Banknote,
   WifiOff,
   Clock,
+  CheckCircle2,
+  Info,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Button, Modal } from "@/components/ui";
+import { Button, Modal, useToast } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useFeedStatus } from "@/lib/useFeedStatus";
 import { subscribeOrders } from "@/lib/services/orders";
 import { subscribeInventory } from "@/lib/services/inventory";
 import { subscribeUsageEvents } from "@/lib/services/usage";
 import { subscribeUsers } from "@/lib/services/users";
+import { subscribeSensors, type SensorState } from "@/lib/services/rfid";
+import { isLocalActivity } from "@/lib/live-activity";
+import { bumpTabBadge, clearTabBadge } from "@/lib/tab-badge";
+import {
+  appendActivityFeed,
+  diffInventory,
+  diffOrders,
+  diffSensors,
+  diffUsage,
+  diffUsers,
+  getActivityFeed,
+  type InventoryState,
+  type LiveEvent,
+  type LiveTone,
+  type OrderState,
+  type SensorSnapshot,
+  type StockChange,
+} from "@/lib/live-activity-diff";
 import { getInventoryStatus, getPriority } from "@/lib/derived";
-import type { Order, InventoryItem, UsageEvent, User as UserType } from "@/types";
+import type { Order, InventoryItem, User as UserType } from "@/types";
 
 interface HeaderProps {
  title: string;
@@ -116,35 +135,228 @@ export function Header({
  const [mounted, setMounted] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [usage, setUsage] = useState<UsageEvent[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const toast = useToast();
+
+  // ---- live activity (toasts + bell feed for every real change) -------
+  const prevOrders = useRef<Map<string, OrderState>>(new Map());
+  const prevInventory = useRef<Map<string, InventoryState>>(new Map());
+  const prevSensors = useRef<Map<string, SensorSnapshot>>(new Map());
+  const prevUsers = useRef<Map<string, string>>(new Map());
+  const seenUsage = useRef<Set<string>>(new Set());
+  // Variant ids touched by a usage event recently - the matching stock
+  // change is already announced by that event.
+  const usageTouched = useRef<Map<string, number>>(new Map());
+  // Stock changes are buffered briefly so the matching usage event can
+  // claim the toast even when the two snapshots arrive out of order.
+  const stockBuffer = useRef<Map<string, StockChange>>(new Map());
+  const stockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // First snapshot per feed only primes the "previous" maps - a page
+  // load must not announce the whole backlog.
+  const hydrated = useRef({
+    orders: false,
+    inventory: false,
+    sensors: false,
+    usage: false,
+    users: false,
+  });
+  const usersRef = useRef<UserType[]>([]);
+  const desktopRef = useRef<string>("unsupported");
+  const [activity, setActivity] = useState<LiveEvent[]>(() => getActivityFeed());
+  const [desktopAlerts, setDesktopAlerts] = useState<string>("unsupported");
 
   useEffect(() => {
    setMounted(true);
    setTheme(readStoredTheme());
+   if (typeof window !== "undefined" && "Notification" in window) {
+    desktopRef.current = Notification.permission;
+    setDesktopAlerts(Notification.permission);
+   }
   }, []);
+
+  // Keep the roster mirror fresh without re-subscribing on user changes.
+  useEffect(() => {
+   usersRef.current = allUsers;
+  }, [allUsers]);
 
   // Feed errors surface as a dropdown row (with retry) instead of a
   // silently empty bell.
   const { feedError, onFeedError, feedNonce, retryFeed } = useFeedStatus();
 
+  const emitLive = useCallback(
+   (events: LiveEvent[]) => {
+    if (events.length === 0) return;
+    // Bell feed: newest first, capped, kept module-side so it survives
+    // header remounts during navigation.
+    setActivity(appendActivityFeed(events));
+    // Toasts + desktop alerts, capped per batch so a burst (e.g. an
+    // auto-deduct touching several materials) never floods the screen.
+    const alerts = events.filter((e) => e.alert).slice(0, 3);
+    const hidden =
+     typeof document !== "undefined" && document.hidden;
+    for (const e of alerts) {
+     const push =
+      e.tone === "error"
+       ? toast.error
+       : e.tone === "success"
+       ? toast.success
+       : toast.info;
+     push(e.detail, e.title);
+     if (desktopRef.current === "granted" && hidden) {
+      try {
+       new Notification(e.title, {
+        body: e.detail,
+        icon: "/logo.jpg",
+        tag: e.id,
+       });
+      } catch {
+       // OS-level notifications can fail; the toast already covered it.
+      }
+     }
+    }
+    // Background tab: Facebook-style badge on the title + favicon so the
+    // changes are visible from the tab strip itself.
+    if (hidden && alerts.length > 0) {
+     bumpTabBadge(alerts.length);
+    }
+   },
+   [toast],
+  );
+
+  const flushStockBuffer = useCallback(() => {
+   stockTimer.current = null;
+   const pending = stockBuffer.current;
+   stockBuffer.current = new Map();
+   if (pending.size === 0) return;
+   const now = Date.now();
+   const events: LiveEvent[] = [];
+   for (const ch of pending.values()) {
+    const touchedAt = usageTouched.current.get(ch.materialVariantId);
+    // Covered by a usage / auto-deduct toast from the same movement.
+    if (touchedAt !== undefined && now - touchedAt < 12000) continue;
+    events.push({
+     id: `evt-stock-${ch.materialVariantId}-${now}`,
+     tone: ch.to < ch.from ? "warning" : "success",
+     title: `Stock adjusted: ${ch.materialVariantId}`,
+     detail: `${ch.itemType} - ${ch.from} -> ${ch.to}`,
+     href: "/inventory",
+     alert: !isLocalActivity("inventory", ch.materialVariantId),
+     at: now,
+    });
+   }
+   emitLive(events);
+  }, [emitLive]);
+
   useEffect(() => {
-   const unsubOrders = subscribeOrders(setOrders, onFeedError);
-   const unsubInv = subscribeInventory(setInventory, onFeedError);
-   const unsubUsage = subscribeUsageEvents(setUsage, 100, onFeedError);
-   const unsubUsers = subscribeUsers(setAllUsers, onFeedError);
+   const unsubOrders = subscribeOrders((rows) => {
+    const { events, next } = diffOrders(prevOrders.current, rows);
+    prevOrders.current = next;
+    setOrders(rows);
+    if (hydrated.current.orders) emitLive(events);
+    else hydrated.current.orders = true;
+   }, onFeedError);
+
+   const unsubInv = subscribeInventory((rows) => {
+    const { events, stockChanges, next } = diffInventory(
+     prevInventory.current,
+     rows,
+    );
+    prevInventory.current = next;
+    setInventory(rows);
+    if (!hydrated.current.inventory) {
+     hydrated.current.inventory = true;
+     return;
+    }
+    emitLive(events);
+    if (stockChanges.length > 0) {
+     for (const ch of stockChanges) {
+      stockBuffer.current.set(ch.materialVariantId, ch);
+     }
+     if (!stockTimer.current) {
+      stockTimer.current = setTimeout(flushStockBuffer, 1200);
+     }
+    }
+   }, onFeedError);
+
+   const unsubSensors = subscribeSensors(
+    (sensors: Record<string, SensorState>) => {
+     const { events, next } = diffSensors(prevSensors.current, sensors);
+     prevSensors.current = next;
+     if (hydrated.current.sensors) emitLive(events);
+     else hydrated.current.sensors = true;
+    },
+    onFeedError,
+   );
+
+   const unsubUsage = subscribeUsageEvents(
+    (rows) => {
+     const { events, touchVariants, autoDeduct, next } = diffUsage(
+      seenUsage.current,
+      rows,
+      (uid) => usersRef.current.find((u) => u.id === uid)?.name ?? null,
+     );
+     seenUsage.current = next;
+     const now = Date.now();
+     for (const v of touchVariants) usageTouched.current.set(v, now);
+     if (!hydrated.current.usage) {
+      hydrated.current.usage = true;
+      return;
+     }
+     if (autoDeduct.count > 0 && autoDeduct.anyAlert) {
+      events.push({
+       id: `evt-autodeduct-${now}`,
+       tone: "info",
+       title: `Auto-deduct: ${autoDeduct.count} material${autoDeduct.count === 1 ? "" : "s"}`,
+       detail: autoDeduct.orderId
+        ? `Order ${autoDeduct.orderId} entered production`
+        : "Recipe deducted for a production order",
+       href: "/production",
+       alert: true,
+       at: now,
+      });
+     }
+     emitLive(events);
+    },
+    100,
+    onFeedError,
+   );
+
+   const unsubUsers = subscribeUsers((rows) => {
+    const { events, next } = diffUsers(prevUsers.current, rows);
+    prevUsers.current = next;
+    setAllUsers(rows);
+    if (hydrated.current.users) emitLive(events);
+    else hydrated.current.users = true;
+   }, onFeedError);
+
    return () => {
     unsubOrders();
     unsubInv();
+    unsubSensors();
     unsubUsage();
     unsubUsers();
+    if (stockTimer.current) {
+     clearTimeout(stockTimer.current);
+     stockTimer.current = null;
+    }
    };
-  }, [feedNonce, onFeedError]);
+  }, [feedNonce, onFeedError, emitLive, flushStockBuffer]);
+
+  const enableDesktopAlerts = async () => {
+   if (typeof window === "undefined" || !("Notification" in window)) return;
+   try {
+    const permission = await Notification.requestPermission();
+    desktopRef.current = permission;
+    setDesktopAlerts(permission);
+   } catch {
+    // Prompt dismissed - nothing to do.
+   }
+  };
 
   // Close the notifications dropdown on Escape.
   useEffect(() => {
@@ -155,6 +367,15 @@ export function Header({
    window.addEventListener("keydown", onKey);
    return () => window.removeEventListener("keydown", onKey);
   }, [notificationsOpen]);
+
+  // Returning to the tab counts as "seen": drop the title/favicon badge.
+  useEffect(() => {
+   const onVisibility = () => {
+    if (!document.hidden) clearTabBadge();
+   };
+   document.addEventListener("visibilitychange", onVisibility);
+   return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   const dismissNotification = (id: string) => {
    setDismissed((prev) => {
@@ -218,8 +439,6 @@ export function Header({
   const notifications: HeaderNotification[] = (() => {
    const out: HeaderNotification[] = [];
    const seenOrders = new Set<string>();
-   const userName = (uid?: string | null) =>
-    (uid && allUsers.find((u) => u.id === uid)?.name) || null;
 
    // 1. Overdue orders (oldest target first).
    const overdue = orders
@@ -318,77 +537,9 @@ export function Header({
     });
    }
 
-   // 6. Latest stock movements (who moved what, from the app).
-   // Only the trailing 7 days - older movements are history, not news.
-   const weekAgo = Date.now() - 7 * 86400000;
-   const recentUsage = usage
-    .filter((u) => {
-     const t = new Date(u.timestamp ?? "").getTime();
-     return !isNaN(t) && t >= weekAgo;
-    })
-    .slice(0, 2);
-   for (const u of recentUsage) {
-    const actor = userName(u.by_uid);
-    const when = timeAgo(u.timestamp ?? "");
-    if (u.direction === "in") {
-     out.push({
-      id: `usage-${u.id ?? `${u.material_variant_id}-${u.timestamp}`}`,
-      icon: Package,
-      accent: "text-printflow-success",
-      title: `Stock in +${u.qty} ${u.material_variant_id}`,
-      detail: [u.reason, actor ? `by ${actor}` : null]
-       .filter(Boolean)
-       .join(" - "),
-      meta: when || "Just now",
-      href: "/inventory",
-     });
-    } else {
-     const src =
-      u.source === "auto-deduct" && u.order_id
-       ? `auto-deduct ${u.order_id}`
-       : (u.reason ?? u.source);
-     out.push({
-      id: `usage-${u.id ?? `${u.material_variant_id}-${u.timestamp}`}`,
-      icon: Package,
-      accent: "text-printflow-warning",
-      title: `Usage -${u.qty} ${u.material_variant_id}`,
-      detail: [src, actor ? `by ${actor}` : null].filter(Boolean).join(" - "),
-      meta: when || "Just now",
-      href: "/inventory",
-     });
-    }
-   }
-
-   // 7. Newest orders (skip ones already listed above), with cashier.
-   // Only orders from the trailing 48h count as "new" - older ones
-   // are queue residents, not news.
-   const twoDaysAgo = Date.now() - 2 * 86400000;
-   const newest = [...orders]
-    .sort(
-     (a, b) =>
-      new Date(b.created_at ?? b.target_date).getTime() -
-      new Date(a.created_at ?? a.target_date).getTime(),
-    )
-    .filter((o) => !seenOrders.has(o.order_id))
-    .filter((o) => {
-     const t = new Date(o.created_at ?? o.target_date).getTime();
-     return !isNaN(t) && t >= twoDaysAgo;
-    })
-    .slice(0, 2);
-   for (const o of newest) {
-    const cashier = userName(o.cashier_id);
-    out.push({
-     id: `new-${o.id ?? o.order_id}`,
-     icon: ShoppingBag,
-     accent: "text-printflow-primary",
-     title: "New order received",
-     detail:
-      `Order ${o.order_id} from ${o.customer_name}` +
-      (cashier ? ` (by ${cashier})` : ""),
-     meta: timeAgo(o.created_at ?? o.target_date) || "Just now",
-     href: "/orders",
-    });
-   }
+   // 6-7. Stock movements and new orders are NOT duplicated here - the
+   // "Live activity" feed already raises a row (and toast) for every
+   // usage event and new order. This list keeps state-based alerts only.
 
    // 8. Outstanding receivables (single summary row).
    // The id carries total+count so dismissing expires: new unpaid
@@ -429,8 +580,36 @@ export function Header({
    return out.filter((n) => !dismissed.has(n.id)).slice(0, 10);
   })();
 
+  // Live activity rows - every real change (app actions, other admins,
+  // other tabs) - rendered on top of the derived alerts. Dismissals use
+  // the same localStorage set.
+  const toneIcon: Record<LiveTone, typeof Package> = {
+   success: CheckCircle2,
+   warning: AlertTriangle,
+   error: AlertTriangle,
+   info: Info,
+  };
+  const toneAccent: Record<LiveTone, string> = {
+   success: "text-printflow-success",
+   warning: "text-printflow-warning",
+   error: "text-printflow-error",
+   info: "text-printflow-primary",
+  };
+  const activityRows: HeaderNotification[] = activity
+   .filter((e) => !dismissed.has(e.id))
+   .map((e) => ({
+    id: e.id,
+    icon: toneIcon[e.tone],
+    accent: toneAccent[e.tone],
+    title: e.title,
+    detail: e.detail,
+    meta: timeAgo(new Date(e.at).toISOString()),
+    href: e.href,
+   }));
+  const feed: HeaderNotification[] = [...activityRows, ...notifications];
+
   const clearAllNotifications = () => {
-   const ids = notifications.map((n) => n.id);
+   const ids = feed.map((n) => n.id);
    if (ids.length === 0) return;
    setDismissed((prev) => {
     const next = new Set(prev);
@@ -489,19 +668,23 @@ export function Header({
       {/* Notifications */}
       <div className="relative">
        <button
-        onClick={() => setNotificationsOpen(!notificationsOpen)}
+        onClick={() => {
+         const next = !notificationsOpen;
+         setNotificationsOpen(next);
+         if (next) clearTabBadge();
+        }}
         className="btn-ghost p-2 relative"
         aria-label={
-         notifications.length > 0
-          ? `Notifications, ${notifications.length} new`
+         feed.length > 0
+          ? `Notifications, ${feed.length} new`
           : "Notifications"
         }
         aria-expanded={notificationsOpen}
        >
         <Bell className="w-5 h-5" />
-        {notifications.length > 0 && (
+        {feed.length > 0 && (
          <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-printflow-error text-white text-[10px] font-bold flex items-center justify-center">
-          {notifications.length > 9 ? "9+" : notifications.length}
+          {feed.length > 9 ? "9+" : feed.length}
          </span>
         )}
        </button>
@@ -523,11 +706,19 @@ export function Header({
            <h3 className="font-semibold text-printflow-on-surface">Notifications</h3>
            <div className="flex items-center gap-2">
             <span className="type-label text-printflow-on-surface-variant">
-             {notifications.length === 0
-              ? "caught up"
-              : `${notifications.length} new`}
+             {feed.length === 0 ? "caught up" : `${feed.length} new`}
             </span>
-            {notifications.length > 0 && (
+            {desktopAlerts === "default" && (
+             <button
+              type="button"
+              onClick={() => void enableDesktopAlerts()}
+              className="text-xs font-medium text-printflow-primary hover:underline focus:outline-none focus:ring-2 focus:ring-printflow-primary rounded px-1"
+              title="Also show OS notifications when this tab is in the background"
+             >
+              Desktop alerts
+             </button>
+            )}
+            {feed.length > 0 && (
              <button
               type="button"
               onClick={clearAllNotifications}
@@ -556,16 +747,16 @@ export function Header({
              </button>
             </div>
            )}
-           {notifications.length === 0 && !feedError ? (
+           {feed.length === 0 && !feedError ? (
             <div className="px-4 py-8 text-center text-sm text-printflow-on-surface-variant">
              You&apos;re all caught up.
             </div>
-           ) : notifications.length === 0 ? (
+           ) : feed.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-printflow-on-surface-variant">
              No notifications to show.
             </div>
            ) : (
-            notifications.map((n, idx) => {
+            feed.map((n, idx) => {
              const Icon = n.icon;
              return (
               <div

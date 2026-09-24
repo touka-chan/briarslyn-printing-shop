@@ -5,6 +5,7 @@ import '../auth/auth_service.dart';
 import '../models/order.dart';
 import 'audit_service.dart';
 import 'firebase_orders.dart' as fb;
+import 'live_activity_marks.dart';
 import 'usage_service.dart';
 
 /// Service layer for order operations with permission enforcement.
@@ -40,6 +41,7 @@ class OrderService {
     }
     try {
       await fb.updatePaymentStatus(orderId, newPaymentStatus);
+      LiveActivityMarks.mark('order', orderId);
       debugPrint('[OrderService] Updated payment for $orderId to $newPaymentStatus');
       AuditService.log(
         actor: auth.currentUser,
@@ -81,6 +83,7 @@ class OrderService {
       throw StateError('Order $orderId is already at final status: $currentStatus');
     }
     await fb.updateOrderStatus(orderId, next);
+    LiveActivityMarks.mark('order', orderId);
     debugPrint('[OrderService] Advanced $orderId from $currentStatus to $next');
     AuditService.log(
       actor: auth.currentUser,
@@ -135,6 +138,7 @@ class OrderService {
       throw StateError('Cannot cancel order $orderId: already in production or completed');
     }
     await fb.cancelOrder(orderId);
+    LiveActivityMarks.mark('order', orderId);
     debugPrint('[OrderService] Cancelled order $orderId');
     AuditService.log(
       actor: auth.currentUser,
@@ -156,6 +160,7 @@ class OrderService {
   }) async {
     auth.assertCan(Permission.orderCreate);
     final id = await fb.createOrder(order);
+    LiveActivityMarks.mark('order', id);
     debugPrint('[OrderService] Created new order $id');
     AuditService.log(
       actor: auth.currentUser,

@@ -28,6 +28,7 @@ import {
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
 import { logAudit } from "@/lib/services/audit";
+import { markLocalActivity } from "@/lib/live-activity";
 import type { Bom, InventoryItem, UsageEvent } from "@/types";
 import { getInventoryStatus } from "@/lib/derived";
 
@@ -153,6 +154,7 @@ export async function logStockIn(input: {
       timestamp: Timestamp.now(),
     });
   });
+  markLocalActivity("inventory", input.materialVariantId);
   logAudit({
    action: "stock_in",
    module: "inventory",
@@ -215,6 +217,7 @@ export async function logUsage(input: {
       timestamp: Timestamp.now(),
     });
   });
+  markLocalActivity("inventory", input.materialVariantId);
   logAudit({
    action: "stock_usage",
    module: "inventory",
@@ -299,6 +302,7 @@ export async function autoDeductForOrder(
     });
   });
   for (const m of moves) {
+   markLocalActivity("inventory", m.variantId);
    logAudit({
     action: "stock_deducted_auto",
     module: "inventory",

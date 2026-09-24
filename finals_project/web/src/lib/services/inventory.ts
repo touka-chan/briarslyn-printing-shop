@@ -32,6 +32,7 @@ import {
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
 import { logAudit } from "@/lib/services/audit";
+import { markLocalActivity } from "@/lib/live-activity";
 import type { InventoryItem } from "@/types";
 import { getInventoryStatus, isStale } from "@/lib/derived";
 
@@ -95,6 +96,7 @@ export async function createVariant(input: {
     last_updated: Timestamp.now(),
     last_checkout_at: null,
   });
+  markLocalActivity("inventory", id);
   logAudit({
    action: "variant_created",
    module: "inventory",
@@ -129,6 +131,7 @@ export async function updateStock(id: string, newStock: number): Promise<void> {
    status: realStatus,
    last_updated: Timestamp.now(),
   });
+  markLocalActivity("inventory", id);
   logAudit({
    action: "stock_adjusted",
    module: "inventory",
@@ -148,6 +151,7 @@ export async function updateReorderPoint(id: string, newRop: number): Promise<vo
    reorder_point: newRop,
    last_updated: Timestamp.now(),
   });
+  markLocalActivity("inventory", id);
   logAudit({
    action: "reorder_point_updated",
    module: "inventory",
@@ -164,6 +168,7 @@ export async function deleteVariant(id: string): Promise<void> {
    ? ((prevSnap.data().item_type as string) ?? id)
    : id;
   await deleteDoc(doc(requireDb(), COLL, id));
+  markLocalActivity("inventory", id);
   logAudit({
    action: "variant_deleted",
    module: "inventory",

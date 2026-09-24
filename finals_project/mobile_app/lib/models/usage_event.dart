@@ -6,6 +6,9 @@
 // locked to its order id and manual/scan entries are standalone, the
 // three sources can never double-count each other.
 class UsageEvent {
+  /// Firestore document id (added by the transport when absent).
+  final String? id;
+
   final String materialVariantId;
   final int qty;
 
@@ -29,6 +32,7 @@ class UsageEvent {
   final bool shortfall;
 
   const UsageEvent({
+    this.id,
     required this.materialVariantId,
     required this.qty,
     required this.direction,
@@ -41,6 +45,7 @@ class UsageEvent {
   });
 
   factory UsageEvent.fromJson(Map<String, dynamic> json) => UsageEvent(
+        id: json['id'] as String?,
         materialVariantId: json['material_variant_id'] as String,
         qty: (json['qty'] as num).toInt(),
         direction: json['direction'] as String,
