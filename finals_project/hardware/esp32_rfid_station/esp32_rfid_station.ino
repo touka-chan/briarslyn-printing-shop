@@ -66,6 +66,11 @@ const unsigned long DEDUPE_MS = 5000;  // same tag inside 5s = ignored
 String lastUid = "";
 unsigned long lastUidAt = 0;
 
+// Heartbeat cadence: keeps `last_seen_at` fresh while the station is
+// powered, so the apps can tell "live" (<=90s) from "unplugged".
+const unsigned long HEARTBEAT_MS = 30000;
+unsigned long lastHeartbeatAt = 0;
+
 // Last HTTP status seen by postJson (302 from Apps Script = script ran).
 int lastHttpStatus = 0;
 
@@ -98,10 +103,20 @@ void setup() {
 
   connectWifi();
   pingSensor();
+  lastHeartbeatAt = millis();
 }
 
 void loop() {
   ensureWifi();
+
+  // Heartbeat: while powered, ping every HEARTBEAT_MS so the dashboard
+  // chip stays "live"; unplugging flips it to idle -> offline by itself.
+  const unsigned long nowMs = millis();
+  if (WiFi.status() == WL_CONNECTED &&
+      (nowMs - lastHeartbeatAt) >= HEARTBEAT_MS) {
+    lastHeartbeatAt = nowMs;
+    pingSensor();
+  }
 
   // Any card present?
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {

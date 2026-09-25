@@ -7,19 +7,20 @@ import { subscribeSensors, type SensorState } from "@/lib/services/rfid";
  * Live sensor status chip for the header.
  *
  * Subscribes to the `sensors` collection (the ESP32 / Apps Script writes
- * `online`/`is_online`, `tap_mode`, and `last_seen_at` on every ping or
- * tap) and re-evaluates on a 30s tick, so a station that stops reporting
- * flips from Live to Idle without a page reload.
+ * `online`/`is_online`, `tap_mode`, and `last_seen_at` on every heartbeat
+ * ping (30s) or tap) and re-evaluates on a 30s tick, so a station that
+ * gets unplugged flips Live -> Idle -> Offline on its own.
  *
- *   Live         online and reported within the last 10 minutes
- *   Idle         online but no activity for over 10 minutes
- *   Offline      flagged offline, or no sensor doc exists yet
+ *   Live         online and reported within the last 90s (heartbeat)
+ *   Idle         online but quiet for over 90s (likely unplugged)
+ *   Offline      flagged offline, quiet for over 10 minutes, or no doc
  *   Unavailable  the sensors feed failed (network/permission)
  *
  * The tooltip carries the sensor id, tap mode, and how long ago it was
  * last seen, so the raw state is always inspectable.
  */
-const LIVE_WINDOW_MS = 10 * 60 * 1000;
+const LIVE_WINDOW_MS = 90 * 1000;
+const OFFLINE_WINDOW_MS = 10 * 60 * 1000;
 const TICK_MS = 30 * 1000;
 
 type Liveness = "live" | "idle" | "offline" | "unavailable";
@@ -75,12 +76,14 @@ export function SensorStatus() {
  const [sensorId, sensor] = primary ?? [];
  const lastSeenMs = sensor?.lastSeenAt ? Date.parse(sensor.lastSeenAt) : NaN;
 
- let liveness: Liveness;
- if (unavailable) liveness = "unavailable";
- else if (!sensor || !sensor.online) liveness = "offline";
- else if (Number.isFinite(lastSeenMs) && now - lastSeenMs > LIVE_WINDOW_MS)
-  liveness = "idle";
- else liveness = "live";
+  let liveness: Liveness;
+  if (unavailable) liveness = "unavailable";
+  else if (!sensor || !sensor.online) liveness = "offline";
+  else if (Number.isFinite(lastSeenMs) && now - lastSeenMs > OFFLINE_WINDOW_MS)
+   liveness = "offline";
+  else if (Number.isFinite(lastSeenMs) && now - lastSeenMs > LIVE_WINDOW_MS)
+   liveness = "idle";
+  else liveness = "live";
 
  const title = (() => {
   if (liveness === "unavailable")
@@ -94,7 +97,9 @@ export function SensorStatus() {
     : "no activity yet",
   );
   if (liveness === "idle")
-   parts.push(`no activity for over ${LIVE_WINDOW_MS / 60_000}m`);
+   parts.push(`no activity for over ${LIVE_WINDOW_MS / 1000}s (likely unplugged)`);
+  if (liveness === "offline" && Number.isFinite(lastSeenMs))
+   parts.push(`quiet for over ${OFFLINE_WINDOW_MS / 60_000}m`);
   return parts.join(" - ");
  })();
 
