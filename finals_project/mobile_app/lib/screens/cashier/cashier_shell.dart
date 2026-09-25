@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app_router.dart';
 import '../../auth/auth.dart';
+import '../../widgets/account_menu.dart';
+import '../../widgets/activity_bell.dart';
 import '../../widgets/role_home_shell.dart';
-import '../notifications/notifications_screen.dart';
-import '../profile/profile_screen.dart';
 import 'cashier_home.dart';
 import 'cashier_new_order.dart';
 import 'cashier_orders.dart';
@@ -67,29 +66,13 @@ class _CashierShellScreenState extends State<CashierShellScreen> {
       appBarTitle: 'POS',
       appBarSubtitle: 'Brialyns Art Sign',
       initialIndex: 0,
-      appBarTrailing: IconButton(
-        icon: const Icon(Icons.notifications_outlined),
-        onPressed: () {
-          HapticFeedback.selectionClick();
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-          );
-        },
-        tooltip: 'Notifications',
-      ),
+      darkChrome: true,
+      prefsKey: 'last_tab_cashier',
+      appBarTrailing: const ActivityBellButton(),
       appBarTrailingActions: [
-        IconButton(
-          icon: const Icon(Icons.account_circle_outlined),
-          onPressed: () {
-            HapticFeedback.selectionClick();
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ProfileScreen()),
-            );
-          },
-          tooltip: 'Profile',
-        ),
+        // Profile, appearance and Sign out live in one dropdown so the
+        // bar keeps its breathing room on narrow phones.
+        AccountMenuButton(uid: auth.currentUid),
       ],
       navItems: [
         NavItem(

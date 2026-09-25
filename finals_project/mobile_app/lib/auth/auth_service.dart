@@ -286,6 +286,22 @@ class AuthService extends ChangeNotifier {
         for (var i = 0; i < 20 && _profile == null; i++) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
+        // Record the sign-in on the profile doc (mirrors the web's
+        // `recordLogin`) so the Profile page shows a real "Last login".
+        // Runs after the profile wait: a brand-new account's doc is
+        // provisioned by the snapshot listener first, so the merge can
+        // never race the provisioner. Best-effort - never throws.
+        final uid = _user?.uid;
+        if (uid != null) {
+          try {
+            await _db.collection('users').doc(uid).set(
+              {'last_login_at': FieldValue.serverTimestamp()},
+              SetOptions(merge: true),
+            );
+          } catch (e) {
+            debugPrint('[auth] last_login_at write failed: $e');
+          }
+        }
         AuditService.log(
           actor: _profile ??
               AppUser(

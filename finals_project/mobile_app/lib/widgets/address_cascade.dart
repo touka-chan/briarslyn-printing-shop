@@ -277,7 +277,7 @@ class _ZipRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.markunread_mailbox_outlined,
             color: AppTheme.onSurfaceVariant,
           ),

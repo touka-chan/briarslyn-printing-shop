@@ -7,6 +7,7 @@ import '../../design/tokens.dart';
 import '../../models/order.dart';
 import '../../services/firebase_orders.dart' as fb_orders;
 import '../../theme/app_theme.dart';
+import '../../utils/chrome.dart';
 
 /// The Orders list screen for POS/Cashier.
 ///
@@ -42,6 +43,13 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
   ];
 
   final _searchController = TextEditingController();
+
+  /// Pull-to-refresh: re-subscribes the live feed (real network round
+  /// trip) and keeps the spinner visible long enough to read as feedback.
+  Future<void> _handleRefresh() async {
+    setState(() => _feedNonce++);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+  }
 
   @override
   void dispose() {
@@ -117,8 +125,9 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
       appBar: canPop
           ? AppBar(
               title: const Text('All Orders'),
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.onSurface,
+              backgroundColor: chromeBarBackground(context),
+              foregroundColor: chromeBarForeground(context),
+              systemOverlayStyle: chromeBarOverlay(context),
               elevation: 0,
               scrolledUnderElevation: 1,
               leading: IconButton(
@@ -176,20 +185,26 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
                   }),
                 ),
                 Expanded(
-                  child: CustomScrollView(
-                    slivers: [
-                      const SliverPadding(
-                        padding: EdgeInsets.only(top: AppSpacing.md),
-                      ),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg, 0, AppSpacing.lg, 0),
-                        sliver: _buildOrdersList(context, filtered),
-                      ),
-                      const SliverPadding(
-                        padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                      ),
-                    ],
+                  child: RefreshIndicator(
+                    onRefresh: _handleRefresh,
+                    color: AppTheme.primary,
+                    backgroundColor: AppTheme.surface,
+                    child: CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        const SliverPadding(
+                          padding: EdgeInsets.only(top: AppSpacing.md),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.lg, 0, AppSpacing.lg, 0),
+                          sliver: _buildOrdersList(context, filtered),
+                        ),
+                        const SliverPadding(
+                          padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -238,7 +253,7 @@ class _CashierOrdersViewState extends State<_CashierOrdersView> {
                 color: AppTheme.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.receipt_long_outlined,
                 size: 48,
                 color: AppTheme.primary,

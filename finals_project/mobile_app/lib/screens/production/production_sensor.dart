@@ -11,6 +11,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
 import '../../models/rfid_event.dart';
 import '../../models/inventory_item.dart';
+import 'production_inventory.dart';
 
 /// The RFID Sensor screen - the third tab in the Production shell.
 ///
@@ -35,6 +36,96 @@ class ProductionSensorScreen extends StatefulWidget {
 class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
   static const _sensorId = 'ESP32-01';
   int _feedNonce = 0;
+
+  // ---- Scan feedback + last-scan card -----------------------------------
+  // The first snapshot just hydrates (opening the tab must not beep);
+  // every NEW event after that vibrates + beeps and refreshes the card.
+  String? _lastScanKey;
+  String? _lastScanTagUid;
+  String? _lastScanVariantId;
+  DateTime? _lastScanAt;
+
+  // ---- Manual lookup -----------------------------------------------------
+  final _lookupCtrl = TextEditingController();
+  String _lookupQuery = '';
+
+  @override
+  void dispose() {
+    _lookupCtrl.dispose();
+    super.dispose();
+  }
+
+  void _syncScanFeedback(List<RfidCheckoutEvent> events) {
+    if (events.isEmpty) return;
+    final latest = events.first;
+    final key = '${latest.tagUid}|${latest.timestamp.microsecondsSinceEpoch}';
+    if (key == _lastScanKey) return;
+    final isFirstSnapshot = _lastScanKey == null;
+    setState(() {
+      _lastScanKey = key;
+      _lastScanTagUid = latest.tagUid;
+      _lastScanVariantId = latest.materialVariantId;
+      _lastScanAt = latest.timestamp;
+    });
+    if (isFirstSnapshot) return;
+    // A real scan just landed: buzz + system alert tone so production
+    // staff can hear/feel it even when not looking at the screen.
+    HapticFeedback.mediumImpact();
+    SystemSound.play(SystemSoundType.alert);
+  }
+
+  InventoryItem? _itemForTag(List<InventoryItem> items, String? tag) {
+    if (tag == null) return null;
+    for (final i in items) {
+      if (i.tagUid == tag) return i;
+    }
+    return null;
+  }
+
+  List<InventoryItem> _lookupHits(List<InventoryItem> inventory) {
+    final q = _lookupQuery;
+    if (q.isEmpty) return const [];
+    return inventory
+        .where((i) =>
+            (i.tagUid ?? '').toLowerCase().contains(q) ||
+            i.materialVariantId.toLowerCase().contains(q) ||
+            i.itemType.toLowerCase().contains(q))
+        .take(5)
+        .toList();
+  }
+
+  List<Widget> _buildLookupResults(List<InventoryItem> inventory) {
+    if (_lookupQuery.isEmpty) return const [];
+    final hits = _lookupHits(inventory);
+    if (hits.isEmpty) {
+      return [
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'No matching tag, variant or item.',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: AppTheme.onSurfaceVariant),
+        ),
+      ];
+    }
+    return [
+      const SizedBox(height: AppSpacing.xs),
+      for (final item in hits)
+        Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.sm),
+          child: _LookupRow(item: item),
+        ),
+    ];
+  }
+
+  String _ago(DateTime d) {
+    final diff = DateTime.now().difference(d);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
 
   Future<void> _toggleSensor(bool currentlyOnline) async {
     HapticFeedback.mediumImpact();
@@ -126,6 +217,11 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                     events.isEmpty ? null : events.first.timestamp;
                 final sensorOnline = docOnline ?? _isSensorOnline(inventory);
 
+                // New scans: buzz + beep + refresh the Last-scan card.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _syncScanFeedback(events);
+                });
+
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(
                   AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
@@ -138,6 +234,44 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                     onToggle: () => _toggleSensor(sensorOnline),
                   ),
                   const SizedBox(height: AppSpacing.lg),
+                  // Last scan - the most recent tag with its matched item
+                  // and live stock, so a scan can be confirmed at a glance.
+                  if (_lastScanAt != null) ...[
+                    _LastScanCard(
+                      tagUid: _lastScanTagUid ?? '-',
+                      variantId: _lastScanVariantId ?? '-',
+                      scannedAt: _lastScanAt!,
+                      item: _itemForTag(inventory, _lastScanTagUid),
+                      agoLabel: _ago(_lastScanAt!),
+                      onTap: () {
+                        final tag = _lastScanTagUid;
+                        if (tag == null) return;
+                        InventoryItem? found;
+                        for (final i in inventory) {
+                          if ((i.tagUid ?? '').trim().toUpperCase() ==
+                              tag.trim().toUpperCase()) {
+                            found = i;
+                            break;
+                          }
+                        }
+                        final match = found;
+                        if (match == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'No item is bound to tag $tag',
+                              ),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                          return;
+                        }
+                        HapticFeedback.selectionClick();
+                        showInventoryItemSheet(context, match);
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
                   // Tap mode - what a station tap means once the ESP32
                   // is online. Persisted on the sensor doc; taps never
                   // move stock by themselves.
@@ -192,6 +326,42 @@ class _ProductionSensorScreenState extends State<ProductionSensorScreen> {
                         ),
                       );
                     },
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  // Manual lookup - find a tag / variant / item and see its
+                  // live stock without waiting for a scan.
+                  PfCard(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Manual lookup',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Type a tag UID, variant ID or item name.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: AppTheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        PfTextField(
+                          hintText: 'e.g. TAG-001, TEST-INK-01, Mug',
+                          prefixIcon: Icons.search_rounded,
+                          controller: _lookupCtrl,
+                          onChanged: (v) => setState(
+                            () => _lookupQuery = v.trim().toLowerCase(),
+                          ),
+                        ),
+                        ..._buildLookupResults(inventory),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   // Sensor stats
@@ -842,6 +1012,167 @@ class _StockAtRiskBanner extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The most recent scan: tag, matched item (if bound), live stock and how
+/// long ago it arrived.
+class _LastScanCard extends StatelessWidget {
+  const _LastScanCard({
+    required this.tagUid,
+    required this.variantId,
+    required this.scannedAt,
+    required this.agoLabel,
+    this.item,
+    this.onTap,
+  });
+
+  final String tagUid;
+  final String variantId;
+  final DateTime scannedAt;
+  final String agoLabel;
+  final InventoryItem? item;
+
+  /// Tapping the card jumps straight to the item's action sheet.
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return PfCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              borderRadius: AppRadius.rSm,
+            ),
+            child: Icon(Icons.nfc_rounded, color: AppTheme.primary, size: 20),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Last scan',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      agoLabel,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppTheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  tagUid,
+                  style: AppTheme.monoStyle(fontSize: 12, color: AppTheme.onSurface),
+                ),
+                Text(
+                  item == null
+                      ? variantId
+                      : '${item!.itemType} - ${item!.materialVariantId}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppTheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          if (item != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${item!.currentStock}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.onSurface,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                PfStatusBadge.stock(item!.status, size: PfBadgeSize.tiny),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One manual-lookup hit: variant, item, tag and live stock.
+class _LookupRow extends StatelessWidget {
+  const _LookupRow({required this.item});
+
+  final InventoryItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceContainerLow,
+        borderRadius: AppRadius.rSm,
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${item.itemType} - ${item.materialVariantId}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  item.tagUid == null
+                      ? 'No tag bound'
+                      : 'Tag ${item.tagUid}',
+                  style: AppTheme.monoStyle(
+                    fontSize: 11,
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            '${item.currentStock}',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.onSurface,
+                ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          PfStatusBadge.stock(item.status, size: PfBadgeSize.tiny),
         ],
       ),
     );

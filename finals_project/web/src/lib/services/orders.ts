@@ -30,13 +30,14 @@ import {
  onSnapshot,
  query,
  orderBy,
- doc,
- getDoc,
- addDoc,
- updateDoc,
- setDoc,
- Timestamp,
- type Unsubscribe,
+  doc,
+  getDoc,
+  addDoc,
+  updateDoc,
+  setDoc,
+  runTransaction,
+  Timestamp,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { requireDb } from "@/lib/firebase";
 import { logAudit } from "@/lib/services/audit";
@@ -50,6 +51,14 @@ import {
 } from "@/lib/derived";
 
 const COLL = "orders";
+/** Shared sequence counter for human-friendly order ids. */
+const COUNTER_COLL = "counters";
+const ORDER_COUNTER_DOC = "orders";
+
+/** ORD-0001, ORD-0002, ... (4-digit pad; keeps growing past 9999). */
+function formatOrderId(sequence: number): string {
+  return `ORD-${String(sequence).padStart(4, "0")}`;
+}
 
 /** Firestore subscription failure handler (permission/offline). */
 export type FeedErrorHandler = (e: unknown) => void;
@@ -120,7 +129,15 @@ export function subscribeOrder(
   }, onError);
 }
 
-/** Create a new order. Returns the generated orderId. */
+/**
+ * Create a new order. Returns the persisted order id.
+ *
+ * New orders get a sequential, human-friendly id (ORD-0001, ORD-0002,
+ * ...) minted from the shared `counters/orders` sequence. The counter
+ * read + increment and the order write share one transaction, so
+ * concurrent cashiers can never mint the same number. Callers may still
+ * pass an explicit `orderId` (legacy/import) to bypass the sequence.
+ */
 export async function createOrder(input: Omit<Order, "id" | "order_id" | "priority" | "estimated_completion" | "based_on"> & {
   orderId?: string;
 }): Promise<string> {
@@ -131,7 +148,6 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
   );
   const eta = computeEta(input.target_date, priority, now);
 
-  const orderId = input.orderId ?? `ORD-${Date.now().toString().slice(-6)}`;
   const doc_ = {
     customer_name: input.customer_name,
     customer_email: input.customer_email ?? null,
@@ -155,7 +171,25 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
     created_at: Timestamp.now(),
     cashier_id: input.cashier_id ?? null,
   };
-  await setDoc(doc(requireDb(), COLL, orderId), doc_);
+  const explicitId = input.orderId?.trim();
+  let orderId: string;
+  if (explicitId) {
+    orderId = explicitId;
+    await setDoc(doc(requireDb(), COLL, orderId), doc_);
+  } else {
+    const db = requireDb();
+    orderId = await runTransaction(db, async (tx) => {
+      const counterRef = doc(db, COUNTER_COLL, ORDER_COUNTER_DOC);
+      const snap = await tx.get(counterRef);
+      const last = snap.data()?.last;
+      const next = (typeof last === "number" ? last : 0) + 1;
+      const id = formatOrderId(next);
+      tx.set(counterRef, { last: next, updated_at: Timestamp.now() });
+      tx.set(doc(db, COLL, id), doc_);
+      return id;
+    });
+  }
+
   markLocalActivity("order", orderId);
   logAudit({
    action: "order_created",

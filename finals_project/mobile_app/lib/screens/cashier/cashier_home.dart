@@ -344,14 +344,14 @@ class _CashierHomeScreenState extends State<CashierHomeScreen> {
                   color: AppTheme.primary.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.receipt_long_outlined,
                   color: AppTheme.primary,
                   size: 28,
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              const Text(
+              Text(
                 'No orders yet',
                 style: TextStyle(
                   fontWeight: FontWeight.w700,

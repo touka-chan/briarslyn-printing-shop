@@ -58,14 +58,14 @@ class AdminDashboard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.admin_panel_settings, color: AppTheme.primary),
+                        Icon(Icons.admin_panel_settings, color: AppTheme.primary),
                         const SizedBox(width: 8),
                         const Text('Admin Mobile Preview',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'The full Admin / Owner dashboard (inventory, forecasting, analytics, user management) lives in the web application.',
                       style: TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
                     ),

@@ -44,6 +44,12 @@ dependencies:
   url_launcher: ^6.3.1
   http: ^1.2.0
 
+  # Offline banner (live connectivity changes).
+  connectivity_plus: ^6.1.0
+
+  # Local prefs (e.g. last tab per role).
+  shared_preferences: ^2.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -54,6 +60,10 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+  # Branded launcher icon + native splash generated from the shop logo.
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.6
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -103,3 +113,28 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Launcher icon: the shop badge on a white tile (matches how the app
+# renders it in the login card / app bar). The adaptive foreground is the
+# badge inside a white circle so it reads on any launcher shape.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+
+# Native splash: white with the badge in light mode, charcoal with the
+# badge-in-circle in dark mode (tracks the device's system theme).
+flutter_native_splash:
+  android: true
+  ios: false
+  color: "#FFFFFF"
+  image: assets/icon/splash_logo.png
+  color_dark: "#17171C"
+  image_dark: assets/icon/splash_logo_dark.png
+  android_12:
+    color: "#FFFFFF"
+    image: assets/icon/splash_logo.png
+    color_dark: "#17171C"
+    image_dark: assets/icon/splash_logo_dark.png

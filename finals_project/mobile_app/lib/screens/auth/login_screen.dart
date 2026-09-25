@@ -191,7 +191,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   color: AppTheme.primary,
                                   borderRadius: AppRadius.rLg,
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.print_rounded,
                                   color: AppTheme.onPrimary,
                                   size: AppIconSize.xl,
@@ -354,7 +354,7 @@ class _LoginScreenState extends State<LoginScreen>
                         ),
                         child: Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.error_outline_rounded,
                               color: AppTheme.statusUrgent,
                               size: 18,
@@ -363,7 +363,7 @@ class _LoginScreenState extends State<LoginScreen>
                             Expanded(
                               child: Text(
                                 _errorText!,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: AppTheme.statusUrgent,
                                   fontSize: 13,
                                 ),
@@ -520,7 +520,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),

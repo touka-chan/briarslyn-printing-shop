@@ -9,8 +9,10 @@ import '../../models/inventory_item.dart';
 import '../../models/order.dart';
 import '../../services/firebase_inventory.dart' as fb_inventory;
 import '../../services/firebase_orders.dart' as fb_orders;
+import '../../services/live_activity_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
+import '../../utils/chrome.dart';
 
 enum _NotificationKind { overdueOrder, urgentOrder, lowStock, insufficientStock, staleSensor, readyForPickup }
 
@@ -73,6 +75,20 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   int _feedNonce = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Visiting the screen counts as "read": clear the app bar bell badge.
+    LiveActivityService.unreadCount.value = 0;
+  }
+
+  /// Pull-to-refresh: re-subscribes both live feeds and holds the spinner
+  /// briefly so the gesture reads as feedback.
+  Future<void> _handleRefresh() async {
+    setState(() => _feedNonce++);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+  }
 
   /// Build the notification list from the live orders + inventory snapshots
   /// so the screen always reflects the latest state in Firestore.
@@ -180,8 +196,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Notifications'),
-        backgroundColor: AppTheme.surface,
-        foregroundColor: AppTheme.onSurface,
+        backgroundColor: chromeBarBackground(context),
+        foregroundColor: chromeBarForeground(context),
+        systemOverlayStyle: chromeBarOverlay(context),
         elevation: 0,
         scrolledUnderElevation: 1,
         leading: IconButton(
@@ -224,28 +241,34 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               if (notifications.isEmpty) return _EmptyState();
               return SafeArea(
                 top: false,
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.md,
-                    AppSpacing.lg,
-                    AppSpacing.xxl,
+                child: RefreshIndicator(
+                  onRefresh: _handleRefresh,
+                  color: AppTheme.primary,
+                  backgroundColor: AppTheme.surface,
+                  child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.xxl,
+                    ),
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: AppSpacing.md),
+                    itemBuilder: (context, index) {
+                      final n = notifications[index];
+                      return StaggeredFadeIn(
+                        delay: Duration(milliseconds: 40 * index),
+                        children: [
+                          _NotificationCard(
+                            notification: n,
+                            onTap: () => _handleTap(context, n),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  itemCount: notifications.length,
-                  separatorBuilder: (_, _) =>
-                      const SizedBox(height: AppSpacing.md),
-                  itemBuilder: (context, index) {
-                    final n = notifications[index];
-                    return StaggeredFadeIn(
-                      delay: Duration(milliseconds: 40 * index),
-                      children: [
-                        _NotificationCard(
-                          notification: n,
-                          onTap: () => _handleTap(context, n),
-                        ),
-                      ],
-                    );
-                  },
                 ),
               );
             },

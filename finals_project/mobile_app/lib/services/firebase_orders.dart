@@ -44,6 +44,13 @@ import 'package:flutter/foundation.dart';
 import '../models/order.dart';
 
 const String _kOrdersCollection = 'orders';
+/// Shared sequence counter for human-friendly order ids.
+const String _kCountersCollection = 'counters';
+const String _kOrderCounterDoc = 'orders';
+
+/// ORD-0001, ORD-0002, ... (4-digit pad; keeps growing past 9999).
+String formatOrderId(int sequence) =>
+    'ORD-${sequence.toString().padLeft(4, '0')}';
 
 /// Subscribes to the live `orders` collection, sorted by `created_at` desc.
 ///
@@ -77,14 +84,15 @@ Stream<List<Order>> subscribeOrdersStream() {
 
 /// Creates a new order document and returns the persisted order id.
 ///
-/// `Order.orderId` is used as the doc id when non-empty (matches the web
-/// `ORD-XXXXXX` convention); otherwise Firestore assigns a new id and we
-/// return it. `created_at` is stamped server-side via `FieldValue.serverTimestamp()`
-/// so all clients see the same canonical time.
+/// New orders get a sequential, human-friendly id (ORD-0001, ORD-0002,
+/// ...) minted from the shared `counters/orders` sequence. The counter
+/// read + increment and the order write share one transaction, so two
+/// cashiers can never mint the same number. A non-empty `Order.orderId`
+/// (legacy/import) still wins and bypasses the sequence. `created_at`
+/// is stamped server-side via `FieldValue.serverTimestamp()` so all
+/// clients see the same canonical time.
 Future<String> createOrder(Order order) async {
   final db = FirebaseFirestore.instance;
-  final String id =
-      order.orderId.isNotEmpty ? order.orderId : db.collection(_kOrdersCollection).doc().id;
 
   // Build the payload with snake_case field names. We omit `id` and
   // `orderId` from the Dart class - the web service writes `customer_*`
@@ -116,8 +124,28 @@ Future<String> createOrder(Order order) async {
     'created_at': FieldValue.serverTimestamp(),
   };
 
-  await db.collection(_kOrdersCollection).doc(id).set(data);
-  return id;
+  // Explicit ids (legacy/import) bypass the sequence.
+  if (order.orderId.isNotEmpty) {
+    await db.collection(_kOrdersCollection).doc(order.orderId).set(data);
+    return order.orderId;
+  }
+
+  // Sequential id: read + bump `counters/orders` and write the order in
+  // the same transaction so concurrent cashiers never collide. Offline,
+  // the transaction fails and the caller surfaces the error.
+  final counterRef = db.collection(_kCountersCollection).doc(_kOrderCounterDoc);
+  return db.runTransaction<String>((tx) async {
+    final snap = await tx.get(counterRef);
+    final last = (snap.data()?['last'] as num?)?.toInt() ?? 0;
+    final next = last + 1;
+    final id = formatOrderId(next);
+    tx.set(counterRef, {
+      'last': next,
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+    tx.set(db.collection(_kOrdersCollection).doc(id), data);
+    return id;
+  });
 }
 
 /// Updates the order's `status` field. Stamps `started_at`/`completed_at`

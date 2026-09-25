@@ -130,7 +130,7 @@ export default function InventoryPage() {
     )
   },
   { key: "current_stock", header: "Stock", render: (r:InventoryItem)=>`${r.current_stock}` },
-  { key: "reorder_point", header: "ROP (dynamic)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point}</span> },
+  { key: "reorder_point", header: "Threshold (ROP)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point}</span> },
   { key: "forecasted_demand_next_7_days", header: "Forecast 7d" },
   { key: "model", header: "Model", render: (r:InventoryItem)=><span className="text-xs break-words">{r.model}</span> },
   { key: "status", header: "Status", render: (r:InventoryItem)=><span className="flex flex-wrap items-center gap-1 min-w-0"><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} />{r.isStale&&<span className="text-[10px] px-1 py-0.5 rounded bg-printflow-warning-container text-printflow-warning whitespace-nowrap">Delayed</span>}</span> },
@@ -255,7 +255,7 @@ export default function InventoryPage() {
      <DataTable columns={cols} data={searched} keyExtractor={r=>r.material_variant_id} onRowClick={r=>{setSel(r); setOpen(true);}} emptyMessage="No materials" pageSize={25} loading={!ready} />
    </ContentCard>
 
-   <ContentCard title="Reorder Alerts" subtitle={alerts.length>0 ? `${alerts.length} items need attention - stock <= ROP` : undefined}>
+   <ContentCard title="Reorder Alerts" subtitle={alerts.length>0 ? `${alerts.length} items need attention - stock at or below threshold (ROP)` : undefined}>
     {alerts.length===0 ? (
      <div className="flex flex-col items-center justify-center py-10 text-center">
       <div className="w-10 h-10 rounded-full bg-printflow-success-container flex items-center justify-center mb-3"><Package className="w-5 h-5 text-printflow-success" /></div>
@@ -335,13 +335,13 @@ export default function InventoryPage() {
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">ITEM TYPE</p><p className="text-sm font-medium mt-1">{sel.item_type}</p></div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">CATEGORY</p><p className="text-sm font-medium mt-1">{sel.category}</p></div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">CURRENT STOCK</p><p className="text-sm font-bold mt-1">{sel.current_stock}</p></div>
-        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">REORDER POINT</p><p className="text-sm font-bold mt-1">{sel.reorder_point} <span className="text-xs font-normal text-printflow-on-surface-variant">({sel.model})</span></p></div>
+        <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">THRESHOLD (ROP)</p><p className="text-sm font-bold mt-1">{sel.reorder_point} <span className="text-xs font-normal text-printflow-on-surface-variant">({sel.model})</span></p></div>
         <div className="p-3.5 bg-printflow-primary/5 rounded-xl border border-printflow-primary/20"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">FORECAST 7D</p><p className="text-sm font-bold text-printflow-primary mt-1">{sel.forecasted_demand_next_7_days}</p></div>
         <div className="p-3.5 bg-printflow-surface rounded-xl border border-printflow-outline-variant/40"><p className="text-[11px] font-medium tracking-wide text-printflow-on-surface-variant">TAG / SENSOR</p><p className="font-mono text-xs mt-1">{sel.tag_uid} - {sel.sensor_id}</p></div>
        </div>
       </div>
      )}
-    </Modal>
+     </Modal>
   </AdminLayout>
  );
 }

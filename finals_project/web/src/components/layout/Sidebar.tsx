@@ -8,6 +8,8 @@ import {
   Factory,
   Menu,
   X,
+  ChevronsLeft,
+  ChevronsRight,
   LayoutDashboard,
   ShoppingCart,
   Package,
@@ -22,6 +24,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
 
 /** Bold display face for the wordmark (sidebar only, self-hosted). */
 const poppins = Poppins({ subsets: ["latin"], weight: ["700", "800"] });
@@ -80,9 +83,20 @@ const navigation: NavSection[] = [
  ];
 
 
-export function Sidebar() {
+interface SidebarProps {
+  /**
+   * "desktop" (default) is the collapsible rail. "drawer" is the
+   * locked-open copy rendered inside the mobile overlay - it ignores
+   * the collapsed preference and shows no toggle.
+   */
+  variant?: "desktop" | "drawer";
+}
+
+export function Sidebar({ variant = "desktop" }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { collapsed, toggle } = useSidebarCollapsed();
+  const isCollapsed = variant === "desktop" && collapsed;
   // Remember the last confirmed Owner state so the Owner-only Audit Log
   // doesn't unmount mid-navigation while the auth profile reloads
   // (user is briefly null between route changes).
@@ -98,9 +112,10 @@ export function Sidebar() {
     aria-label="Main navigation"
    >
     <div className="flex flex-col h-full relative">
-     {/* Logo */}
-      <div className="relative flex items-center h-14 px-5">
-       <Link href="/dashboard" className="flex items-center gap-2 min-w-0" aria-label="Brialyns Art Sign Panel">
+     {/* Logo. While collapsed only the wordmark hides, so the logo
+         stays visible; the toggle lives at the bottom (see below). */}
+      <div className="sidebar-brand">
+       <Link href="/dashboard" className="sidebar-brand-link" aria-label="Brialyns Art Sign Panel">
         <img
           src="/logo.jpg"
           alt=""
@@ -108,23 +123,23 @@ export function Sidebar() {
           height={32}
           className="w-8 h-8 rounded-full object-cover ring-2 ring-white/80 shrink-0"
         />
-        <span className={`font-bold text-xs text-white leading-tight whitespace-nowrap ${poppins.className}`}>
+        <span className={`sidebar-label font-bold text-xs text-white leading-tight whitespace-nowrap ${poppins.className}`}>
           Brialyns Art Sign <span className="text-white/40 font-semibold">| Panel</span>
         </span>
        </Link>
-     </div>
+      </div>
 
-      {/* Navigation - grouped by section titles. Thin visible scrollbar
-          (not hidden) so the System section below the fold is discoverable. */}
-      <nav className="relative flex-1 py-2 overflow-y-auto scrollbar-thin" aria-label="Main navigation">
+      {/* Navigation - grouped by section titles. Scrollbar hidden
+          (reference look): content still scrolls via wheel/touch. */}
+      <nav className="relative flex-1 py-2 overflow-y-auto no-scrollbar" aria-label="Main navigation">
         {navigation.map((section) => {
           const items = section.items.filter(
             (item) => !item.ownerOnly || isOwner,
           );
           if (items.length === 0) return null;
           return (
-          <div key={section.title} className="mb-2 last:mb-0">
-          <h2 className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+          <div key={section.title} className="sidebar-section mb-2 last:mb-0">
+          <h2 className="sidebar-section-title">
             {section.title}
           </h2>
          <ul className="space-y-1 px-3" role="list">
@@ -135,20 +150,22 @@ export function Sidebar() {
            <li key={item.href}>
              <Link
               href={item.href}
-               className={`group flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-[13px] ${
+               className={`sidebar-link group ${
                isActive
                 ? "bg-white text-black shadow-sm"
                 : "text-white/60 hover:bg-white/10 hover:text-white"
               }`}
-             aria-current={isActive ? "page" : undefined}
-            >
+              aria-current={isActive ? "page" : undefined}
+              aria-label={item.label}
+              title={isCollapsed ? item.label : undefined}
+             >
              <Icon
               className={`w-[18px] h-[18px] shrink-0 transition-transform duration-200 ${
                isActive ? "" : "group-hover:scale-110"
               }`}
               aria-hidden
              />
-             <span className="font-medium truncate">{item.label}</span>
+             <span className="sidebar-label font-medium truncate">{item.label}</span>
             </Link>
            </li>
           );
@@ -158,8 +175,31 @@ export function Sidebar() {
         );
        })}
       </nav>
-    </div>
-   </aside>
+
+      {/* Collapse toggle pinned to the bottom so the brand/logo stays
+          visible when the rail narrows. */}
+      {variant === "desktop" && (
+       <div className="sidebar-footer">
+        <button
+         type="button"
+         onClick={toggle}
+         className="sidebar-collapse-toggle"
+         aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+         title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+         {isCollapsed ? (
+          <ChevronsRight className="w-[18px] h-[18px] shrink-0" aria-hidden />
+         ) : (
+          <ChevronsLeft className="w-[18px] h-[18px] shrink-0" aria-hidden />
+         )}
+         <span className="sidebar-label truncate">
+          {isCollapsed ? "Expand" : "Collapse"}
+         </span>
+        </button>
+       </div>
+      )}
+     </div>
+    </aside>
   );
 }
 
@@ -189,7 +229,7 @@ export function MobileSidebarOverlay({ isOpen, onClose, children }: { isOpen: bo
      {children}
      <button
       onClick={onClose}
-      className="absolute top-4 right-4 btn-ghost p-2 lg:hidden"
+      className="absolute top-4 right-4 z-50 btn-ghost p-2 lg:hidden"
       aria-label="Close navigation menu"
      >
       <X className="w-5 h-5" />

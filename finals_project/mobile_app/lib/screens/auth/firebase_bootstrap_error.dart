@@ -30,14 +30,14 @@ class FirebaseBootstrapErrorApp extends StatelessWidget {
                       color: AppTheme.statusUrgent.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.cloud_off_rounded,
                       size: 56,
                       color: AppTheme.statusUrgent,
                     ),
                   ),
                   const SizedBox(height: 24),
-                  const Text(
+                  Text(
                     'Firebase not configured',
                     style: TextStyle(
                       fontSize: 22,
@@ -47,7 +47,7 @@ class FirebaseBootstrapErrorApp extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'This is a one-time setup. The app will not run until Firebase is connected.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.onSurfaceVariant),
@@ -59,7 +59,7 @@ class FirebaseBootstrapErrorApp extends StatelessWidget {
                       color: AppTheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Steps:\n'
                       '1. Go to console.firebase.google.com and create a project.\n'
                       '2. Enable Email/Password sign-in under Authentication.\n'
@@ -77,7 +77,7 @@ class FirebaseBootstrapErrorApp extends StatelessWidget {
                   const SizedBox(height: 16),
                   Text(
                     'Error: $message',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.statusUrgent,
                     ),

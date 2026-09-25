@@ -14,6 +14,7 @@ import '../../services/firebase_orders.dart' as fb_orders;
 import '../../services/order_service.dart';
 import '../../services/services.dart';
 import '../../services/eta.dart' as eta;
+import '../../utils/chrome.dart';
 
 /// The Order Detail screen - shared between Cashier and Production.
 ///
@@ -37,8 +38,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        foregroundColor: AppTheme.onSurface,
+        backgroundColor: chromeBarBackground(context),
+        foregroundColor: chromeBarForeground(context),
+        systemOverlayStyle: chromeBarOverlay(context),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -76,9 +78,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           );
         }
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
+          return Scaffold(
             backgroundColor: AppTheme.background,
-            body: Center(child: CircularProgressIndicator()),
+            body: const Center(child: CircularProgressIndicator()),
           );
         }
         final doc = snap.data;
@@ -163,8 +165,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           slivers: [
             SliverAppBar(
               pinned: true,
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.onSurface,
+              backgroundColor: chromeBarBackground(context),
+              foregroundColor: chromeBarForeground(context),
+              systemOverlayStyle: chromeBarOverlay(context),
               elevation: 0,
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back_rounded),
@@ -732,8 +735,9 @@ class _NotFoundScaffold extends StatelessWidget {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Order Not Found'),
-        backgroundColor: AppTheme.surface,
-        foregroundColor: AppTheme.onSurface,
+        backgroundColor: chromeBarBackground(context),
+        foregroundColor: chromeBarForeground(context),
+        systemOverlayStyle: chromeBarOverlay(context),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: onBack,
@@ -776,7 +780,7 @@ class _CustomerOrdersSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
@@ -922,12 +926,14 @@ class _StatusTimeline extends StatelessWidget {
 
   final String currentStatus;
 
-  static const List<_TimelineStage> _stages = [
-    _TimelineStage('Pending', Icons.schedule_rounded, AppTheme.statusUrgent),
-    _TimelineStage('In Production', Icons.construction_rounded, AppTheme.statusInProduction),
-    _TimelineStage('Ready for Pickup', Icons.check_circle_outline_rounded, AppTheme.statusReadyForPickup),
-    _TimelineStage('Completed', Icons.task_alt_rounded, AppTheme.statusCompleted),
-  ];
+  /// Built per access so the badge colors follow the live palette
+  /// (light/dark) instead of freezing the mode active at first use.
+  List<_TimelineStage> get _stages => [
+        _TimelineStage('Pending', Icons.schedule_rounded, AppTheme.statusUrgent),
+        _TimelineStage('In Production', Icons.construction_rounded, AppTheme.statusInProduction),
+        _TimelineStage('Ready for Pickup', Icons.check_circle_outline_rounded, AppTheme.statusReadyForPickup),
+        _TimelineStage('Completed', Icons.task_alt_rounded, AppTheme.statusCompleted),
+      ];
 
   int get _currentIndex {
     switch (currentStatus) {

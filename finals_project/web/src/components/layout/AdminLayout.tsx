@@ -18,13 +18,15 @@ export function AdminLayout({ children, title, subtitle, headerActions, onSearch
   // Canvas stays light in both modes; dark mode floats dark panels on it.
   return (
    <div className="min-h-screen bg-[#e2e5e9] flex">
-    {/* Mobile Sidebar Overlay */}
+    {/* Mobile Sidebar Overlay - always full width, no collapse. */}
     <MobileSidebarOverlay isOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)}>
-     <Sidebar />
+     <Sidebar variant="drawer" />
     </MobileSidebarOverlay>
 
-    {/* Desktop Sidebar */}
-    <Sidebar />
+    {/* Desktop Sidebar (collapsible; below lg the drawer above replaces it) */}
+    <div className="hidden lg:block">
+     <Sidebar />
+    </div>
 
     {/* Main Content - floating rounded panel like the reference */}
     <main className="main-content lg:relative px-3 pt-3">

@@ -29,7 +29,7 @@ class PfCard extends StatelessWidget {
     this.child,
     this.padding = const EdgeInsets.all(AppSpacing.md),
     this.cardRadius = AppRadius.rMd,
-    this.backgroundColor = AppTheme.surface,
+    this.backgroundColor,
     this.onTap,
     this.accent,
     this.variant = PfCardVariant.surface,
@@ -39,7 +39,10 @@ class PfCard extends StatelessWidget {
   final Widget? child;
   final EdgeInsets padding;
   final BorderRadius cardRadius;
-  final Color backgroundColor;
+
+  /// Defaults to [AppTheme.surface] at build time (the palette is live and
+  /// cannot be a compile-time default).
+  final Color? backgroundColor;
   final VoidCallback? onTap;
   final Color? accent;
   final PfCardVariant variant;
@@ -50,10 +53,11 @@ class PfCard extends StatelessWidget {
     final Color effectiveBg;
     final Color effectiveBorder;
     final List<BoxShadow> shadow;
+    final Color bg = backgroundColor ?? AppTheme.surface;
 
     switch (variant) {
       case PfCardVariant.elevated:
-        effectiveBg = backgroundColor;
+        effectiveBg = bg;
         effectiveBorder = Colors.transparent;
         shadow = AppShadow.sm;
         break;
@@ -63,7 +67,7 @@ class PfCard extends StatelessWidget {
         shadow = const [];
         break;
       case PfCardVariant.surface:
-        effectiveBg = backgroundColor;
+        effectiveBg = bg;
         effectiveBorder =
             borderColor ?? Theme.of(context).colorScheme.outlineVariant;
         shadow = const [];

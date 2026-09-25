@@ -157,6 +157,27 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---- otp_codes/{uid} ----
+    // One-time codes for profile-edit confirmations (5-minute TTL,
+    // single-use, max 5 attempts). Written and verified ONLY by the Apps
+    // Script service account (Admin SDK bypasses rules) - no client can
+    // ever read a code out of the database, so possessing the code
+    // proves access to the registered inbox.
+    match /otp_codes/{docId} {
+      allow read, write: if false;
+    }
+
+    // ---- counters/{counterId} ----
+    // Sequence counters behind human-friendly ids (orders -> ORD-0001).
+    // Order creation reads + bumps `counters/orders` in the SAME
+    // transaction that writes the order, so only cashier-tier roles may
+    // touch it. Deletes are denied - resetting would re-issue ids.
+    match /counters/{counterId} {
+      allow read: if isSignedIn();
+      allow create, update: if isCashier() && counterId == 'orders';
+      allow delete: if false;
+    }
+
     // ---- everything else ----
     match /{document=**} {
       allow read, write: if false;

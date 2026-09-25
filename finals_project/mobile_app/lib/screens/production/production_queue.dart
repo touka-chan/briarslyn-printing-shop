@@ -33,6 +33,13 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
   final _searchCtrl = TextEditingController();
   final List<String> _filters = ['All', 'Overdue', 'Urgent', 'Upcoming'];
 
+  /// Pull-to-refresh: re-subscribes the live feed and holds the spinner
+  /// briefly so the gesture reads as feedback.
+  Future<void> _handleRefresh() async {
+    setState(() => _feedNonce++);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -147,7 +154,12 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
         final rate = eta.completedUnitsLast7d(raw) / 7.0;
         final live =
             raw.map((o) => _withLiveDerived(o, active, rate)).toList();
-        return _buildQueue(live);
+        return RefreshIndicator(
+          onRefresh: _handleRefresh,
+          color: AppTheme.primary,
+          backgroundColor: AppTheme.surface,
+          child: _buildQueue(live),
+        );
       },
     );
   }
@@ -244,6 +256,7 @@ class _ProductionQueueScreenState extends State<ProductionQueueScreen> {
         : ((onTimeCount / activeOrders.length) * 100).round();
 
     return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
       child: StaggeredFadeIn(
         children: [

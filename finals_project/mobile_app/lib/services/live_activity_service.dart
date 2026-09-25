@@ -94,6 +94,11 @@ class LiveActivityService {
   /// Emitter wired in main.dart to the global ScaffoldMessenger.
   static void Function(LiveActivityEvent event)? onEvent;
 
+  /// Unread live-activity count for the app bar bell badge. Bumped once
+  /// per real change (self-inflicted changes never get here); the
+  /// Notifications screen resets it when opened.
+  static final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
+
   // ---- watcher state ----------------------------------------------------
   final List<StreamSubscription<dynamic>> _subs = [];
   bool _active = false;
@@ -179,6 +184,9 @@ class LiveActivityService {
 
   void _emit(List<LiveActivityEvent> events) {
     if (events.isEmpty || onEvent == null) return;
+    // Every real change marks the bell unread; the Notifications screen
+    // clears it when opened.
+    unreadCount.value += events.length;
     // Cap snackbars per batch so a burst (auto-deduct touching several
     // materials) never floods the screen - mirrors the web header.
     var shown = 0;

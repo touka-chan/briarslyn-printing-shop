@@ -8,6 +8,8 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/firebase_bootstrap_error.dart';
 import 'services/live_activity_service.dart';
 import 'theme/app_theme.dart';
+import 'theme/theme_controller.dart';
+import 'widgets/offline_banner.dart';
 
 /// Top-level singleton - constructed once after Firebase initializes, then
 /// passed into [AuthProvider]. Anywhere in the app, [AuthProvider.of]
@@ -27,6 +29,32 @@ void _syncLiveActivityWatcher() {
   } else {
     LiveActivityService.instance.stop();
   }
+}
+
+/// Last uid whose stored appearance was applied, and the preference that
+/// was applied for it. The profile doc trails the Firebase user by a
+/// moment, so the mode is applied once per uid when the snapshot with the
+/// stored `theme` actually arrives - never re-applied after that, which
+/// keeps the optimistic toggle from being reverted by its own write.
+String? _appliedThemeUid;
+String? _appliedTheme;
+
+void _syncThemeFromProfile() {
+  final uid = _auth.currentUid;
+  if (uid == null) {
+    if (_appliedThemeUid != null) {
+      _appliedThemeUid = null;
+      _appliedTheme = null;
+      applyStoredTheme(null); // sign-out returns to light
+    }
+    return;
+  }
+  final user = _auth.currentUser;
+  if (user == null) return; // profile snapshot still loading
+  if (uid == _appliedThemeUid && _appliedTheme != null) return;
+  _appliedThemeUid = uid;
+  _appliedTheme = user.theme ?? 'light';
+  applyStoredTheme(user.theme);
 }
 
 /// Shows one live-activity change as a floating SnackBar (icon + title +
@@ -74,7 +102,7 @@ void _showLiveActivitySnackBar(LiveActivityEvent event) {
               children: [
                 Text(
                   event.title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.onPrimary,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
@@ -83,7 +111,7 @@ void _showLiveActivitySnackBar(LiveActivityEvent event) {
                 const SizedBox(height: 2),
                 Text(
                   event.detail,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.onPrimary,
                     fontSize: 12,
                   ),
@@ -111,6 +139,11 @@ Future<void> main() async {
     _auth.addListener(_syncLiveActivityWatcher);
     _syncLiveActivityWatcher();
 
+    // Appearance: apply the signed-in user's saved mode before the first
+    // frame (signed-out devices stay light).
+    _auth.addListener(_syncThemeFromProfile);
+    _syncThemeFromProfile();
+
     runApp(const PrintFlowApp());
   } on FirebaseException catch (e) {
     // Config placeholder (REPLACE_ME) makes the SDK throw. Show a clear
@@ -130,15 +163,21 @@ class PrintFlowApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return AuthProvider(
       authService: _auth,
-      child: MaterialApp(
-        title: 'Brialyns Art Sign',
-        debugShowCheckedModeBanner: false,
-        scaffoldMessengerKey: scaffoldMessengerKey,
-        theme: AppTheme.light,
-        initialRoute: AppRoutes.login,
-        onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
-          settings,
-          fallback: (_) => const LoginScreen(),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: themeNotifier,
+        builder: (context, _, _) => MaterialApp(
+          title: 'Brialyns Art Sign',
+          debugShowCheckedModeBanner: false,
+          scaffoldMessengerKey: scaffoldMessengerKey,
+          theme: AppTheme.light,
+          initialRoute: AppRoutes.login,
+          // Global offline strip above every screen.
+          builder: (context, child) =>
+              OfflineBanner(child: child ?? const SizedBox.shrink()),
+          onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
+            settings,
+            fallback: (_) => const LoginScreen(),
+          ),
         ),
       ),
     );

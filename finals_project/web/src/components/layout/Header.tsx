@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button, Modal, useToast } from "@/components/ui";
+import { SensorStatus } from "./SensorStatus";
 import { useAuth } from "@/lib/auth";
 import { useFeedStatus } from "@/lib/useFeedStatus";
 import { subscribeOrders } from "@/lib/services/orders";
@@ -664,6 +665,9 @@ export function Header({
     {/* Right: Actions */}
     <div className="flex items-center gap-3">
      {actions}
+
+     {/* Live ESP32 station status (sensors collection) */}
+     <SensorStatus />
 
       {/* Notifications */}
       <div className="relative">

@@ -58,7 +58,7 @@ class KpiCard extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.onSurface,
@@ -67,7 +67,7 @@ class KpiCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   color: AppTheme.onSurfaceVariant,
                 ),

@@ -131,6 +131,53 @@ class InventoryService {
     }
   }
 
+  /// Finds the variant a physical tag is currently bound to (null when
+  /// the tag is free). Used by the scan-to-confirm flow so a tap can
+  /// never silently move stock into the wrong item.
+  static Future<String?> findVariantByTag(String tagUid) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('inventory')
+          .where('tag_uid', isEqualTo: tagUid)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return null;
+      return snap.docs.first.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Binds (or replaces) a tag on a variant.
+  ///
+  /// Requires [Permission.inventoryUpdate].
+  static Future<void> bindTag({
+    required String materialVariantId,
+    required String tagUid,
+    required AuthService auth,
+    String? previousTag,
+  }) async {
+    auth.assertCan(Permission.inventoryUpdate);
+    await FirebaseFirestore.instance
+        .collection('inventory')
+        .doc(materialVariantId)
+        .update(<String, dynamic>{
+      'tag_uid': tagUid,
+      'last_updated': FieldValue.serverTimestamp(),
+    });
+    LiveActivityMarks.mark('inventory', materialVariantId);
+    debugPrint('[InventoryService] Bound tag $tagUid to $materialVariantId');
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'tag_bound',
+      module: 'inventory',
+      recordId: materialVariantId,
+      recordLabel: 'Material $materialVariantId tag',
+      oldValue: previousTag,
+      newValue: tagUid,
+    );
+  }
+
   /// Best-effort pre-read for audit old-values. Returns null when the doc
   /// is missing/unreadable - callers still proceed with the write.
   static Future<Map<String, dynamic>?> _readVariant(String id) async {

@@ -292,7 +292,7 @@ export default function DashboardPage() {
   },
   {
    key: "reorder_point",
-   header: "ROP",
+   header: "Threshold (ROP)",
    render: (r: InventoryItem) => (
     <span
      className={

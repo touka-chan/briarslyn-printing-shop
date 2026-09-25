@@ -320,7 +320,7 @@ export default function AnalyticsPage() {
    },
    {
     key: "reorder_point",
-    header: "ROP",
+    header: "Threshold (ROP)",
     render: (r: InventoryItem) => (
      <span
       className={

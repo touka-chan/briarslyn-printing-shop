@@ -19,7 +19,7 @@ class PfMetricCard extends StatelessWidget {
     required this.value,
     required this.label,
     required this.icon,
-    this.accentColor = AppTheme.primary,
+    this.accentColor,
     this.change,
     this.changePositive = true,
     this.sparklineData,
@@ -30,7 +30,10 @@ class PfMetricCard extends StatelessWidget {
   final num value;
   final String label;
   final IconData icon;
-  final Color accentColor;
+
+  /// Defaults to [AppTheme.primary] at build time (the palette is live and
+  /// cannot be a compile-time default).
+  final Color? accentColor;
   final String? change;
   final bool changePositive;
   final List<double>? sparklineData;
@@ -41,6 +44,7 @@ class PfMetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final hasSparkline = sparklineData != null && sparklineData!.length >= 2;
+    final accent = accentColor ?? AppTheme.primary;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -53,7 +57,7 @@ class PfMetricCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.08),
+            color: accent.withValues(alpha: 0.08),
             blurRadius: 12,
             offset: const Offset(0, 2),
           ),
@@ -68,13 +72,13 @@ class PfMetricCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(AppSpacing.xs),
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
+                  color: accent.withValues(alpha: 0.12),
                   borderRadius: AppRadius.rSm,
                 ),
                 child: Icon(
                   icon,
                   size: AppIconSize.md,
-                  color: accentColor,
+                  color: accent,
                 ),
               ),
               const Spacer(),
@@ -113,7 +117,7 @@ class PfMetricCard extends StatelessWidget {
               height: 32,
               child: _Sparkline(
                 data: sparklineData!,
-                color: accentColor,
+                color: accent,
               ),
             ),
           ],

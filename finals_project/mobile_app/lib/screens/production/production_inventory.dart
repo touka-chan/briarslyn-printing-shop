@@ -17,6 +17,7 @@ import '../../utils/animations.dart';
 import '../../models/inventory_item.dart';
 import '../../models/rfid_event.dart';
 import '../../models/usage_event.dart';
+import '../../widgets/scan_confirm_sheet.dart';
 
 /// The Inventory screen - the second tab in the Production shell.
 ///
@@ -59,9 +60,21 @@ class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
             ),
           );
         }
-        return _buildBody(snap.data!);
+        return RefreshIndicator(
+          onRefresh: _handleRefresh,
+          color: AppTheme.primary,
+          backgroundColor: AppTheme.surface,
+          child: _buildBody(snap.data!),
+        );
       },
     );
+  }
+
+  /// Pull-to-refresh: re-subscribes the live feed and holds the spinner
+  /// briefly so the gesture reads as feedback.
+  Future<void> _handleRefresh() async {
+    setState(() => _feedNonce++);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
   }
 
   Widget _buildErrorState({String? details, VoidCallback? onRetry}) {
@@ -133,6 +146,7 @@ class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
     final insufficientCount = source.where((i) => i.status == 'Insufficient Stock').length;
 
     return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xxl),
       child: StaggeredFadeIn(
         children: [
@@ -168,6 +182,30 @@ class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
             selected: _filter,
             onChanged: (v) => setState(() => _filter = v),
           ),
+          const SizedBox(height: AppSpacing.md),
+          // Scanner-first row: tap any tag to open its item, or create a
+          // new material variant.
+          Row(
+            children: [
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Find by Scan',
+                  icon: Icons.nfc_rounded,
+                  fullWidth: true,
+                  onPressed: () => _findByScan(source),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: PfButton.outlined(
+                  label: 'Add Item',
+                  icon: Icons.add_rounded,
+                  fullWidth: true,
+                  onPressed: () => _showAddItemSheet(context, source),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.lg),
           // Inventory list
           if (source.isEmpty)
@@ -191,6 +229,53 @@ class _ProductionInventoryScreenState extends State<ProductionInventoryScreen> {
         ],
       ),
     );
+  }
+
+  /// Scanner-first lookup: tap any tag to open its item sheet, or turn a
+  /// free tag into a new item (prefilled with the scanned UID).
+  Future<void> _findByScan(List<InventoryItem> items) async {
+    final uid = await showScanConfirmSheet(
+      context,
+      mode: ScanConfirmMode.lookup,
+    );
+    if (!mounted || uid == null) return;
+
+    InventoryItem? found;
+    for (final item in items) {
+      if ((item.tagUid ?? '').trim().toUpperCase() == uid.toUpperCase()) {
+        found = item;
+        break;
+      }
+    }
+    final match = found;
+    if (match != null) {
+      HapticFeedback.mediumImpact();
+      context.showModalSheet(builder: (_) => _ItemDetailSheet(item: match));
+      return;
+    }
+
+    final create = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Free tag'),
+        content: Text(
+          'No item is bound to tag $uid. Create a new item with it?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (create == true && mounted) {
+      await _showAddItemSheet(context, items, prefilledTag: uid);
+    }
   }
 }
 
@@ -424,7 +509,7 @@ class _InventoryCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Reorder at: ${item.reorderPoint}',
+                    'Threshold: ${item.reorderPoint}',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
                   ),
                   Text(
@@ -476,7 +561,7 @@ class _ItemDetailSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -507,7 +592,7 @@ class _ItemDetailSheet extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           _DetailRow(label: 'Category', value: item.category),
           _DetailRow(label: 'Current Stock', value: '${item.currentStock}'),
-          _DetailRow(label: 'Reorder Point', value: '${item.reorderPoint}'),
+          _DetailRow(label: 'Threshold (ROP)', value: '${item.reorderPoint}'),
           _DetailRow(label: 'Forecast (7d)', value: '${item.forecastedDemandNext7Days}'),
           _DetailRow(label: 'Forecast Model', value: item.model ?? '-'),
           if (item.tagUid != null)
@@ -547,13 +632,30 @@ class _ItemDetailSheet extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           PfButton.outlined(
-            label: 'Edit Reorder Point',
+            label: 'Edit Threshold (ROP)',
             icon: Icons.flag_outlined,
             fullWidth: true,
             onPressed: () {
               HapticFeedback.selectionClick();
               context.pop();
               _showEditReorderPointSheet(context, item);
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // Bind (or replace) this item's RFID tag by scanning it - stock
+          // is untouched; only the tag mapping changes.
+          PfButton.outlined(
+            label: 'Bind / Replace Tag',
+            icon: Icons.nfc_rounded,
+            fullWidth: true,
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              context.pop();
+              showScanConfirmSheet(
+                context,
+                mode: ScanConfirmMode.bind,
+                item: item,
+              );
             },
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -752,7 +854,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
     final viewInsets = MediaQuery.of(context).viewInsets;
     final projectStock = widget.item.currentStock + _qty;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -944,11 +1046,45 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
     }
   }
 
+  /// Confirms the adjustment by scanning the item's tag (identity check
+  /// before an absolute stock correction). The scan sheet applies
+  /// `updateStock` itself.
+  Future<void> _scanConfirm() async {
+    final value = int.tryParse(_ctrl.text.trim());
+    if (value == null || value < 0) {
+      setState(() => _error = 'Enter a non-negative whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final consumedTag = await showScanConfirmSheet(
+      context,
+      mode: ScanConfirmMode.adjust,
+      item: widget.item,
+      targetStock: value,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (consumedTag != null) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Stock updated (scan) to $value for ${widget.item.materialVariantId}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1013,6 +1149,14 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
           const SizedBox(height: AppSpacing.xl),
+          // Primary: scan this item's tag to confirm the correction.
+          PfButton.filled(
+            label: 'Scan tag to confirm',
+            icon: Icons.nfc_rounded,
+            fullWidth: true,
+            onPressed: _submitting ? null : _scanConfirm,
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
               Expanded(
@@ -1024,8 +1168,8 @@ class _AdjustStockSheetState extends State<_AdjustStockSheet> {
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: PfButton.filled(
-                  label: _submitting ? 'Saving...' : 'Save',
+                child: PfButton.outlined(
+                  label: _submitting ? 'Saving...' : 'Save without scan',
                   icon: Icons.check_rounded,
                   fullWidth: true,
                   loading: _submitting,
@@ -1127,11 +1271,44 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
     }
   }
 
+  /// Confirms the new reorder point by scanning the item's tag. The scan
+  /// sheet applies `updateReorderPoint` itself.
+  Future<void> _scanConfirm() async {
+    final value = int.tryParse(_ctrl.text.trim());
+    if (value == null || value < 0) {
+      setState(() => _error = 'Enter a non-negative whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final consumedTag = await showScanConfirmSheet(
+      context,
+      mode: ScanConfirmMode.reorderPoint,
+      item: widget.item,
+      newReorderPoint: value,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (consumedTag != null) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Reorder point (scan) set to $value for ${widget.item.materialVariantId}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1157,7 +1334,7 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
             ),
           ),
           Text(
-            'Edit Reorder Point',
+            'Edit Threshold (ROP)',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -1179,7 +1356,7 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: _Stat(
-                  label: 'Current ROP',
+                  label: 'Current Threshold',
                   value: '${widget.item.reorderPoint}',
                   highlight: true,
                 ),
@@ -1188,7 +1365,7 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
           ),
           const SizedBox(height: AppSpacing.lg),
           PfTextField(
-            label: 'New reorder point',
+            label: 'New threshold (ROP)',
             hintText: 'Enter new threshold',
             helper: 'Stock at or below this level shows as Low Stock.',
             controller: _ctrl,
@@ -1198,6 +1375,14 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
           const SizedBox(height: AppSpacing.xl),
+          // Primary: scan this item's tag to confirm the new threshold.
+          PfButton.filled(
+            label: 'Scan tag to confirm',
+            icon: Icons.nfc_rounded,
+            fullWidth: true,
+            onPressed: _submitting ? null : _scanConfirm,
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
               Expanded(
@@ -1209,8 +1394,8 @@ class _EditReorderPointSheetState extends State<_EditReorderPointSheet> {
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: PfButton.filled(
-                  label: _submitting ? 'Saving...' : 'Save',
+                child: PfButton.outlined(
+                  label: _submitting ? 'Saving...' : 'Save without scan',
                   icon: Icons.check_rounded,
                   fullWidth: true,
                   loading: _submitting,
@@ -1382,11 +1567,47 @@ class _StockInSheetState extends State<_StockInSheet> {
     }
   }
 
+  /// Confirms the receive by scanning the item's RFID tag. The scan sheet
+  /// applies the stock-in itself (with source 'rfid'), so this only
+  /// validates the quantity and closes on success.
+  Future<void> _scanConfirm() async {
+    final qty = int.tryParse(_qtyCtrl.text.trim());
+    if (qty == null || qty <= 0) {
+      setState(() => _error = 'Enter a positive whole number');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final note = _noteCtrl.text.trim();
+    final consumedTag = await showScanConfirmSheet(
+      context,
+      mode: ScanConfirmMode.stockIn,
+      item: widget.item,
+      qty: qty,
+      note: note.isEmpty ? null : note,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (consumedTag != null) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Stock in (scan): +$qty ${widget.item.materialVariantId}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1440,6 +1661,15 @@ class _StockInSheetState extends State<_StockInSheet> {
             prefixIcon: Icons.note_alt_outlined,
           ),
           const SizedBox(height: AppSpacing.xl),
+          // Primary path: confirm by scanning the item's RFID tag - the
+          // receiver picks the item first, so the tap can only land here.
+          PfButton.filled(
+            label: 'Scan tag to confirm',
+            icon: Icons.nfc_rounded,
+            fullWidth: true,
+            onPressed: _submitting ? null : _scanConfirm,
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
               Expanded(
@@ -1451,8 +1681,8 @@ class _StockInSheetState extends State<_StockInSheet> {
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: PfButton.filled(
-                  label: _submitting ? 'Saving...' : 'Confirm',
+                child: PfButton.outlined(
+                  label: _submitting ? 'Saving...' : 'Save without scan',
                   icon: Icons.check_rounded,
                   fullWidth: true,
                   loading: _submitting,
@@ -1612,7 +1842,7 @@ class _LogUsageSheetState extends State<_LogUsageSheet> {
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1717,6 +1947,379 @@ class _LogUsageSheetState extends State<_LogUsageSheet> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Opens the Add Item sheet. [source] is the live inventory list - its
+/// distinct categories populate the category dropdown.
+Future<void> _showAddItemSheet(
+  BuildContext context,
+  List<InventoryItem> source, {
+  String? prefilledTag,
+}) async {
+  final categories = source
+      .map((i) => i.category.trim())
+      .where((c) => c.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _AddItemSheet(
+      categories: categories,
+      prefilledTag: prefilledTag,
+    ),
+  );
+}
+
+/// Opens the item's action sheet from anywhere (e.g. the Sensor tab's
+/// Last-scan card). Mirrors the card tap in the inventory list.
+Future<void> showInventoryItemSheet(
+  BuildContext context,
+  InventoryItem item,
+) {
+  return context.showModalSheet(builder: (_) => _ItemDetailSheet(item: item));
+}
+
+/// Modal bottom sheet for creating a new material variant. The variant ID
+/// is auto-generated (INV-XXXXXX, same convention as the web), the category
+/// is picked from the existing list (or typed as new), the sensor comes
+/// from the live `sensors` collection, and the RFID tag can be scanned
+/// right here (capture only - binding happens on save).
+class _AddItemSheet extends StatefulWidget {
+  const _AddItemSheet({required this.categories, this.prefilledTag});
+
+  final List<String> categories;
+
+  /// Tag UID captured by a previous scan (e.g. the Find-by-Scan free-tag
+  /// flow) - shown as already scanned.
+  final String? prefilledTag;
+
+  @override
+  State<_AddItemSheet> createState() => _AddItemSheetState();
+}
+
+class _AddItemSheetState extends State<_AddItemSheet> {
+  static const String _newCategory = '__new_category__';
+
+  final _itemTypeCtrl = TextEditingController();
+  final _newCategoryCtrl = TextEditingController();
+  final _stockCtrl = TextEditingController(text: '0');
+  final _ropCtrl = TextEditingController(text: '5');
+
+  String? _category;
+  String _sensor = 'ESP32-01';
+  String? _capturedTag;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _capturedTag = widget.prefilledTag;
+  }
+
+  @override
+  void dispose() {
+    _itemTypeCtrl.dispose();
+    _newCategoryCtrl.dispose();
+    _stockCtrl.dispose();
+    _ropCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Same formula used by usage_service / firebase_inventory.
+  String _statusFor(int stock, int rop) {
+    if (stock <= (rop * 0.6).floor()) return 'Insufficient Stock';
+    if (stock <= rop) return 'Low Stock';
+    return 'In Stock';
+  }
+
+  Future<void> _scanTag() async {
+    final uid = await showScanConfirmSheet(
+      context,
+      mode: ScanConfirmMode.capture,
+    );
+    if (!mounted || uid == null) return;
+    setState(() => _capturedTag = uid);
+  }
+
+  Future<void> _save() async {
+    final itemType = _itemTypeCtrl.text.trim();
+    final category = _category == _newCategory
+        ? _newCategoryCtrl.text.trim()
+        : (_category ?? '');
+    final stock = int.tryParse(_stockCtrl.text.trim());
+    final rop = int.tryParse(_ropCtrl.text.trim());
+    if (itemType.isEmpty) {
+      setState(() => _error = 'Enter the item type');
+      return;
+    }
+    if (category.isEmpty) {
+      setState(() => _error = 'Pick a category or type a new one');
+      return;
+    }
+    if (stock == null || stock < 0) {
+      setState(() => _error = 'Initial stock: whole number (0 or more)');
+      return;
+    }
+    if (rop == null || rop < 0) {
+      setState(() => _error = 'Reorder point: whole number (0 or more)');
+      return;
+    }
+    final ms = DateTime.now().millisecondsSinceEpoch.toString();
+    final id = 'INV-${ms.substring(ms.length - 6)}';
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final auth = AuthProvider.of(context);
+    try {
+      await InventoryService.createVariant(
+        item: InventoryItem(
+          materialVariantId: id,
+          itemType: itemType,
+          category: category,
+          tagUid: _capturedTag,
+          sensorId: _sensor.trim().isEmpty ? null : _sensor.trim(),
+          currentStock: stock,
+          reorderPoint: rop,
+          forecastedDemandNext7Days: 0,
+          model: 'Exponential Smoothing',
+          status: _statusFor(stock, rop),
+          lastUpdated: DateTime.now(),
+        ),
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Created: $id ($itemType)'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $e';
+      });
+    }
+  }
+
+  InputDecoration _dropdownDecoration() => InputDecoration(
+        filled: true,
+        fillColor: AppTheme.surfaceContainer,
+        border: OutlineInputBorder(
+          borderRadius: AppRadius.rMd,
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.md,
+        ),
+      );
+
+  Widget _fieldLabel(String text) => Text(
+        text,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: AppTheme.onSurface,
+            ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              'Add Item',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Variant ID: auto (INV-XXXXXX)',
+              style: AppTheme.monoStyle(
+                fontSize: 12,
+                color: AppTheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            PfTextField(
+              label: 'Item type',
+              hintText: 'e.g. Test Ink Black',
+              controller: _itemTypeCtrl,
+              prefixIcon: Icons.category_outlined,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _fieldLabel('Category'),
+            const SizedBox(height: AppSpacing.sm),
+            DropdownButtonFormField<String>(
+              initialValue: _category,
+              decoration: _dropdownDecoration(),
+              hint: const Text('Pick a category'),
+              items: [
+                ...widget.categories.map(
+                  (c) => DropdownMenuItem(value: c, child: Text(c)),
+                ),
+                const DropdownMenuItem(
+                  value: _newCategory,
+                  child: Text('+ New category'),
+                ),
+              ],
+              onChanged:
+                  _saving ? null : (v) => setState(() => _category = v),
+            ),
+            if (_category == _newCategory) ...[
+              const SizedBox(height: AppSpacing.sm),
+              PfTextField(
+                label: 'New category',
+                hintText: 'e.g. Ink',
+                controller: _newCategoryCtrl,
+                prefixIcon: Icons.create_new_folder_outlined,
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            _fieldLabel('Sensor'),
+            const SizedBox(height: AppSpacing.sm),
+            StreamBuilder<Map<String, fb_rfid.SensorState>>(
+              stream: fb_rfid.subscribeSensorsStream(),
+              builder: (context, snap) {
+                final ids = <String>{'ESP32-01'}
+                  ..addAll(snap.data?.keys ?? const <String>[])
+                  ..add(_sensor);
+                final list = ids.toList()..sort();
+                return DropdownButtonFormField<String>(
+                  initialValue: list.contains(_sensor) ? _sensor : list.first,
+                  decoration: _dropdownDecoration(),
+                  items: list
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged:
+                      _saving ? null : (v) => setState(() => _sensor = v ?? _sensor),
+                );
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: PfTextField(
+                    label: 'Initial stock',
+                    hintText: '0',
+                    controller: _stockCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: PfTextField(
+                    label: 'Reorder point',
+                    hintText: '5',
+                    controller: _ropCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            PfButton.outlined(
+              label: _capturedTag == null
+                  ? 'Scan tag (optional)'
+                  : 'Tag: $_capturedTag',
+              icon: Icons.nfc_rounded,
+              fullWidth: true,
+              onPressed: _saving ? null : _scanTag,
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorContainer,
+                  borderRadius: AppRadius.rSm,
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: AppTheme.onErrorContainer,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            Row(
+              children: [
+                Expanded(
+                  child: PfButton.outlined(
+                    label: 'Cancel',
+                    fullWidth: true,
+                    onPressed: _saving ? null : () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: PfButton.filled(
+                    label: _saving ? 'Saving...' : 'Create item',
+                    icon: Icons.add_rounded,
+                    fullWidth: true,
+                    loading: _saving,
+                    onPressed: _saving ? null : _save,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

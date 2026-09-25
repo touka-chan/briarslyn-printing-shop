@@ -353,7 +353,7 @@ export default function ReportsPage() {
   { key: "item_type", header: "Item" },
   { key: "category", header: "Category" },
   { key: "current_stock", header: "Stock" },
-  { key: "reorder_point", header: "ROP" },
+  { key: "reorder_point", header: "Threshold (ROP)" },
   { key: "forecasted_demand_next_7_days", header: "Fcst 7d" },
   {
    key: "status",

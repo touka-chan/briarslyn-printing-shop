@@ -11,6 +11,11 @@ class AppUser {
   final String role; // 'Admin' | 'POS_Cashier' | 'Production Staff'
   final String status; // 'active' | 'inactive'
   final String? lastLogin;
+
+  /// Saved appearance preference ('dark' | 'light' | null = light).
+  /// Follows the account across devices (stored on `users/{uid}.theme`).
+  final String? theme;
+
   final String? region;
   final String? province;
   final String? city;
@@ -24,6 +29,7 @@ class AppUser {
     required this.role,
     this.status = 'active',
     this.lastLogin,
+    this.theme,
     this.region,
     this.province,
     this.city,
@@ -38,6 +44,7 @@ class AppUser {
         role: json['role'] as String,
         status: json['status'] as String? ?? 'active',
         lastLogin: json['lastLogin'] as String?,
+        theme: json['theme'] as String?,
         region: json['region'] as String?,
         province: json['province'] as String?,
         city: json['city'] as String?,
@@ -52,6 +59,7 @@ class AppUser {
         'role': role,
         'status': status,
         'lastLogin': lastLogin,
+        'theme': theme,
         'region': region,
         'province': province,
         'city': city,

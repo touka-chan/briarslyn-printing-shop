@@ -189,7 +189,7 @@ export default function ForecastingPage() {
   { key: "material_variant_id", header: "Variant ID", render: (r:InventoryItem)=><span className="font-mono text-xs">{r.material_variant_id}</span> },
   { key: "item_type", header: "Item Type" },
   { key: "current_stock", header: "Stock" },
-  { key: "reorder_point", header: "ROP (Holt-Winters/Exp Smoothing)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point} ({r.model})</span> },
+  { key: "reorder_point", header: "Threshold / ROP (Holt-Winters/Exp Smoothing)", render: (r:InventoryItem)=><span className={r.current_stock<=r.reorder_point?"text-printflow-error font-bold":""}>{r.reorder_point} ({r.model})</span> },
   { key: "forecasted_demand_next_7_days", header: "Forecast 7d" },
   { key: "tag_uid", header: "Tag UID", render: (r:InventoryItem)=><span className="font-mono text-xs">{r.tag_uid}</span> },
   { key: "sensor_id", header: "Sensor" },
@@ -199,7 +199,7 @@ export default function ForecastingPage() {
    { key: "material_variant_id", header: "Variant ID", render: (r:InventoryItem)=><span className="font-mono text-xs">{r.material_variant_id}</span> },
    { key: "item_type", header: "Item Type" },
    { key: "current_stock", header: "Stock" },
-   { key: "reorder_point", header: "ROP" },
+   { key: "reorder_point", header: "Threshold (ROP)" },
    { key: "status", header: "Status", render: (r:InventoryItem)=><StatusBadge status={r.status.toLowerCase().replace(/\s+/g,'-') as any} customLabel={r.status} /> },
   ];
 

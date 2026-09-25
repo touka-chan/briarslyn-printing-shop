@@ -16,6 +16,7 @@ import '../../services/firebase_inventory.dart' as fb_inventory;
 import '../../services/firebase_orders.dart' as fb_orders;
 import '../../services/order_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/chrome.dart';
 import '../../utils/animations.dart';
 import '../../widgets/address_cascade.dart';
 import 'cashier_order_confirmed.dart';
@@ -291,7 +292,7 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
   /// so an accidental back-tap doesn't silently discard the draft.
   Future<void> _handleBack() async {
     if (!_hasUserInput()) {
-      Navigator.pop(context);
+      _leaveScreen();
       return;
     }
     HapticFeedback.selectionClick();
@@ -317,7 +318,18 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
       ),
     );
     if (shouldDiscard == true && mounted) {
-      Navigator.pop(context);
+      _leaveScreen();
+    }
+  }
+
+  /// Leaves the screen safely: pops the pushed route, or exits the app when
+  /// the form is the shell's root tab (never pops an empty navigator).
+  void _leaveScreen() {
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+    } else {
+      SystemNavigator.pop();
     }
   }
 
@@ -486,12 +498,25 @@ class _CashierNewOrderScreenState extends State<CashierNewOrderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // System back / predictive gesture gets the same unsaved-changes guard
+    // as the app bar arrow.
+    return PopScope(
+      canPop: !_hasUserInput(),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('New Order'),
-        backgroundColor: AppTheme.surface,
-        foregroundColor: AppTheme.onSurface,
+        backgroundColor: chromeBarBackground(context),
+        foregroundColor: chromeBarForeground(context),
+        systemOverlayStyle: chromeBarOverlay(context),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: _handleBack,

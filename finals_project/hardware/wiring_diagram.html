@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brialyns Art Sign - ESP32 + RC522 Wiring</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 60px;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    background: #f4f4f2; color: #17171c;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.4px; }
+  .sub { color: #55555e; font-size: 14px; margin-bottom: 20px; }
+  .warn {
+    display: flex; gap: 10px; align-items: center;
+    background: #fdecec; border: 1px solid #f3b7b7; color: #8f1d1d;
+    border-radius: 12px; padding: 12px 16px; font-weight: 600; font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .card { background: #fff; border: 1px solid #e3e3df; border-radius: 16px; padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  svg { width: 100%; height: auto; display: block; }
+  table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #ecece8; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #6b6b74; }
+  .sw { display: inline-block; width: 26px; height: 6px; border-radius: 3px; vertical-align: middle; margin-right: 8px; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+  ol { font-size: 14px; line-height: 1.75; padding-left: 20px; }
+  ol b { color: #17171c; }
+  .hint { font-size: 13px; color: #55555e; margin-top: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESP32 + RC522 RFID Station — Wiring</h1>
+  <div class="sub">Brialyns Art Sign · PrintFlow · 7 wires, walang soldering kung naka-solder na ang header pins ng RC522</div>
+
+  <div class="warn">⚠️ RC522 ay <u>3.3V ONLY</u> — huwag ikabit sa 5V/VIN, masisira ito.</div>
+
+  <div class="card">
+    <svg viewBox="0 0 920 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wiring diagram">
+      <!-- ESP32 board -->
+      <rect x="50" y="60" width="270" height="400" rx="18" fill="#17171c"/>
+      <text x="185" y="98" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="17" font-weight="700">ESP32 DevKit</text>
+      <text x="185" y="118" text-anchor="middle" fill="#9c9ca6" font-family="Inter, sans-serif" font-size="11">USB papunta sa PC</text>
+
+      <!-- RC522 board -->
+      <rect x="600" y="60" width="270" height="400" rx="18" fill="#232a3d"/>
+      <text x="735" y="98" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="17" font-weight="700">RC522 RFID</text>
+      <text x="735" y="118" text-anchor="middle" fill="#9ea9c7" font-family="Inter, sans-serif" font-size="11">8 pins sa gilid</text>
+
+      <!-- ESP32 pins -->
+      <g font-family="Inter, sans-serif" font-size="14" font-weight="600">
+        <circle cx="320" cy="150" r="7" fill="#ff5252"/><text x="305" y="155" text-anchor="end" fill="#fff">3V3</text>
+        <circle cx="320" cy="200" r="7" fill="#111"/><text x="305" y="205" text-anchor="end" fill="#fff">GND</text>
+        <circle cx="320" cy="250" r="7" fill="#ff9f43"/><text x="305" y="255" text-anchor="end" fill="#fff">D5</text>
+        <circle cx="320" cy="300" r="7" fill="#f7c948"/><text x="305" y="305" text-anchor="end" fill="#fff">D18</text>
+        <circle cx="320" cy="350" r="7" fill="#2ecc71"/><text x="305" y="355" text-anchor="end" fill="#fff">D23</text>
+        <circle cx="320" cy="400" r="7" fill="#4f8ef7"/><text x="305" y="405" text-anchor="end" fill="#fff">D19</text>
+        <circle cx="320" cy="440" r="7" fill="#a55eea"/><text x="305" y="445" text-anchor="end" fill="#fff">D27</text>
+      </g>
+
+      <!-- RC522 pins -->
+      <g font-family="Inter, sans-serif" font-size="14" font-weight="600">
+        <circle cx="600" cy="150" r="7" fill="#ff9f43"/><text x="618" y="155" fill="#fff">SDA / SS</text>
+        <circle cx="600" cy="200" r="7" fill="#f7c948"/><text x="618" y="205" fill="#fff">SCK</text>
+        <circle cx="600" cy="250" r="7" fill="#2ecc71"/><text x="618" y="255" fill="#fff">MOSI</text>
+        <circle cx="600" cy="300" r="7" fill="#4f8ef7"/><text x="618" y="305" fill="#fff">MISO</text>
+        <circle cx="600" cy="350" r="7" fill="#6b7280"/><text x="618" y="355" fill="#8b93a5">IRQ</text>
+        <circle cx="600" cy="390" r="7" fill="#111"/><text x="618" y="395" fill="#fff">GND</text>
+        <circle cx="600" cy="428" r="7" fill="#a55eea"/><text x="618" y="433" fill="#fff">RST</text>
+        <circle cx="600" cy="455" r="7" fill="#ff5252"/><text x="618" y="460" fill="#fff">3.3V</text>
+      </g>
+
+      <!-- wires -->
+      <g fill="none" stroke-width="3.5" stroke-linecap="round" opacity="0.95">
+        <path d="M320 150 C 460 150, 470 455, 600 455" stroke="#ff5252"/>
+        <path d="M320 200 C 450 200, 470 390, 600 390" stroke="#2b2b2b"/>
+        <path d="M320 250 C 440 250, 480 150, 600 150" stroke="#ff9f43"/>
+        <path d="M320 300 C 450 300, 480 200, 600 200" stroke="#f7c948"/>
+        <path d="M320 350 C 460 350, 480 250, 600 250" stroke="#2ecc71"/>
+        <path d="M320 400 C 470 400, 480 300, 600 300" stroke="#4f8ef7"/>
+        <path d="M320 440 C 480 440, 490 428, 600 428" stroke="#a55eea"/>
+      </g>
+
+      <!-- IRQ note -->
+      <path d="M600 350 L 560 350" stroke="#6b7280" stroke-width="3" stroke-dasharray="5 6"/>
+      <text x="548" y="345" text-anchor="end" fill="#6b7280" font-family="Inter, sans-serif" font-size="12" font-weight="600">walang wire</text>
+
+      <!-- card tag hint -->
+      <rect x="640" y="140" width="190" height="34" rx="8" fill="#ffffff14"/>
+      <text x="735" y="162" text-anchor="middle" fill="#c9d2ea" font-family="Inter, sans-serif" font-size="11.5">Tap dito ang card / sticker tag</text>
+    </svg>
+
+    <table>
+      <thead><tr><th>Wire</th><th>ESP32</th><th>RC522</th></tr></thead>
+      <tbody>
+        <tr><td><span class="sw" style="background:#ff5252"></span>Pula</td><td class="mono">3V3</td><td class="mono">3.3V</td></tr>
+        <tr><td><span class="sw" style="background:#111"></span>Itim</td><td class="mono">GND</td><td class="mono">GND</td></tr>
+        <tr><td><span class="sw" style="background:#ff9f43"></span>Orange</td><td class="mono">D5 (GPIO 5)</td><td class="mono">SDA / SS</td></tr>
+        <tr><td><span class="sw" style="background:#f7c948"></span>Dilaw</td><td class="mono">D18 (GPIO 18)</td><td class="mono">SCK</td></tr>
+        <tr><td><span class="sw" style="background:#2ecc71"></span>Berde</td><td class="mono">D23 (GPIO 23)</td><td class="mono">MOSI</td></tr>
+        <tr><td><span class="sw" style="background:#4f8ef7"></span>Asul</td><td class="mono">D19 (GPIO 19)</td><td class="mono">MISO</td></tr>
+        <tr><td><span class="sw" style="background:#a55eea"></span>Lila</td><td class="mono">D27 (GPIO 27)</td><td class="mono">RST</td></tr>
+        <tr><td><span class="sw" style="background:#6b7280"></span>—</td><td class="mono">hindi kinakabit</td><td class="mono">IRQ</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <ol>
+      <li><b>Hanapin ang labels</b> sa ESP32 board (naka-print sa PCB): 3V3, GND, at <b>D5 / D18 / D19 / D23 / D27</b>. Ang "Dxx" ay pareho lang ng "GPIO xx" (D18 = GPIO 18).</li>
+      <li><b>Kabitin ang 7 wires</b> base sa table. Female-female jumper wires ang kailangan. <b>Double-check ang 3V3</b> — hindi 5V/VIN.</li>
+      <li><b>Iwanang blangko ang IRQ</b> (walang wire).</li>
+      <li>Isaksak ang USB cable (data cable, hindi charge-only) sa PC. Dapat may lalabas na COM port.</li>
+      <li>Arduino IDE → <b>Tools → Board: "ESP32 Dev Module"</b> → tamang <b>Port (COMx)</b> → <b>Upload</b>.</li>
+      <li>Buksan ang <b>Serial Monitor @ 115200</b>: dapat RC522 version <span class="mono">0x91/0x92</span> → WiFi IP → ping <span class="mono">{"ok":true}</span>.</li>
+      <li>I-tap ang card/sticker → lalabas ang UID sa serial (e.g. <span class="mono">04A3B2C1</span>).</li>
+    </ol>
+    <div class="hint">
+      <b>Kung ayaw gumana:</b> (1) "RC522 not detected" → loose wire, maling pin, o naikabit sa 5V. (2) Walang COM port → kulang ang USB driver (CP210x o CH340 — hanapin sa Device Manager). (3) WiFi fail → 5GHz ang network mo; 2.4GHz lang ang ESP32. (4) Kung loose ang header pins ng RC522 → kailangan i-solder ang 8-pin header.
+    </div>
+  </div>
+</div>
+</body>
+</html>

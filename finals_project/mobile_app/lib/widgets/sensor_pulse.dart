@@ -81,7 +81,7 @@ class _SensorPulseState extends State<SensorPulse>
           const SizedBox(width: 6),
           Text(
             widget.sensorId,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'monospace',
               fontSize: 12,
               fontWeight: FontWeight.w500,

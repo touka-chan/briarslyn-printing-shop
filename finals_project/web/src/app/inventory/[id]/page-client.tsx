@@ -319,7 +319,7 @@ export default function VariantDetailPage() {
    }
   };
 
- return (
+  return (
   <AdminLayout title={item.material_variant_id} subtitle={item.item_type}>
    <Link
     href="/inventory"
@@ -380,7 +380,7 @@ export default function VariantDetailPage() {
        </div>
       <div className="p-3 bg-printflow-surface-container rounded-lg">
        <p className="text-xs text-printflow-on-surface-variant">
-        Reorder Point
+        Threshold (ROP)
        </p>
        <p className="text-xl font-bold text-printflow-primary mt-1">
         {item.reorder_point}

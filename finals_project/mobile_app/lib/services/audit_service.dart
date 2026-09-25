@@ -26,6 +26,7 @@ const Map<String, String> auditActionLabels = {
   'reorder_point_updated': 'Reorder Point Updated',
   'variant_created': 'Variant Created',
   'variant_deleted': 'Variant Deleted',
+  'tag_bound': 'Tag Bound',
   'user_created': 'User Created',
   'user_role_updated': 'User Role Updated',
   'user_status_updated': 'User Status Updated',

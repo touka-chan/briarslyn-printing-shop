@@ -238,6 +238,7 @@ export type AuditAction =
  | "reorder_point_updated"
  | "variant_created"
  | "variant_deleted"
+ | "tag_bound"
  | "user_created"
  | "user_role_updated"
  | "user_status_updated"

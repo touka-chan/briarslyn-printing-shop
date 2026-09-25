@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../design/tokens.dart';
 import '../theme/app_theme.dart';
@@ -33,6 +35,8 @@ class RoleHomeShell extends StatefulWidget {
     this.appBarTrailingActions = const [],
     this.appBarBottom,
     this.initialIndex = 0,
+    this.darkChrome = false,
+    this.prefsKey,
   });
 
   /// Title shown in the app bar (e.g. "POS" or "Production Queue").
@@ -59,6 +63,17 @@ class RoleHomeShell extends StatefulWidget {
   /// Initial tab index.
   final int initialIndex;
 
+  /// When true, the shell renders the dark charcoal chrome (app bar +
+  /// bottom nav) that mirrors the web admin's sidebar: white brand
+  /// title, white idle icons, and a white active pill. Enabled by the
+  /// Cashier and Production shells; the Admin shell keeps the light
+  /// chrome. UI only - navigation and screens are untouched.
+  final bool darkChrome;
+
+  /// Optional SharedPreferences key remembering the last opened tab for
+  /// this role (e.g. `last_tab_production`). Survives app restarts.
+  final String? prefsKey;
+
   @override
   State<RoleHomeShell> createState() => _RoleHomeShellState();
 }
@@ -66,10 +81,39 @@ class RoleHomeShell extends StatefulWidget {
 class _RoleHomeShellState extends State<RoleHomeShell> {
   late int _index = widget.initialIndex.clamp(0, widget.navItems.length - 1);
 
+  @override
+  void initState() {
+    super.initState();
+    _restoreLastTab();
+  }
+
+  Future<void> _restoreLastTab() async {
+    final key = widget.prefsKey;
+    if (key == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getInt(key);
+      if (saved == null || !mounted) return;
+      final clamped = saved.clamp(0, widget.navItems.length - 1);
+      if (clamped != _index) setState(() => _index = clamped);
+    } catch (_) {
+      // Prefs unavailable - keep the default tab.
+    }
+  }
+
   void _onTabSelected(int i) {
     if (i == _index) return;
     HapticFeedback.selectionClick();
     setState(() => _index = i);
+    final key = widget.prefsKey;
+    if (key != null) {
+      () async {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt(key, i);
+        } catch (_) {}
+      }();
+    }
   }
 
   @override
@@ -94,46 +138,100 @@ class _RoleHomeShellState extends State<RoleHomeShell> {
           children: widget.navItems.map((n) => n.screen).toList(),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: _onTabSelected,
-        backgroundColor: AppTheme.surface,
-        indicatorColor: AppTheme.primaryContainer,
-        height: 68,
-        destinations: [
-          for (final n in widget.navItems)
-            NavigationDestination(
-              icon: Icon(n.icon, size: AppIconSize.md),
-              selectedIcon: Icon(n.iconActive, size: AppIconSize.md),
-              label: n.label,
-            ),
-        ],
+      bottomNavigationBar: _buildNavigationBar(context),
+    );
+  }
+
+  /// The bottom navigation bar. The chrome roles wrap it in a dark theme
+  /// (white active pill, white idle icons - the web sidebar's
+  /// active/inactive treatment); the light path is unchanged.
+  Widget _buildNavigationBar(BuildContext context) {
+    final dark = widget.darkChrome;
+    final bar = NavigationBar(
+      selectedIndex: _index,
+      onDestinationSelected: _onTabSelected,
+      backgroundColor: dark ? AppTheme.chrome : AppTheme.surface,
+      indicatorColor: dark ? AppTheme.onChrome : AppTheme.primaryContainer,
+      height: 68,
+      destinations: [
+        for (final n in widget.navItems)
+          NavigationDestination(
+            icon: Icon(n.icon, size: AppIconSize.md),
+            selectedIcon: Icon(n.iconActive, size: AppIconSize.md),
+            label: n.label,
+          ),
+      ],
+    );
+    if (!dark) return bar;
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: AppIconSize.md,
+            color: states.contains(WidgetState.selected)
+                ? AppTheme.chrome
+                : AppTheme.onChromeMuted,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: states.contains(WidgetState.selected)
+                ? AppTheme.onChrome
+                : AppTheme.onChromeMuted,
+          ),
+        ),
       ),
+      child: bar,
     );
   }
 
   Widget _buildRail(BuildContext context) {
+    final dark = widget.darkChrome;
+    final rail = NavigationRail(
+      selectedIndex: _index,
+      onDestinationSelected: _onTabSelected,
+      labelType: NavigationRailLabelType.all,
+      backgroundColor: dark ? AppTheme.chrome : AppTheme.surface,
+      indicatorColor: dark ? AppTheme.onChrome : AppTheme.primaryContainer,
+      leading: const SizedBox(height: AppSpacing.sm),
+      destinations: [
+        for (final n in widget.navItems)
+          NavigationRailDestination(
+            icon: Icon(n.icon, size: AppIconSize.md),
+            selectedIcon: Icon(n.iconActive, size: AppIconSize.md),
+            label: Text(n.label),
+          ),
+      ],
+    );
     return Scaffold(
       appBar: _buildAppBar(context),
       body: SafeArea(
         child: Row(
           children: [
-            NavigationRail(
-              selectedIndex: _index,
-              onDestinationSelected: _onTabSelected,
-              labelType: NavigationRailLabelType.all,
-              backgroundColor: AppTheme.surface,
-              indicatorColor: AppTheme.primaryContainer,
-              leading: const SizedBox(height: AppSpacing.sm),
-              destinations: [
-                for (final n in widget.navItems)
-                  NavigationRailDestination(
-                    icon: Icon(n.icon, size: AppIconSize.md),
-                    selectedIcon: Icon(n.iconActive, size: AppIconSize.md),
-                    label: Text(n.label),
+            if (!dark)
+              rail
+            else
+              NavigationRailTheme(
+                data: NavigationRailThemeData(
+                  selectedIconTheme:
+                      const IconThemeData(color: AppTheme.chrome),
+                  unselectedIconTheme:
+                      const IconThemeData(color: AppTheme.onChromeMuted),
+                  selectedLabelTextStyle: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.onChrome,
                   ),
-              ],
-            ),
+                  unselectedLabelTextStyle: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.onChromeMuted,
+                  ),
+                ),
+                child: rail,
+              ),
             const VerticalDivider(width: 1, thickness: 1),
             Expanded(
               child: IndexedStack(
@@ -148,26 +246,67 @@ class _RoleHomeShellState extends State<RoleHomeShell> {
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
+    final dark = widget.darkChrome;
+    final titleStyle = dark
+        ? GoogleFonts.poppins(
+            fontSize: 19,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.onChrome,
+            height: 1.15,
+          )
+        : Theme.of(context).textTheme.titleLarge;
+    final subtitleStyle = dark
+        ? GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            color: AppTheme.onChromeMuted,
+          )
+        : Theme.of(context).textTheme.bodySmall;
+
     return AppBar(
-      backgroundColor: AppTheme.surface,
-      foregroundColor: AppTheme.onSurface,
+      backgroundColor: dark ? AppTheme.chrome : AppTheme.surface,
+      foregroundColor: dark ? AppTheme.onChrome : AppTheme.onSurface,
       elevation: 0,
-      scrolledUnderElevation: 1,
+      // Flat charcoal bar (no scroll shadow) with a hairline divider,
+      // like the web sidebar's edge.
+      scrolledUnderElevation: dark ? 0 : 1,
+      shape: dark
+          ? const Border(bottom: BorderSide(color: AppTheme.chromeHairline))
+          : null,
+      systemOverlayStyle:
+          dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       centerTitle: false,
-      titleSpacing: AppSpacing.lg,
+      titleSpacing: dark ? AppSpacing.sm : AppSpacing.lg,
+      // Brand badge on the left, mirroring the web sidebar logo.
+      leadingWidth: dark ? 60 : null,
+      leading: dark
+          ? Padding(
+              padding: const EdgeInsets.only(left: AppSpacing.lg),
+              child: Center(
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/images/logo.jpg',
+                    width: 30,
+                    height: 30,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            )
+          : null,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
             widget.appBarTitle,
-            style: Theme.of(context).textTheme.titleLarge,
+            style: titleStyle,
           ),
           if (widget.appBarSubtitle != null) ...[
             const SizedBox(height: 2),
             Text(
               widget.appBarSubtitle!,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: subtitleStyle,
             ),
           ],
         ],

@@ -86,7 +86,7 @@ class _LogoutDialog extends StatelessWidget {
                         color: AppTheme.statusUrgent.withValues(alpha: 0.14),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.logout_rounded,
                         color: AppTheme.statusUrgent,
                         size: 30,

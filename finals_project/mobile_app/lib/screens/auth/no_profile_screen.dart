@@ -85,7 +85,7 @@ class _NoProfileScreenState extends State<NoProfileScreen> {
                         color: AppTheme.statusUrgent.withValues(alpha: 0.1),
                         borderRadius: AppRadius.rLg,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.person_off_rounded,
                         color: AppTheme.statusUrgent,
                         size: AppIconSize.xl,
@@ -96,7 +96,7 @@ class _NoProfileScreenState extends State<NoProfileScreen> {
                   Text(
                     awaitingApproval ? 'Awaiting approval' : 'Profile not found',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.onSurface,
@@ -108,7 +108,7 @@ class _NoProfileScreenState extends State<NoProfileScreen> {
                         ? 'Your account is signed in but an Owner has not activated it yet. Ask the Owner to approve you on the Users page, then sign in again.'
                         : 'Your account is signed in but no Brialyns Art Sign profile is linked to it. Ask an administrator to create your user record.',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppTheme.onSurfaceVariant),
+                    style: TextStyle(color: AppTheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   Container(
@@ -162,7 +162,7 @@ class _NoProfileScreenState extends State<NoProfileScreen> {
           width: 64,
           child: Text(
             k,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.onSurfaceVariant,
               fontSize: 13,
             ),
@@ -171,7 +171,7 @@ class _NoProfileScreenState extends State<NoProfileScreen> {
         Expanded(
           child: Text(
             v,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.onSurface,
               fontSize: 13,
               fontWeight: FontWeight.w600,

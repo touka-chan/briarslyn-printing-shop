@@ -21,7 +21,8 @@ export const metadata: Metadata = {
     template: "%s | Brialyns Art Sign",
   },
   description: "Brialyns Art Sign Management System",
-  icons: [{ rel: "icon", url: "/logo.jpg" }],
+  // Tab icon comes from the file conventions in this folder:
+  // favicon.ico + icon.png (both generated from public/logo.jpg).
 };
 
 /**
@@ -43,11 +44,22 @@ export const metadata: Metadata = {
  */
 const themeScript = `(function(){try{var s=localStorage.getItem('printflow-theme');if(s==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`;
 
+/**
+ * No-flash sidebar bootstrap. Mirrors the stored desktop-sidebar
+ * collapse choice ("printflow-sidebar-collapsed") onto <html> before
+ * first paint, because globals.css drives the collapsed rail from the
+ * `sidebar-collapsed` class and the React store only reads storage
+ * after hydration. Keep the key/class in sync with
+ * lib/hooks/useSidebarCollapsed.ts.
+ */
+const sidebarScript = `(function(){try{if(localStorage.getItem('printflow-sidebar-collapsed')==='1'){document.documentElement.classList.add('sidebar-collapsed');}}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`h-full antialiased ${displayFont.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: sidebarScript }} />
       </head>
       <body className="min-h-full flex flex-col">
         <ToastProvider>

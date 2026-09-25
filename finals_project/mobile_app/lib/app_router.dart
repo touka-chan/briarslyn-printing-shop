@@ -9,6 +9,7 @@ import 'screens/cashier/cashier_orders.dart';
 import 'screens/cashier/cashier_customers.dart';
 import 'screens/cashier/order_detail.dart';
 import 'screens/production/production_shell.dart';
+import 'theme/theme_controller.dart';
 
 /// A simple centralized list of named routes for the app.
 ///
@@ -103,7 +104,8 @@ class AppRouter {
       settings: settings,
       transitionDuration: const Duration(milliseconds: 220),
       reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (context, animation, secondary) => builder(context),
+      pageBuilder: (context, animation, secondary) =>
+          _ModeAware(builder: builder),
       transitionsBuilder: (context, animation, secondary, child) {
         final curve = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
         return FadeTransition(
@@ -117,6 +119,23 @@ class AppRouter {
           ),
         );
       },
+    );
+  }
+}
+
+/// Rebuilds the routed page whenever the appearance mode flips. The page's
+/// subtree uses `AppTheme` statics (not only `Theme.of`), so a rebuild has to
+/// be forced from above for every color to repaint after a toggle.
+class _ModeAware extends StatelessWidget {
+  const _ModeAware({required this.builder});
+
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: themeNotifier,
+      builder: (context, _, _) => builder(context),
     );
   }
 }

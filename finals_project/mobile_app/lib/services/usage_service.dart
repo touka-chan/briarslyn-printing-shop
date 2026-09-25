@@ -54,10 +54,13 @@ class UsageService {
       fb_usage.fetchBom(normalizeItemType(itemType));
 
   /// Logs a stock IN (delivery received). Requires inventoryUpdate.
+  /// [source] is 'manual' for the plain sheet and 'rfid' when the operator
+  /// confirmed by scanning the item's tag.
   static Future<MovementResult> logStockIn({
     required String materialVariantId,
     required int qty,
     String? note,
+    String source = 'manual',
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.inventoryUpdate);
@@ -87,7 +90,7 @@ class UsageService {
           'material_variant_id': materialVariantId,
           'qty': qty,
           'direction': 'in',
-          'source': 'manual',
+          'source': source,
           'order_id': null,
           'reason': note,
           'by_uid': byUid,
