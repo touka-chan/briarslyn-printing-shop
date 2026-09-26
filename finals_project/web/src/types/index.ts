@@ -62,6 +62,10 @@ export interface Order {
   stock_deducted?: boolean;
   /** ISO timestamp - when the auto-deduct ran. */
   deducted_at?: string;
+  /** Per-order materials snapshot: pinned at creation from the BOM recipe
+   *  scaled to the order quantity (editable while Pending). Empty/missing
+   *  on legacy orders - the auto-deduct then falls back to the BOM. */
+  materials?: Array<{ material_variant_id: string; qty: number }>;
   // "Cancelled" is terminal (written by cancelOrder, never deleted).
   status: "Pending" | "In Production" | "Ready for Pickup" | "Completed" | "Cancelled";
   priority: "Overdue" | "Urgent" | "Upcoming"; // computed from target_date per FR3
@@ -138,8 +142,8 @@ export interface UsageEvent {
   qty: number;
   /** "in" (received) or "out" (consumed). */
   direction: "in" | "out";
-  /** "auto-deduct" | "manual" | "rfid". */
-  source: "auto-deduct" | "manual" | "rfid";
+  /** "auto-deduct" | "manual" | "rfid" | "cancel-return" (stock returned on cancel). */
+  source: "auto-deduct" | "manual" | "rfid" | "cancel-return";
   /** Set for auto-deducts and order-linked manual logs. */
   order_id?: string | null;
   /** Free-text reason for manual entries. */
@@ -227,14 +231,16 @@ export type EmployeeGender = "Male" | "Female" | "Other" | "Prefer not to say";
  * Only the Owner role may read (page + rules).
  */
 export type AuditAction =
- | "order_created"
- | "order_status_updated"
- | "order_cancelled"
+  | "order_created"
+  | "order_status_updated"
+  | "order_materials_updated"
+  | "order_cancelled"
  | "payment_updated"
  | "stock_in"
  | "stock_usage"
  | "stock_deducted_auto"
- | "stock_adjusted"
+  | "stock_adjusted"
+  | "stock_returned"
  | "reorder_point_updated"
  | "variant_created"
  | "variant_deleted"

@@ -22,6 +22,7 @@ enum Permission {
   orderUpdatePayment,    // Update payment status (cashier)
   orderUpdateStatus,     // Advance production status (production)
   orderCancel,           // Cancel orders (before production)
+  orderUpdateMaterials,  // Edit an order's pinned materials (while Pending)
   orderDelete,           // Delete orders (admin only, not used yet)
 
   // Customer permissions
@@ -77,6 +78,7 @@ class RolePermissions {
       Permission.orderUpdatePayment,
       Permission.orderUpdateStatus,
       Permission.orderCancel,
+      Permission.orderUpdateMaterials,
       Permission.orderDelete,
       Permission.customerRead,
       Permission.customerCreate,
@@ -98,6 +100,7 @@ class RolePermissions {
       Permission.orderUpdatePayment,
       Permission.orderUpdateStatus,
       Permission.orderCancel,
+      Permission.orderUpdateMaterials,
       Permission.orderDelete,
       Permission.customerRead,
       Permission.customerCreate,
@@ -119,6 +122,7 @@ class RolePermissions {
       Permission.orderRead,
       Permission.orderUpdatePayment,
       Permission.orderCancel, // Can cancel before production starts
+      Permission.orderUpdateMaterials, // Can edit an order's materials (while Pending)
       // Customers
       Permission.customerRead,
       Permission.customerCreate,

@@ -31,6 +31,29 @@
  *
  * NOTE: the ESP32 only sees 2.4 GHz WiFi (not 5 GHz).
  *
+ * LED LANGUAGE (works on a charger / no laptop attached)
+ * ------------------------------------------------------
+ *   2 blinks       RC522 OK (at boot, or when it reconnects)
+ *   3 blinks       WiFi connected
+ *   1 blink        tag read (tap detected)
+ *   2 blinks       tap recorded - right after the single read-blink
+ *   5 fast blinks  send failed (offline/rejected)
+ *   10 + 10 blinks RC522 NOT detected at boot -> check the wiring
+ *   (heartbeat every 30s is silent - it only refreshes last_seen_at)
+ *
+ * OLED DISPLAY (optional, SSD1306 128x64 I2C - shows status + tap results)
+ * -----------------------------------------------------------------------------
+ *   OLED VCC -> ESP32 3V3
+ *   OLED GND -> ESP32 GND
+ *   OLED SDA -> GPIO 21
+ *   OLED SCL -> GPIO 22
+ *
+ * Requires libraries "Adafruit SSD1306" + "Adafruit GFX" (already installed).
+ *   - Default I2C address is 0x3C; some modules use 0x3D - change OLED_ADDR
+ *     below if the screen stays dark.
+ *   - Kung iba ang OLED mo (hal. SH1106 1.3") sabihin mo - ibang driver ang
+ *     kailangan noon (U8g2).
+ *
  * BINDING A TAG
  * -------------
  * Tap a tag -> the UID prints here (e.g. 04A3B2C1) -> Firebase console ->
@@ -43,6 +66,9 @@
 #include <HTTPClient.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ---------------- TODO: fill these two in ----------------
 const char *WIFI_SSID = "bile ka";
@@ -60,7 +86,20 @@ const char *SENSOR_ID = "ESP32-01";
 #define RFID_RST_PIN 27
 #define STATUS_LED_PIN 2  // most dev boards have the onboard LED here
 
+// ---------------- OLED display (SSD1306 128x64, I2C) ----------------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define OLED_ADDR 0x3C  // may ibang module ay 0x3D
+
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+bool _oledOk = false;
+
+// How long a tap result stays on screen before the ready screen returns.
+static const unsigned long OLED_RESULT_MS = 1600;
+unsigned long _oledShowUntil = 0;
 
 const unsigned long DEDUPE_MS = 5000;  // same tag inside 5s = ignored
 String lastUid = "";
@@ -79,6 +118,12 @@ int lastHttpStatus = 0;
 // which happens on flaky links (the reply URL is one-time and expires).
 bool lastRequestDelivered = false;
 
+// True when the RC522 answers on SPI. Press-fit headers can lose contact
+// when the station is moved (e.g. laptop -> charger), so the firmware
+// retries and shows the state on the onboard LED - no laptop needed.
+bool _rfidOk = false;
+unsigned long _lastRfidRetryAt = 0;
+
 // ---------------------------------------------------------
 
 void setup() {
@@ -90,20 +135,41 @@ void setup() {
   pinMode(STATUS_LED_PIN, OUTPUT);
   digitalWrite(STATUS_LED_PIN, LOW);
 
+  // OLED display (silent if absent - everything else keeps working).
+  Wire.begin(OLED_SDA, OLED_SCL);
+  _oledOk = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (!_oledOk) {
+    Serial.println(
+        "[oled] SSD1306 not found (check SDA=21 SCL=22, addr 0x3C/0x3D).");
+  } else {
+    oledShow("BRIALYNS RFID", "BOOTING", "");
+  }
+
   SPI.begin();  // SCK=18, MISO=19, MOSI=23
   rfid.PCD_Init();
   delay(50);
   byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
   Serial.printf("[rfid] RC522 version register: 0x%02X\n", version);
-  if (version == 0x00 || version == 0xFF) {
+  _rfidOk = !(version == 0x00 || version == 0xFF);
+  if (!_rfidOk) {
     Serial.println(
         "[rfid] WARNING: RC522 not detected. Check wiring (3.3V!), "
         "SDA=D5 SCK=D18 MOSI=D23 MISO=D19 RST=D27.");
+    oledShow("RFID ERROR", "NO MODULE", "check wiring");
+    // Unmissable on a charger: two rounds of 10 fast blinks.
+    blinkTimes(10, 80, 80);
+    delay(500);
+    blinkTimes(10, 80, 80);
+  } else {
+    blinkTimes(2, 60, 120);  // RC522 OK
   }
 
   connectWifi();
   pingSensor();
   lastHeartbeatAt = millis();
+  if (_rfidOk) {
+    oledReady();
+  }
 }
 
 void loop() {
@@ -116,6 +182,32 @@ void loop() {
       (nowMs - lastHeartbeatAt) >= HEARTBEAT_MS) {
     lastHeartbeatAt = nowMs;
     pingSensor();
+  }
+
+  // Tap result -> back to the ready screen (non-blocking).
+  if (_oledShowUntil != 0 && (nowMs - _oledShowUntil) >= OLED_RESULT_MS) {
+    _oledShowUntil = 0;
+    oledReady();
+  }
+
+  // RC522 watchdog: re-init every few seconds while it is not answering,
+  // so a loose press-fit header reconnects by itself (2 blinks when it
+  // does).
+  if (!_rfidOk && (nowMs - _lastRfidRetryAt) >= 5000) {
+    _lastRfidRetryAt = nowMs;
+    rfid.PCD_Init();
+    delay(20);
+    byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+    if (v != 0x00 && v != 0xFF) {
+      _rfidOk = true;
+      Serial.println("[rfid] RC522 detected again - tapping enabled");
+      blinkTimes(2, 60, 120);
+      oledReady();
+    }
+  }
+  if (!_rfidOk) {
+    delay(50);
+    return;
   }
 
   // Any card present?
@@ -137,7 +229,8 @@ void loop() {
   lastUidAt = now;
 
   Serial.println("[rfid] tap: " + uid);
-  blink();
+  blinkTimes(1, 60, 120);
+  oledShow("TAP", uid, "sending...");
   postTap(uid);
 }
 
@@ -151,10 +244,46 @@ String uidToString(byte *buffer, byte size) {
   return out;
 }
 
-void blink() {
-  digitalWrite(STATUS_LED_PIN, HIGH);
-  delay(60);
-  digitalWrite(STATUS_LED_PIN, LOW);
+/// Blink the onboard LED [times] - the station's status language when
+/// running on a charger with no serial monitor attached:
+///   2 blinks      RC522 OK
+///   3 blinks      WiFi connected
+///   1 blink       tag read
+///   2 blinks      tap recorded (right after the single read-blink)
+///   5 fast blinks send failed / offline
+///   10+10 blinks  RC522 not detected at boot (check the wiring)
+void blinkTimes(int times, int onMs, int offMs) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(STATUS_LED_PIN, HIGH);
+    delay(onMs);
+    digitalWrite(STATUS_LED_PIN, LOW);
+    if (i < times - 1) delay(offMs);
+  }
+}
+
+/// Draw a 3-line status screen. Big middle line (auto-shrinks for long
+/// UIDs). No-op when the display is absent.
+void oledShow(const String &l1, const String &l2, const String &l3) {
+  if (!_oledOk) return;
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(l1);
+  if (l2.length() > 10) {
+    display.println(l2);
+  } else {
+    display.setTextSize(2);
+    display.println(l2);
+    display.setTextSize(1);
+  }
+  display.println(l3);
+  display.display();
+}
+
+/// Default station screen shown between taps.
+void oledReady() {
+  oledShow("BRIALYNS RFID", "TAP A TAG", String(SENSOR_ID));
 }
 
 // ---------------- WiFi ----------------
@@ -172,6 +301,7 @@ void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("[wifi] connected, IP: ");
     Serial.println(WiFi.localIP());
+    blinkTimes(3, 60, 120);  // WiFi ok
   } else {
     Serial.println("[wifi] not connected yet - retrying in the background.");
   }
@@ -258,8 +388,14 @@ void postTap(const String &uid) {
       Serial.println(
           "[http] tap received by the server (reply unreadable this time - "
           "it is one-time-use; check the app Sensor feed).");
+      oledShow("RECORDED", uid, "check app");
+      _oledShowUntil = millis();
+      blinkTimes(2, 60, 120);  // recorded (reply just not readable)
     } else {
       Serial.println("[http] no reply (offline?)");
+      oledShow("FAILED", "offline?", "try again");
+      _oledShowUntil = millis();
+      blinkTimes(5, 70, 70);  // send failed
     }
     return;
   }
@@ -269,18 +405,31 @@ void postTap(const String &uid) {
   String variant = jsonStringValue(reply, "material_variant_id");
   if (ok && variant.length() > 0) {
     Serial.printf("[rfid] recorded %s -> %s\n", uid.c_str(), variant.c_str());
+    oledShow("RECORDED", variant, uid);
+    _oledShowUntil = millis();
+    blinkTimes(2, 60, 120);  // recorded
   } else if (ok) {
     Serial.println(
         "[rfid] recorded, but no inventory item is bound to this tag yet.");
+    oledShow("RECORDED", uid, "no binding");
+    _oledShowUntil = millis();
+    blinkTimes(2, 60, 120);  // recorded (unbound)
   } else {
     Serial.println("[rfid] server rejected the tap - check the secret.");
+    oledShow("REJECTED", "check secret", "");
+    _oledShowUntil = millis();
+    blinkTimes(5, 70, 70);  // rejected
   }
 }
 
 void pingSensor() {
+  // `rfid_ok` rides along on every heartbeat so the RC522's readability
+  // can be checked remotely (sensors/ESP32-01.rfid_ok) - no laptop/serial
+  // needed. false = the reader is not answering on SPI (check the pins).
   String payload = "{\"secret\":\"" + String(WEBHOOK_SECRET) +
                    "\",\"action\":\"sensor_ping\",\"sensor_id\":\"" +
-                   String(SENSOR_ID) + "\"}";
+                   String(SENSOR_ID) + "\",\"rfid_ok\":" +
+                   (_rfidOk ? "true" : "false") + "}";
   Serial.println("[http] ping: " + postJson(payload));
 }
 

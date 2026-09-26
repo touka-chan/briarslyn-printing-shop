@@ -121,6 +121,8 @@ Future<String> createOrder(Order order) async {
     'based_on': order.basedOn,
     'cashier_id': order.cashierId,
     'stock_deducted': false,
+    'materials':
+        order.materials.map((m) => m.toJson()).toList(growable: false),
     'created_at': FieldValue.serverTimestamp(),
   };
 

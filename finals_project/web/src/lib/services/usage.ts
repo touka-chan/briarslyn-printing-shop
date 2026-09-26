@@ -18,10 +18,12 @@ import {
   collection,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   doc,
   getDoc,
+  getDocs,
   Timestamp,
   runTransaction,
   type Unsubscribe,
@@ -246,13 +248,31 @@ export async function autoDeductForOrder(
   if (order.stock_deducted === true) {
     return { deltas: {}, shortfall: false, skipped: true };
   }
-  const itemType = (order.item_type as string) ?? "";
-  const orderQty = (order.quantity as number) ?? 0;
-  const bom = await fetchBom(itemType);
-  if (!bom || orderQty <= 0) {
-    return { deltas: {}, shortfall: false, skipped: true };
+  // Prefer the order's pinned materials list (set at creation, editable
+  // while Pending); fall back to the live BOM for legacy orders.
+  const pinned = Array.isArray(order.materials) ? order.materials : [];
+  let consumption: Record<string, number> = {};
+  if (pinned.length > 0) {
+    for (const line of pinned) {
+      const vid =
+        typeof line?.material_variant_id === "string"
+          ? line.material_variant_id
+          : "";
+      const q =
+        typeof line?.qty === "number"
+          ? Math.max(0, Math.floor(line.qty))
+          : 0;
+      if (vid && q > 0) consumption[vid] = (consumption[vid] ?? 0) + q;
+    }
+  } else {
+    const itemType = (order.item_type as string) ?? "";
+    const orderQty = (order.quantity as number) ?? 0;
+    const bom = await fetchBom(itemType);
+    if (!bom || orderQty <= 0) {
+      return { deltas: {}, shortfall: false, skipped: true };
+    }
+    consumption = consumptionFor(bom, orderQty);
   }
-  const consumption = consumptionFor(bom, orderQty);
   if (Object.keys(consumption).length === 0) {
     return { deltas: {}, shortfall: false, skipped: true };
   }
@@ -313,6 +333,111 @@ export async function autoDeductForOrder(
    });
   }
   return { deltas, shortfall, skipped: false };
+}
+
+/**
+ * Lines deducted for an order (from its auto-deduct usage events), used
+ * to prefill the cancel-return dialog. Empty when nothing was deducted.
+ */
+export async function getReturnableLines(
+  orderId: string,
+): Promise<Array<{ variant: string; qty: number }>> {
+  const db = requireDb();
+  const snap = await getDocs(
+    query(collection(db, "usage_events"), where("order_id", "==", orderId)),
+  ).catch(() => null);
+  if (!snap) return [];
+  return snap.docs
+    .map((d) => d.data() as Record<string, unknown>)
+    .filter((d) => d.source === "auto-deduct")
+    .map((d) => ({
+      variant: (d.material_variant_id as string) ?? "",
+      qty: typeof d.qty === "number" ? Math.max(0, Math.floor(d.qty)) : 0,
+    }))
+    .filter((l) => l.variant && l.qty > 0);
+}
+
+/**
+ * Reverses a deducted order on cancel: returns the given quantities to
+ * stock (usage IN, source "cancel-return") and marks the order
+ * Cancelled - all in one transaction. Throws when the order is missing,
+ * already Cancelled/Completed, or was never deducted. Returns what was
+ * applied.
+ */
+export async function reverseDeductionForCancel(
+  orderId: string,
+  returns: Record<string, number>,
+  byUid?: string | null,
+): Promise<Record<string, number>> {
+  const db = requireDb();
+  const orderRef = doc(db, "orders", orderId);
+  const orderSnap = await getDoc(orderRef);
+  if (!orderSnap.exists()) throw new Error(`Order not found: ${orderId}`);
+  const order = orderSnap.data() as Record<string, unknown>;
+  const status = (order.status as string) ?? "Pending";
+  if (status === "Completed") {
+    throw new Error(`Cannot cancel order ${orderId}: already completed.`);
+  }
+  if (status === "Cancelled") return {};
+  if (order.stock_deducted !== true) {
+    throw new Error(`Order ${orderId} has nothing to return.`);
+  }
+  const applied: Record<string, number> = {};
+  await runTransaction(db, async (tx) => {
+    const fresh = await tx.get(orderRef);
+    const freshData = fresh.data() as Record<string, unknown> | undefined;
+    if (!fresh.exists()) throw new Error(`Order not found: ${orderId}`);
+    const freshStatus = (freshData?.status as string) ?? "Pending";
+    if (freshStatus === "Cancelled") return;
+    if (freshStatus === "Completed") {
+      throw new Error(`Cannot cancel order ${orderId}: already completed.`);
+    }
+    for (const [variantId, qtyRaw] of Object.entries(returns)) {
+      const qty = Math.max(0, Math.floor(qtyRaw));
+      if (!variantId || qty <= 0) continue;
+      const ref = doc(db, "inventory", variantId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) continue;
+      const data = snap.data() as Record<string, unknown>;
+      const stock = (data.current_stock as number) ?? 0;
+      const rop = (data.reorder_point as number) ?? 0;
+      const next = stock + qty;
+      tx.update(ref, {
+        current_stock: next,
+        status: getInventoryStatus({
+          current_stock: next,
+          reorder_point: rop,
+        } as InventoryItem),
+        last_updated: Timestamp.now(),
+      });
+      tx.set(doc(collection(db, "usage_events")), {
+        material_variant_id: variantId,
+        qty,
+        direction: "in",
+        source: "cancel-return",
+        order_id: orderId,
+        reason: null,
+        shortfall: false,
+        by_uid: byUid ?? null,
+        timestamp: Timestamp.now(),
+      });
+      applied[variantId] = qty;
+    }
+    tx.update(orderRef, { status: "Cancelled" });
+  });
+  for (const [variantId, qty] of Object.entries(applied)) {
+    markLocalActivity("inventory", variantId);
+    logAudit({
+     action: "stock_returned",
+     module: "inventory",
+     record_id: variantId,
+     record_label: `Material ${variantId} (cancel-return for ${orderId})`,
+     old_value: null,
+     new_value: `+${qty}`,
+    });
+  }
+  markLocalActivity("order", orderId);
+  return applied;
 }
 
 // ---- internal helpers ----

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter/foundation.dart';
 
 import '../auth/auth_service.dart';
+import '../models/bom.dart';
 import '../models/order.dart';
 import 'audit_service.dart';
 import 'firebase_orders.dart' as fb;
@@ -116,9 +117,14 @@ class OrderService {
 
   /// Cancels an order.
   ///
+  /// Allowed until handover: Pending, In Production, Ready for Pickup.
+  /// Completed is terminal (a delivered order is a refund, not a cancel);
+  /// already-Cancelled is an idempotent no-op. When nothing was deducted
+  /// (Pending), this only flips the status - see [cancelOrderWithReturn]
+  /// for returning already-deducted stock.
   /// Requires [Permission.orderCancel].
   /// Throws [PermissionDeniedException] if the user lacks permission.
-  /// Throws [StateError] if the order is in production or completed.
+  /// Throws [StateError] if the order is completed.
   static Future<void> cancelOrder({
     required String orderId,
     required AuthService auth,
@@ -132,11 +138,10 @@ class OrderService {
       throw ArgumentError('Order not found: $orderId');
     }
     final currentStatus = (snap.data() as Map<String, dynamic>)['status'] as String? ?? 'Pending';
-    if (currentStatus == 'In Production' ||
-        currentStatus == 'Ready for Pickup' ||
-        currentStatus == 'Completed') {
-      throw StateError('Cannot cancel order $orderId: already in production or completed');
+    if (currentStatus == 'Completed') {
+      throw StateError('Cannot cancel order $orderId: already completed');
     }
+    if (currentStatus == 'Cancelled') return;
     await fb.cancelOrder(orderId);
     LiveActivityMarks.mark('order', orderId);
     debugPrint('[OrderService] Cancelled order $orderId');
@@ -151,6 +156,83 @@ class OrderService {
     );
   }
 
+  /// Cancels a deducted order and returns stock. The [returns] map holds
+  /// per-variant return quantities (0 = keep deducted). Requires
+  /// [Permission.orderCancel] plus [Permission.inventoryUpdate] (via the
+  /// reversal) - cashiers without it get a PermissionDeniedException and
+  /// should fall back to plain [cancelOrder].
+  static Future<Map<String, int>> cancelOrderWithReturn({
+    required String orderId,
+    required Map<String, int> returns,
+    required AuthService auth,
+  }) async {
+    auth.assertCan(Permission.orderCancel);
+    final applied = await UsageService.reverseDeductionForCancel(
+      orderId: orderId,
+      returns: returns,
+      auth: auth,
+    );
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'order_cancelled',
+      module: 'orders',
+      recordId: orderId,
+      recordLabel: 'Order $orderId',
+      newValue: applied.isEmpty
+          ? 'Cancelled (no stock returned)'
+          : 'Cancelled (returned: ${applied.entries.map((e) => '${e.key} +${e.value}').join(', ')})',
+    );
+    return applied;
+  }
+
+  /// Updates an order's pinned materials list. Only while the order is
+  /// Pending - post-production the plan is locked (use the movement
+  /// sheets instead).
+  /// Requires [Permission.orderUpdateMaterials].
+  /// Throws [PermissionDeniedException] if the user lacks permission.
+  /// Throws [StateError] if the order is no longer Pending.
+  static Future<void> updateOrderMaterials({
+    required String orderId,
+    required List<OrderMaterial> materials,
+    required AuthService auth,
+  }) async {
+    auth.assertCan(Permission.orderUpdateMaterials);
+    final snap = await FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId)
+        .get();
+    if (!snap.exists) {
+      throw ArgumentError('Order not found: $orderId');
+    }
+    final status =
+        (snap.data() as Map<String, dynamic>)['status'] as String? ??
+            'Pending';
+    if (status != 'Pending') {
+      throw StateError(
+          'Materials can only be edited while the order is Pending');
+    }
+    for (final m in materials) {
+      if (m.materialVariantId.trim().isEmpty || m.qty <= 0) {
+        throw ArgumentError(
+            'Each material needs a variant and a positive quantity');
+      }
+    }
+    await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
+      'materials': materials.map((m) => m.toJson()).toList(growable: false),
+    });
+    LiveActivityMarks.mark('order', orderId);
+    debugPrint('[OrderService] Updated materials for $orderId');
+    AuditService.log(
+      actor: auth.currentUser,
+      action: 'order_materials_updated',
+      module: 'orders',
+      recordId: orderId,
+      recordLabel: 'Order $orderId materials',
+      newValue:
+          materials.map((m) => '${m.materialVariantId} x${m.qty}').join(', '),
+    );
+  }
+
   /// Creates a new order. Returns the persisted order id.
   ///
   /// Requires [Permission.orderCreate] (cashier role).
@@ -159,7 +241,28 @@ class OrderService {
     required AuthService auth,
   }) async {
     auth.assertCan(Permission.orderCreate);
-    final id = await fb.createOrder(order);
+    // Pin the BOM recipe (scaled to the order quantity) onto the order so
+    // the deduct step and the detail screen show the same plan even if the
+    // recipe changes later. A missing BOM yields an empty list - the deduct
+    // then falls back to the live BOM at production entry. The lookup must
+    // never block order creation.
+    List<OrderMaterial> materials = const [];
+    try {
+      final bom =
+          await UsageService.fetchBom(normalizeItemType(order.itemType));
+      if (bom != null && order.quantity > 0) {
+        materials = bom.lines
+            .where((l) => l.qtyPerUnit > 0)
+            .map((l) => OrderMaterial(
+                  materialVariantId: l.materialVariantId,
+                  qty: (l.qtyPerUnit * order.quantity).ceil(),
+                ))
+            .toList(growable: false);
+      }
+    } catch (_) {
+      materials = const [];
+    }
+    final id = await fb.createOrder(order.copyWith(materials: materials));
     LiveActivityMarks.mark('order', id);
     debugPrint('[OrderService] Created new order $id');
     AuditService.log(

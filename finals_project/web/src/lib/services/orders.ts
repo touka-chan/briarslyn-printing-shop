@@ -148,6 +148,43 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
   );
   const eta = computeEta(input.target_date, priority, now);
 
+  // Pin the BOM recipe (scaled to the order quantity) onto the order so
+  // the deduct step and the detail screen show the same plan even if the
+  // recipe changes later. An explicitly provided list wins; missing BOM ->
+  // empty list (the deduct falls back to the live BOM at production
+  // entry). Never blocks creation.
+  let materials: Array<{ material_variant_id: string; qty: number }> =
+    Array.isArray(input.materials) && input.materials.length > 0
+      ? input.materials
+          .filter(
+            (l) =>
+              typeof l?.material_variant_id === "string" &&
+              l.material_variant_id &&
+              Number.isInteger(l.qty) &&
+              l.qty > 0,
+          )
+          .map((l) => ({
+            material_variant_id: l.material_variant_id,
+            qty: l.qty,
+          }))
+      : [];
+  if (materials.length === 0) {
+    try {
+      const { fetchBom } = await import("@/lib/services/usage");
+      const bom = await fetchBom(input.item_type);
+      if (bom && input.quantity > 0) {
+        materials = (bom.lines ?? [])
+          .filter((l) => l && l.qty_per_unit > 0)
+          .map((l) => ({
+            material_variant_id: l.material_variant_id,
+            qty: Math.ceil(l.qty_per_unit * input.quantity),
+          }));
+      }
+    } catch {
+      materials = [];
+    }
+  }
+
   const doc_ = {
     customer_name: input.customer_name,
     customer_email: input.customer_email ?? null,
@@ -170,6 +207,7 @@ export async function createOrder(input: Omit<Order, "id" | "order_id" | "priori
     based_on: eta.basedOn,
     created_at: Timestamp.now(),
     cashier_id: input.cashier_id ?? null,
+    materials,
   };
   const explicitId = input.orderId?.trim();
   let orderId: string;
@@ -264,10 +302,57 @@ export async function updatePaymentStatus(
   });
 }
 
-/** Mark an order as cancelled. We never delete orders - history is kept. */
+/** Update an order's pinned materials list. Only while Pending -
+ * post-production the plan is locked (use the movement sheets instead). */
+export async function updateOrderMaterials(
+  id: string,
+  materials: Array<{ material_variant_id: string; qty: number }>,
+): Promise<void> {
+  const ref = doc(requireDb(), COLL, id);
+  const snap = await getDoc(ref).catch(() => null);
+  if (!snap?.exists()) throw new Error(`Order not found: ${id}`);
+  const status = (snap.data().status as string) ?? "Pending";
+  if (status !== "Pending") {
+    throw new Error("Materials can only be edited while the order is Pending.");
+  }
+  for (const m of materials) {
+    if (
+      !m?.material_variant_id ||
+      !Number.isInteger(m.qty) ||
+      m.qty <= 0
+    ) {
+      throw new Error(
+        "Each material needs a variant and a positive whole quantity.",
+      );
+    }
+  }
+  await updateDoc(ref, { materials });
+  markLocalActivity("order", id);
+  logAudit({
+   action: "order_materials_updated",
+   module: "orders",
+   record_id: id,
+   record_label: `Order ${id} materials`,
+   old_value: null,
+   new_value: materials.map((m) => `${m.material_variant_id} x${m.qty}`).join(", "),
+  });
+}
+
+/** Mark an order as cancelled. We never delete orders - history is kept.
+ *
+ * Allowed until handover (Pending, In Production, Ready for Pickup).
+ * Completed is terminal; already-Cancelled is an idempotent no-op. When
+ * nothing was deducted this only flips the status - see
+ * [cancelOrderWithReturn] for returning already-deducted stock.
+ */
 export async function cancelOrder(id: string): Promise<void> {
   const prevSnap = await getDoc(doc(requireDb(), COLL, id)).catch(() => null);
-  const prevStatus = (prevSnap?.data()?.status as string | undefined) ?? null;
+  if (!prevSnap?.exists()) throw new Error(`Order not found: ${id}`);
+  const prevStatus = (prevSnap?.data()?.status as string | undefined) ?? "Pending";
+  if (prevStatus === "Completed") {
+    throw new Error(`Cannot cancel order ${id}: already completed.`);
+  }
+  if (prevStatus === "Cancelled") return;
   await updateDoc(doc(requireDb(), COLL, id), { status: "Cancelled" });
   markLocalActivity("order", id);
   logAudit({
@@ -278,6 +363,32 @@ export async function cancelOrder(id: string): Promise<void> {
    old_value: prevStatus,
    new_value: "Cancelled",
   });
+}
+
+/**
+ * Cancel a deducted order and return stock. The [returns] map holds
+ * per-variant return quantities (0 = keep deducted).
+ */
+export async function cancelOrderWithReturn(
+  id: string,
+  returns: Record<string, number>,
+): Promise<Record<string, number>> {
+  const { reverseDeductionForCancel } = await import("@/lib/services/usage");
+  const applied = await reverseDeductionForCancel(id, returns);
+  logAudit({
+   action: "order_cancelled",
+   module: "orders",
+   record_id: id,
+   record_label: `Order ${id}`,
+   old_value: null,
+   new_value:
+    Object.keys(applied).length === 0
+     ? "Cancelled (no stock returned)"
+     : `Cancelled (returned: ${Object.entries(applied)
+        .map(([v, q]) => `${v} +${q}`)
+        .join(", ")})`,
+  });
+  return applied;
 }
 
 function paymentLabel(status: unknown, method: unknown): string | null {

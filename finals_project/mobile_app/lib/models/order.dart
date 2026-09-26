@@ -1,3 +1,26 @@
+/// One material line pinned to an order at creation: the BOM recipe scaled
+/// to the order quantity (rounded up, like the deduct engine), editable
+/// while the order is Pending. Mirrors the web `Order["materials"]` shape.
+class OrderMaterial {
+  /// Inventory variant consumed by the order.
+  final String materialVariantId;
+
+  /// Whole units needed for THIS order.
+  final int qty;
+
+  const OrderMaterial({required this.materialVariantId, required this.qty});
+
+  factory OrderMaterial.fromJson(Map<String, dynamic> json) => OrderMaterial(
+        materialVariantId: json['material_variant_id'] as String,
+        qty: (json['qty'] as num?)?.toInt() ?? 0,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'material_variant_id': materialVariantId,
+        'qty': qty,
+      };
+}
+
 /// Mirrors the web `Order` interface in `web/src/types/index.ts`.
 /// Aligned to Title 1 IX. API Contract: /api/orders, /api/orders/queue,
 /// /api/orders/{id}/status, /api/orders/{id}/eta.
@@ -33,6 +56,10 @@ class Order {
   final DateTime? createdAt;
   /// True once the recipe was auto-deducted (order entered production).
   final bool stockDeducted;
+  /// Per-order materials snapshot: pinned at creation from the BOM recipe
+  /// scaled to the order quantity (editable while the order is Pending).
+  /// Empty on legacy orders - the auto-deduct then falls back to the BOM.
+  final List<OrderMaterial> materials;
   /// Stamped when the order enters production / completes (ETA throughput).
   final DateTime? startedAt;
   final DateTime? completedAt;
@@ -63,6 +90,7 @@ class Order {
     this.stockDeducted = false,
     this.startedAt,
     this.completedAt,
+    this.materials = const [],
   });
 
   /// Reads the shared Firestore order shape (snake_case, Timestamps).
@@ -93,6 +121,10 @@ class Order {
         stockDeducted: json['stock_deducted'] as bool? ?? false,
         startedAt: _parseDate(json['started_at']),
         completedAt: _parseDate(json['completed_at']),
+        materials: ((json['materials'] as List?) ?? const [])
+            .map((e) =>
+                OrderMaterial.fromJson((e as Map).cast<String, dynamic>()))
+            .toList(growable: false),
       );
 
   Map<String, dynamic> toJson() => {
@@ -121,7 +153,69 @@ class Order {
         'stock_deducted': stockDeducted,
         'started_at': startedAt?.toIso8601String(),
         'completed_at': completedAt?.toIso8601String(),
+        'materials': materials.map((m) => m.toJson()).toList(),
       };
+
+  /// Copies the order with the given fields replaced. Nullable fields
+  /// cannot be reset to null through this method (by design - callers
+  /// only ever set values here).
+  Order copyWith({
+    String? orderId,
+    String? customerName,
+    String? customerEmail,
+    String? customerPhone,
+    String? customerRegion,
+    String? customerProvince,
+    String? customerCity,
+    String? customerBarangay,
+    String? customerZip,
+    String? itemType,
+    int? quantity,
+    String? layoutFile,
+    DateTime? targetDate,
+    double? paymentAmount,
+    String? paymentStatus,
+    String? paymentMethod,
+    String? status,
+    String? priority,
+    DateTime? estimatedCompletion,
+    List<String>? basedOn,
+    String? cashierId,
+    DateTime? createdAt,
+    bool? stockDeducted,
+    DateTime? startedAt,
+    DateTime? completedAt,
+    List<OrderMaterial>? materials,
+  }) {
+    return Order(
+      orderId: orderId ?? this.orderId,
+      customerName: customerName ?? this.customerName,
+      customerEmail: customerEmail ?? this.customerEmail,
+      customerPhone: customerPhone ?? this.customerPhone,
+      customerRegion: customerRegion ?? this.customerRegion,
+      customerProvince: customerProvince ?? this.customerProvince,
+      customerCity: customerCity ?? this.customerCity,
+      customerBarangay: customerBarangay ?? this.customerBarangay,
+      customerZip: customerZip ?? this.customerZip,
+      itemType: itemType ?? this.itemType,
+      quantity: quantity ?? this.quantity,
+      layoutFile: layoutFile ?? this.layoutFile,
+      targetDate: targetDate ?? this.targetDate,
+      paymentAmount: paymentAmount ?? this.paymentAmount,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      status: status ?? this.status,
+      priority: priority ?? this.priority,
+      estimatedCompletion: estimatedCompletion ?? this.estimatedCompletion,
+      basedOn: basedOn ?? this.basedOn,
+      cashierId: cashierId ?? this.cashierId,
+      createdAt: createdAt ?? this.createdAt,
+      stockDeducted: stockDeducted ?? this.stockDeducted,
+      startedAt: startedAt ?? this.startedAt,
+      completedAt: completedAt ?? this.completedAt,
+      materials: materials ?? this.materials,
+    );
+  }
 }
 
 /// Parses a Firestore Timestamp, ISO string, or null into a [DateTime].

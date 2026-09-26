@@ -7,12 +7,15 @@ import '../../app_router.dart';
 import '../../auth/auth.dart';
 import '../../components/components.dart';
 import '../../design/tokens.dart';
+import '../../models/inventory_item.dart';
 import '../../models/order.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/animations.dart';
+import '../../services/firebase_inventory.dart' as fb_inventory;
 import '../../services/firebase_orders.dart' as fb_orders;
 import '../../services/order_service.dart';
 import '../../services/services.dart';
+import '../../services/usage_service.dart';
 import '../../services/eta.dart' as eta;
 import '../../utils/chrome.dart';
 
@@ -204,6 +207,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
                       // Payment summary
                       _buildPaymentSummary(context, order),
+                      const SizedBox(height: AppSpacing.lg),
+
+                      // Materials needed (pinned at creation; editable
+                      // while Pending)
+                      _buildMaterials(context, order),
                       const SizedBox(height: AppSpacing.lg),
 
                       // Actions
@@ -473,11 +481,103 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  /// Materials needed for the order: the pinned list from creation
+  /// (editable while Pending), with live stock per line. Legacy orders
+  /// without a list fall back to the live BOM recipe at production.
+  Widget _buildMaterials(BuildContext context, Order order) {
+    return StreamBuilder<List<InventoryItem>>(
+      stream: fb_inventory.subscribeInventoryStream(),
+      builder: (context, snap) {
+        final inventory = snap.data ?? const <InventoryItem>[];
+        final byId = {for (final i in inventory) i.materialVariantId: i};
+        final canEdit = order.status == 'Pending';
+        return PfCard(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Materials needed',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  if (order.stockDeducted)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withValues(alpha: 0.12),
+                        borderRadius: AppRadius.rPill,
+                      ),
+                      child: Text(
+                        'Deducted',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ),
+                  if (canEdit)
+                    PermissionGate(
+                      permission: Permission.orderUpdateMaterials,
+                      child: TextButton(
+                        onPressed: () =>
+                            _showEditMaterialsSheet(context, order, inventory),
+                        child: const Text('Edit'),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              if (order.materials.isEmpty)
+                Text(
+                  'No pinned materials - uses the live BOM recipe at production.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.onSurfaceVariant,
+                      ),
+                )
+              else
+                for (final m in order.materials) ...[
+                  _MaterialRow(
+                    material: m,
+                    item: byId[m.materialVariantId],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showEditMaterialsSheet(
+    BuildContext context,
+    Order order,
+    List<InventoryItem> inventory,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditMaterialsSheet(order: order, inventory: inventory),
+    );
+  }
+
   Widget _buildActions(BuildContext context, Order order) {
     final auth = AuthProvider.of(context);
     final isCashier = auth.isCashier;
     final isProduction = auth.isProduction;
-    final canCancel = order.status == 'Pending';
+    final canCancel = order.status == 'Pending' ||
+        order.status == 'In Production' ||
+        order.status == 'Ready for Pickup';
 
     return Column(
       children: [
@@ -631,52 +731,155 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   void _confirmCancelOrder(BuildContext context, Order order) {
     HapticFeedback.mediumImpact();
+    if (!order.stockDeducted) {
+      // Nothing was deducted yet - plain confirm.
+      _showPlainCancelDialog(
+        context,
+        order,
+        'Order ${order.orderId} will be cancelled.',
+      );
+      return;
+    }
+    final auth = AuthProvider.of(context);
+    if (!auth.can(Permission.inventoryUpdate)) {
+      // Cashier path: the status flips, deducted stock stays deducted.
+      _showPlainCancelDialog(
+        context,
+        order,
+        'Order ${order.orderId} will be cancelled. Its deducted stock '
+        'stays deducted - only production staff can return stock.',
+      );
+      return;
+    }
+    // Production path: choose what to return.
+    _confirmCancelWithReturn(context, order);
+  }
+
+  void _showPlainCancelDialog(
+      BuildContext context, Order order, String message) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Cancel Order?'),
-        content: Text('Order ${order.orderId} will be cancelled. This cannot be undone once sent to production.'),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Keep'),
           ),
           TextButton(
-            style: TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
-            onPressed: () async {
-              Navigator.pop(context);
-              final auth = AuthProvider.of(context);
-              try {
-                await OrderService.cancelOrder(
-                  orderId: order.orderId,
-                  auth: auth,
-                );
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Order cancelled'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-              } on PermissionDeniedException catch (e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(e.message),
-                    backgroundColor: AppTheme.statusUrgent,
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
-            },
+            style: TextButton.styleFrom(
+                foregroundColor: AppTheme.statusOverdue),
+            onPressed: () => _doPlainCancel(context, order),
             child: const Text('Cancel'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _doPlainCancel(BuildContext context, Order order) async {
+    Navigator.pop(context);
+    final auth = AuthProvider.of(context);
+    try {
+      await OrderService.cancelOrder(
+        orderId: order.orderId,
+        auth: auth,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Order cancelled'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    } on PermissionDeniedException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on StateError catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmCancelWithReturn(
+      BuildContext context, Order order) async {
+    List<Map<String, dynamic>> lines = const [];
+    try {
+      lines = await UsageService.getReturnableLines(order.orderId);
+    } catch (_) {}
+    if (!context.mounted) return;
+    // Fallback to the pinned materials when no deduct records exist.
+    final fallback = lines.isEmpty
+        ? [
+            for (final m in order.materials)
+              {'variant': m.materialVariantId, 'qty': m.qty}
+          ]
+        : lines;
+    if (fallback.isEmpty) {
+      _showPlainCancelDialog(
+        context,
+        order,
+        'Order ${order.orderId} will be cancelled.',
+      );
+      return;
+    }
+    final result = await showDialog<Map<String, int>?>(
+      context: context,
+      builder: (_) => _CancelReturnDialog(order: order, lines: fallback),
+    );
+    if (result == null || !context.mounted) return;
+    final auth = AuthProvider.of(context);
+    try {
+      await OrderService.cancelOrderWithReturn(
+        orderId: order.orderId,
+        returns: result,
+        auth: auth,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Order cancelled'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    } on PermissionDeniedException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on StateError catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.statusUrgent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   /// Returns true if the order has at least one address component set.
@@ -1181,6 +1384,506 @@ class _SpecRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Return-materials dialog for cancelling a deducted order. Each deducted
+/// line gets an editable return quantity (0 = keep deducted, e.g.
+/// already-cut stock). Returns the map on confirm, null on dismiss.
+class _CancelReturnDialog extends StatefulWidget {
+  const _CancelReturnDialog({required this.order, required this.lines});
+
+  final Order order;
+  final List<Map<String, dynamic>> lines;
+
+  @override
+  State<_CancelReturnDialog> createState() => _CancelReturnDialogState();
+}
+
+class _CancelReturnDialogState extends State<_CancelReturnDialog> {
+  late final List<TextEditingController> _qtyCtrls;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyCtrls = [
+      for (final l in widget.lines)
+        TextEditingController(text: '${l['qty'] as int? ?? 0}'),
+    ];
+  }
+
+  @override
+  void dispose() {
+    for (final c in _qtyCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Cancel ${widget.order.orderId}?'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Return unused materials to stock (0 keeps them deducted):',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (var i = 0; i < widget.lines.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${widget.lines[i]['variant']}',
+                        style: AppTheme.monoStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    SizedBox(
+                      width: 72,
+                      child: TextField(
+                        controller: _qtyCtrls[i],
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          fillColor: AppTheme.surfaceContainer,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.sm,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: AppRadius.rSm,
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Keep'),
+        ),
+        TextButton(
+          style:
+              TextButton.styleFrom(foregroundColor: AppTheme.statusOverdue),
+          onPressed: () {
+            final out = <String, int>{};
+            for (var i = 0; i < widget.lines.length; i++) {
+              final vid = '${widget.lines[i]['variant']}';
+              final qty =
+                  int.tryParse(_qtyCtrls[i].text.trim()) ?? 0;
+              if (vid.isNotEmpty && qty > 0) out[vid] = qty;
+            }
+            Navigator.pop(context, out);
+          },
+          child: const Text('Cancel + return'),
+        ),
+      ],
+    );
+  }
+}
+
+/// One pinned material line with live stock (or a missing-variant warning).
+class _MaterialRow extends StatelessWidget {
+  const _MaterialRow({required this.material, required this.item});
+
+  final OrderMaterial material;
+  final InventoryItem? item;
+
+  @override
+  Widget build(BuildContext context) {
+    final stock = item?.currentStock;
+    final short = stock != null && stock < material.qty;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceContainerLow,
+        borderRadius: AppRadius.rSm,
+        border: Border.all(
+          color: short
+              ? AppTheme.statusOverdue.withValues(alpha: 0.4)
+              : Theme.of(context).colorScheme.outlineVariant,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  material.materialVariantId,
+                  style: AppTheme.monoStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (item != null)
+                  Text(
+                    item!.itemType,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.onSurfaceVariant,
+                        ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  Text(
+                    'Not in inventory',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.statusUrgent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'x${material.qty}',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (stock != null)
+                Text(
+                  'stock $stock',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: short
+                        ? AppTheme.statusOverdue
+                        : AppTheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditableLine {
+  _EditableLine({required this.variantId, required this.qtyCtrl});
+
+  String variantId;
+  final TextEditingController qtyCtrl;
+}
+
+/// Modal bottom sheet for editing an order's pinned materials (Pending
+/// only). Rows can change quantity, be removed, or added from the live
+/// inventory list. Duplicate variants are merged (summed) on save.
+class _EditMaterialsSheet extends StatefulWidget {
+  const _EditMaterialsSheet({required this.order, required this.inventory});
+
+  final Order order;
+  final List<InventoryItem> inventory;
+
+  @override
+  State<_EditMaterialsSheet> createState() => _EditMaterialsSheetState();
+}
+
+class _EditMaterialsSheetState extends State<_EditMaterialsSheet> {
+  late List<_EditableLine> _rows;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _rows = widget.order.materials
+        .map((m) => _EditableLine(
+              variantId: m.materialVariantId,
+              qtyCtrl: TextEditingController(text: '${m.qty}'),
+            ))
+        .toList();
+  }
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.qtyCtrl.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    // Merge duplicate variants by summing their quantities.
+    final merged = <String, int>{};
+    for (final r in _rows) {
+      final qty = int.tryParse(r.qtyCtrl.text.trim());
+      if (r.variantId.trim().isEmpty || qty == null || qty <= 0) {
+        setState(
+            () => _error = 'Each line needs a variant and a positive quantity');
+        return;
+      }
+      final vid = r.variantId.trim();
+      merged[vid] = (merged[vid] ?? 0) + qty;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final auth = AuthProvider.of(context);
+    try {
+      await OrderService.updateOrderMaterials(
+        orderId: widget.order.orderId,
+        materials: [
+          for (final e in merged.entries)
+            OrderMaterial(materialVariantId: e.key, qty: e.value),
+        ],
+        auth: auth,
+      );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Order materials updated'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PermissionDeniedException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.message;
+      });
+    } on StateError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg + viewInsets.bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              'Edit materials',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '${widget.order.orderId} - editable while Pending',
+              style: AppTheme.monoStyle(
+                fontSize: 12,
+                color: AppTheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            for (var i = 0; i < _rows.length; i++) ...[
+              _LineEditor(
+                row: _rows[i],
+                inventory: widget.inventory,
+                onRemove: _saving
+                    ? null
+                    : () => setState(() {
+                          _rows[i].qtyCtrl.dispose();
+                          _rows.removeAt(i);
+                        }),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            PfButton.outlined(
+              label: 'Add line',
+              icon: Icons.add_rounded,
+              fullWidth: true,
+              onPressed: _saving
+                  ? null
+                  : () => setState(() {
+                        _rows.add(_EditableLine(
+                          variantId: '',
+                          qtyCtrl: TextEditingController(text: '1'),
+                        ));
+                      }),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorContainer,
+                  borderRadius: AppRadius.rSm,
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: AppTheme.onErrorContainer,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            Row(
+              children: [
+                Expanded(
+                  child: PfButton.outlined(
+                    label: 'Cancel',
+                    fullWidth: true,
+                    onPressed:
+                        _saving ? null : () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: PfButton.filled(
+                    label: _saving ? 'Saving...' : 'Save',
+                    icon: Icons.check_rounded,
+                    fullWidth: true,
+                    loading: _saving,
+                    onPressed: _saving ? null : _save,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One editable material line: variant picker + quantity + remove.
+class _LineEditor extends StatelessWidget {
+  const _LineEditor({
+    required this.row,
+    required this.inventory,
+    required this.onRemove,
+  });
+
+  final _EditableLine row;
+  final List<InventoryItem> inventory;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 5,
+          child: DropdownButtonFormField<String>(
+            initialValue:
+                inventory.any((i) => i.materialVariantId == row.variantId)
+                    ? row.variantId
+                    : null,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppTheme.surfaceContainer,
+              border: OutlineInputBorder(
+                borderRadius: AppRadius.rMd,
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.md,
+              ),
+            ),
+            hint: const Text('Variant'),
+            items: inventory
+                .map((i) => DropdownMenuItem(
+                      value: i.materialVariantId,
+                      child: Text(
+                        '${i.materialVariantId} - ${i.itemType}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) row.variantId = v;
+            },
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          flex: 2,
+          child: PfTextField(
+            hintText: 'Qty',
+            controller: row.qtyCtrl,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.remove_circle_outline_rounded),
+          color: AppTheme.statusOverdue,
+          tooltip: 'Remove line',
+          onPressed: onRemove,
+        ),
+      ],
     );
   }
 }

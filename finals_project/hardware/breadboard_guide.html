@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brialyns Art Sign - Breadboard Layout (ESP32 + RC522 + OLED)</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 60px;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    background: #f4f4f2; color: #17171c;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.4px; }
+  .sub { color: #55555e; font-size: 14px; margin-bottom: 20px; }
+  .warn {
+    display: flex; gap: 10px; align-items: center;
+    background: #fdecec; border: 1px solid #f3b7b7; color: #8f1d1d;
+    border-radius: 12px; padding: 12px 16px; font-weight: 600; font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .card { background: #fff; border: 1px solid #e3e3df; border-radius: 16px; padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  svg { width: 100%; height: auto; display: block; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #ecece8; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #6b6b74; }
+  .sw { display: inline-block; width: 26px; height: 6px; border-radius: 3px; vertical-align: middle; margin-right: 8px; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+  ol { font-size: 14px; line-height: 1.75; padding-left: 20px; }
+  ol b { color: #17171c; }
+  h2 { font-size: 17px; margin: 22px 0 6px; }
+  .hint { font-size: 13px; color: #55555e; margin-top: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Breadboard Layout — ESP32 + RC522 + OLED</h1>
+  <div class="sub">Brialyns Art Sign · PrintFlow · male-to-male wires + breadboard (walang soldering)</div>
+
+  <div class="warn">⚠️ RC522 ay <u>3.3V ONLY</u> — pula rail = 3V3 mula sa ESP32, hindi 5V/VIN.</div>
+
+  <div class="card" style="margin-bottom:20px; border:2px solid #6C5CE7">
+    <h2 style="margin-top:0">Para sa board mo (full-size, vertical, galing sa picture)</h2>
+    <ol>
+      <li><b>RC522 — column E, rows R40–R47</b> (sunod-sunod mula taas: SDA, SCK, MOSI, MISO, IRQ=blangko, GND, RST, 3.3V). Ang row number ay hindi importante — basta 8 magkakasunod na rows.</li>
+      <li><b>OLED — column E, rows R50–R53</b> (VCC, GND, SCL, SDA — sundin ang silkscreen!).</li>
+      <li>⚠️ <b>PUTOL ang red/blue rails mo sa gitna (~rows 30–35).</b> Lahat ng power jumpers natin ay nasa <b>ilalim ng putol</b> (rows 40 pataas — kasama ang ESP32 3V3/GND feed) kaya walang problema. Huwag gagamit ng itaas + ilalim nang sabay.</li>
+      <li>Ang kanan (F–J) ay <b>libre</b> — hindi ginagamit.</li>
+      <li>Ang M-M wires ay galing sa <b>A–D butas ng parehong row number</b> (hal. blue wire: kahit saang A/B/C/D ng row 43, papuntang D19) — magkadugtong sila ng column E sa row na yon.</li>
+    </ol>
+    <div class="hint" style="background:#FFF6E5;border:1px solid #F0C369;border-radius:10px;padding:10px 12px">
+      <b>IMPORTANTE — yung OLED mo sa picture:</b> parang <b>7 ang wires</b>! Basahin mo ang maliliit na labels na naka-print sa blue PCB (hal. GND, VCC, SCL, SDA, RES, DC, CS).<br>
+      • Kung <b>GND · VCC · SCL · SDA</b> lang = <b>I2C</b> ✓ (tugma ang code natin) — sabihin mo lang, tuloy tayo.<br>
+      • Kung may <b>RES / DC / CS</b> = <b>SPI variant</b> yan — sabihin mo agad, at <b>ibahin ko ang wiring + code</b> (hindi gagana ang I2C code doon).
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px; border:2px solid #1F9D5B">
+    <h2 style="margin-top:0">Ipapa-solder? Ganito ang dapat kalabasan</h2>
+    <p class="hint" style="margin-top:0">Side view (hiwa sa gitna): 8-pin header na nakatusok sa RC522, solder sa <b>ilalim</b>, mahahabang pins <b>pataas</b>.</p>
+    <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Soldered header cross-section">
+      <defs>
+        <linearGradient id="silver" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#f4f6f8"/>
+          <stop offset="1" stop-color="#b9bdc7"/>
+        </linearGradient>
+      </defs>
+      <!-- PCB -->
+      <rect x="60" y="150" width="520" height="18" rx="2" fill="#2e7d46"/>
+      <rect x="60" y="150" width="520" height="3" fill="#ffffff" opacity="0.45"/>
+      <text x="46" y="165" text-anchor="end" fill="#55555e" font-family="Inter, sans-serif" font-size="12">PCB (RC522)</text>
+      <!-- header pins through the holes -->
+      <g fill="#c0c5cc" stroke="#8a8f9b" stroke-width="1">
+        <rect x="175" y="60" width="10" height="175"/>
+        <rect x="315" y="60" width="10" height="175"/>
+        <rect x="455" y="60" width="10" height="175"/>
+      </g>
+      <!-- plastic spacer -->
+      <rect x="150" y="170" width="40" height="22" rx="4" fill="#22242a"/>
+      <rect x="290" y="170" width="40" height="22" rx="4" fill="#22242a"/>
+      <rect x="430" y="170" width="40" height="22" rx="4" fill="#22242a"/>
+      <text x="120" y="186" text-anchor="end" fill="#55555e" font-family="Inter, sans-serif" font-size="12">plastic spacer</text>
+      <!-- solder fillets (cones) -->
+      <g stroke="#8a8f9b" stroke-width="1">
+        <polygon points="167,168 193,168 185,190 175,190" fill="url(#silver)"/>
+        <polygon points="307,168 333,168 325,190 315,190" fill="url(#silver)"/>
+        <polygon points="447,168 473,168 465,190 455,190" fill="url(#silver)"/>
+      </g>
+      <text x="510" y="186" fill="#55555e" font-family="Inter, sans-serif" font-size="12">solder dito (sa ilalim)</text>
+      <text x="70" y="75" fill="#17171c" font-family="Inter, sans-serif" font-size="12" font-weight="700">mahabang pins PATAAS</text>
+      <text x="70" y="92" fill="#55555e" font-family="Inter, sans-serif" font-size="11">dito ikakabit ang F-F wires</text>
+      <text x="320" y="262" text-anchor="middle" fill="#55555e" font-family="Inter, sans-serif" font-size="11">×8 pins — lahat dapat ganito ang itsura</text>
+    </svg>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">
+      <div style="flex:1;min-width:170px;background:#EDF9F0;border:1px solid #9AD9AE;border-radius:10px;padding:10px 12px">
+        <svg viewBox="0 0 180 100" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" aria-label="Good joint">
+          <rect x="85" y="8" width="10" height="84" fill="#c0c5cc" stroke="#8a8f9b"/>
+          <polygon points="72,66 108,66 96,92 84,92" fill="url(#silver2)" stroke="#8a8f9b"/>
+          <defs><linearGradient id="silver2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f6f8"/><stop offset="1" stop-color="#b9bdc7"/></linearGradient></defs>
+        </svg>
+        <p style="margin:6px 0 0;font-size:13px"><b>✓ TAMA:</b> makintab, korteng maliit na bundok/bulkan, kumakapit sa pin at sa butas.</p>
+      </div>
+      <div style="flex:1;min-width:170px;background:#FDECEC;border:1px solid #F3B7B7;border-radius:10px;padding:10px 12px">
+        <svg viewBox="0 0 180 100" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" aria-label="Cold joint">
+          <rect x="85" y="8" width="10" height="84" fill="#c0c5cc" stroke="#8a8f9b"/>
+          <ellipse cx="90" cy="78" rx="16" ry="12" fill="#9a9aa0" stroke="#6b6b72"/>
+        </svg>
+        <p style="margin:6px 0 0;font-size:13px"><b>✗ MALI (cold joint):</b> mapurol, kulay abo, parang bolang nakapatong lang — hindi kakapit, luluwag din.</p>
+      </div>
+      <div style="flex:1;min-width:170px;background:#FDECEC;border:1px solid #F3B7B7;border-radius:10px;padding:10px 12px">
+        <svg viewBox="0 0 180 100" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" aria-label="Bridged pins">
+          <rect x="65" y="8" width="10" height="84" fill="#c0c5cc" stroke="#8a8f9b"/>
+          <rect x="105" y="8" width="10" height="84" fill="#c0c5cc" stroke="#8a8f9b"/>
+          <rect x="60" y="70" width="60" height="16" rx="4" fill="#b9bdc7" stroke="#8a8f9b"/>
+        </svg>
+        <p style="margin:6px 0 0;font-size:13px"><b>✗ MALI (bridge/short):</b> nagdugtong ang 2 katabing pins — <b>masisira ang module</b>, ipatanggal agad.</p>
+      </div>
+    </div>
+    <div class="hint" style="background:#F4F5FF;border:1px solid #B9B4F5;border-radius:10px;padding:10px 12px;margin-top:12px">
+      <b>Sabihin mo sa gagawa (kopyahin mo ito):</b><br>
+      <i>"Boss, pa-solder po nitong 8-pin male header sa RC522 ko. Pataas po yung mahahabang pins, tapos yung solder po sa ilalim — tig-isang maliit na cone lang po bawat butas, huwag pong pagdudugtungin ang katabing pins. Salamat po!"</i>
+    </div>
+    <div class="hint" style="margin-top:10px">
+      <b>Dalhin:</b> RC522 module + 8-pin header strip. <b>Presyo/oras:</b> ~₱20–50, ~2 minuto. <b>Pagbalik, i-check:</b> 8 pins nakatayo at hindi gumagalaw pag hinila nang dahan-dahan · 8 makintab na cones sa ilalim · walang nagdudugtong (silipin laban sa liwanag).
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Paano gumagana ang breadboard (mabilis lang)</h2>
+    <ol>
+      <li><b>Gitnang guhit (ravine):</b> ang kaliwa (A–E) at kanan (F–J) ay <b>hindi</b> magkadugtong.</li>
+      <li><b>Parehong row number:</b> ang 5 butas sa A–B–C–D–E ay <b>magkadugtong</b> (hal. lahat ng E1..A1 ay iisang linya).</li>
+      <li><b>Pulang (+) at asul (−) rails sa baba:</b> pahaba ang koneksyon — dito ilagay ang <b>3V3</b> (red) at <b>GND</b> (blue) mula sa ESP32.</li>
+      <li><b>RC522:</b> isaksak ang kasamang 8-pin header <b>through</b> sa butas ng module, diretso pababa sa breadboard sa <b>column E, rows 1–8</b> (sunod-sunod: SDA, SCK, MOSI, MISO, IRQ, GND, RST, 3.3V). Ang breadboard clips ang hahawak.</li>
+      <li><b>OLED (4 pins):</b> isaksak sa <b>column E, rows 10–13</b> (sunod sa silkscreen ng module mo — kadalasan VCC, GND, SCL, SDA).</li>
+    </ol>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <svg viewBox="0 0 1000 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kumpletong setup: ESP32 + breadboard + RC522 + OLED">
+      <!-- ESP32 DevKit board (kaliwa) -->
+      <rect x="60" y="430" width="170" height="400" rx="14" fill="#17171c"/>
+      <rect x="118" y="414" width="44" height="16" rx="4" fill="#6b7280"/>
+      <text x="140" y="427" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="8">USB</text>
+      <text x="145" y="460" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="15" font-weight="700">ESP32</text>
+      <text x="145" y="478" text-anchor="middle" fill="#9c9ca6" font-family="Inter, sans-serif" font-size="10">DevKit · USB sa PC</text>
+      <g font-family="Inter, sans-serif" font-size="13" font-weight="600">
+        <circle cx="216" cy="490" r="7" fill="#ff9f43"/><text x="202" y="495" text-anchor="end" fill="#fff">D5</text>
+        <circle cx="216" cy="520" r="7" fill="#f7c948"/><text x="202" y="525" text-anchor="end" fill="#fff">D18</text>
+        <circle cx="216" cy="550" r="7" fill="#2ecc71"/><text x="202" y="555" text-anchor="end" fill="#fff">D23</text>
+        <circle cx="216" cy="580" r="7" fill="#4f8ef7"/><text x="202" y="585" text-anchor="end" fill="#fff">D19</text>
+        <circle cx="216" cy="670" r="7" fill="#a55eea"/><text x="202" y="675" text-anchor="end" fill="#fff">D27</text>
+        <circle cx="216" cy="700" r="7" fill="#ff5252"/><text x="202" y="705" text-anchor="end" fill="#fff">3V3</text>
+        <circle cx="216" cy="728" r="7" fill="#111111"/><text x="202" y="733" text-anchor="end" fill="#fff">GND</text>
+        <circle cx="216" cy="776" r="7" fill="#7a7ae0"/><text x="202" y="781" text-anchor="end" fill="#fff">D22</text>
+        <circle cx="216" cy="806" r="7" fill="#00b3b3"/><text x="202" y="811" text-anchor="end" fill="#fff">D21</text>
+      </g>
+
+      <!-- breadboard body (full-size, vertical) -->
+      <rect x="430" y="100" width="380" height="740" rx="14" fill="#eef0f4"/>
+      <rect x="430" y="100" width="380" height="740" rx="14" fill="none" stroke="#c9ccd4" stroke-width="2"/>
+      <!-- center gap (ravine) -->
+      <line x1="602" y1="150" x2="602" y2="430" stroke="#b9bdc7" stroke-width="4" stroke-dasharray="6 6"/>
+      <line x1="614" y1="150" x2="614" y2="430" stroke="#b9bdc7" stroke-width="4" stroke-dasharray="6 6"/>
+      <line x1="602" y1="740" x2="602" y2="815" stroke="#b9bdc7" stroke-width="4" stroke-dasharray="6 6"/>
+      <line x1="614" y1="740" x2="614" y2="815" stroke="#b9bdc7" stroke-width="4" stroke-dasharray="6 6"/>
+      <!-- power rails (kaliwa) with the middle BREAK -->
+      <rect x="436" y="130" width="6" height="300" rx="3" fill="#ff5252"/>
+      <rect x="436" y="466" width="6" height="344" rx="3" fill="#ff5252"/>
+      <rect x="448" y="130" width="6" height="300" rx="3" fill="#2471a3"/>
+      <rect x="448" y="466" width="6" height="344" rx="3" fill="#2471a3"/>
+      <rect x="432" y="430" width="26" height="36" rx="4" fill="#f4f4f2"/>
+      <text x="445" y="455" text-anchor="middle" fill="#c0392b" font-family="Inter, sans-serif" font-size="18" font-weight="700">⚠</text>
+      <text x="640" y="452" fill="#8f1d1d" font-family="Inter, sans-serif" font-size="12.5" font-weight="700">rails PUTOL dito (~R30–R35)</text>
+      <text x="439" y="122" text-anchor="middle" fill="#c0392b" font-family="Inter, sans-serif" font-size="12" font-weight="700">+</text>
+      <text x="451" y="122" text-anchor="middle" fill="#2471a3" font-family="Inter, sans-serif" font-size="12" font-weight="700">−</text>
+
+      <!-- RC522 rows R40-R47 strips -->
+      <line x1="475" y1="490" x2="555" y2="490" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="520" x2="555" y2="520" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="550" x2="555" y2="550" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="580" x2="555" y2="580" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="610" x2="555" y2="610" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="640" x2="555" y2="640" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="670" x2="555" y2="670" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="700" x2="555" y2="700" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <g font-family="Inter, sans-serif" font-size="11" fill="#8a8f9b">
+        <text x="464" y="494" text-anchor="end">R40</text>
+        <text x="464" y="524" text-anchor="end">R41</text>
+        <text x="464" y="554" text-anchor="end">R42</text>
+        <text x="464" y="584" text-anchor="end">R43</text>
+        <text x="464" y="614" text-anchor="end">R44</text>
+        <text x="464" y="644" text-anchor="end">R45</text>
+        <text x="464" y="674" text-anchor="end">R46</text>
+        <text x="464" y="704" text-anchor="end">R47</text>
+      </g>
+      <!-- RC522 module body -->
+      <rect x="515" y="452" width="135" height="258" rx="10" fill="#232a3d"/>
+      <text x="582" y="470" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="13" font-weight="700">RC522</text>
+      <g font-family="Inter, sans-serif" font-size="11.5" font-weight="600" fill="#fff">
+        <text x="530" y="496">SDA</text>
+        <text x="530" y="526">SCK</text>
+        <text x="530" y="556">MOSI</text>
+        <text x="530" y="586">MISO</text>
+        <text x="530" y="616">IRQ</text>
+        <text x="530" y="646">GND</text>
+        <text x="530" y="676">RST</text>
+        <text x="530" y="706">3.3V</text>
+      </g>
+
+      <!-- OLED rows R50-R53 strips -->
+      <line x1="475" y1="716" x2="555" y2="716" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="746" x2="555" y2="746" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="776" x2="555" y2="776" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <line x1="475" y1="806" x2="555" y2="806" stroke="#dfe2e9" stroke-width="7" stroke-linecap="round"/>
+      <g font-family="Inter, sans-serif" font-size="11" fill="#8a8f9b">
+        <text x="464" y="720" text-anchor="end">R50</text>
+        <text x="464" y="750" text-anchor="end">R51</text>
+        <text x="464" y="780" text-anchor="end">R52</text>
+        <text x="464" y="810" text-anchor="end">R53</text>
+      </g>
+      <!-- OLED module body -->
+      <rect x="515" y="694" width="135" height="124" rx="10" fill="#232a3d"/>
+      <text x="582" y="712" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="13" font-weight="700">OLED</text>
+      <g font-family="Inter, sans-serif" font-size="11.5" font-weight="600" fill="#fff">
+        <text x="530" y="722">VCC</text>
+        <text x="530" y="752">GND</text>
+        <text x="530" y="782">SCL</text>
+        <text x="530" y="812">SDA</text>
+      </g>
+      <text x="582" y="832" text-anchor="middle" fill="#ffd479" font-family="Inter, sans-serif" font-size="10" font-weight="700">sundin ang silkscreen mo!</text>
+
+      <!-- wires: rows -> ESP32 -->
+      <g fill="none" stroke-width="3.5" stroke-linecap="round" opacity="0.95">
+        <path d="M475 490 L226 490" stroke="#ff9f43"/>
+        <path d="M475 520 L226 520" stroke="#f7c948"/>
+        <path d="M475 550 L226 550" stroke="#2ecc71"/>
+        <path d="M475 580 L226 580" stroke="#4f8ef7"/>
+        <path d="M475 670 L226 670" stroke="#a55eea"/>
+        <path d="M475 776 L226 776" stroke="#7a7ae0"/>
+        <path d="M475 806 L226 806" stroke="#00b3b3"/>
+        <path d="M216 700 L439 700" stroke="#ff5252"/>
+        <path d="M216 728 L451 728" stroke="#2b2b2b"/>
+      </g>
+      <!-- row -> rail jumpers (endpoint dots = tunay na koneksyon) -->
+      <g fill="none" stroke-width="3.5" stroke-linecap="round" opacity="0.95">
+        <path d="M500 700 L439 712" stroke="#ff5252"/>
+        <path d="M505 620 L451 640" stroke="#2b2b2b"/>
+        <path d="M500 716 L439 728" stroke="#ff5252"/>
+        <path d="M505 746 L451 766" stroke="#2b2b2b"/>
+      </g>
+      <g>
+        <circle cx="439" cy="712" r="4" fill="#ff5252"/>
+        <circle cx="451" cy="640" r="4" fill="#2b2b2b"/>
+        <circle cx="439" cy="728" r="4" fill="#ff5252"/>
+        <circle cx="451" cy="766" r="4" fill="#2b2b2b"/>
+      </g>
+      <!-- IRQ: walang wire -->
+      <path d="M475 610 L450 610" stroke="#6b7280" stroke-width="3" stroke-dasharray="5 6"/>
+      <text x="440" y="614" text-anchor="end" fill="#8a8f9b" font-family="Inter, sans-serif" font-size="11" font-weight="600">R44 blangko</text>
+      <text x="730" y="868" text-anchor="middle" fill="#8a8f9b" font-family="Inter, sans-serif" font-size="12">F–J (kanang kalahati): libre — walang ginagamit</text>
+    </svg>
+
+    <table>
+      <thead><tr><th>Breadboard row</th><th>Wire papunta</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">R40 (RC522 SDA)</td><td><span class="sw" style="background:#ff9f43"></span>M-M wire → <span class="mono">D5</span></td></tr>
+        <tr><td class="mono">R41 (RC522 SCK)</td><td><span class="sw" style="background:#f7c948"></span>M-M wire → <span class="mono">D18</span></td></tr>
+        <tr><td class="mono">R42 (RC522 MOSI)</td><td><span class="sw" style="background:#2ecc71"></span>M-M wire → <span class="mono">D23</span></td></tr>
+        <tr><td class="mono">R43 (RC522 MISO)</td><td><span class="sw" style="background:#4f8ef7"></span>M-M wire → <span class="mono">D19</span></td></tr>
+        <tr><td class="mono">R44 (RC522 IRQ)</td><td><span class="sw" style="background:#6b7280"></span>wala — iwanang blangko</td></tr>
+        <tr><td class="mono">R45 (RC522 GND)</td><td><span class="sw" style="background:#111"></span>maikling jumper → <b>asul (−) rail</b></td></tr>
+        <tr><td class="mono">R46 (RC522 RST)</td><td><span class="sw" style="background:#a55eea"></span>M-M wire → <span class="mono">D27</span></td></tr>
+        <tr><td class="mono">R47 (RC522 3.3V)</td><td><span class="sw" style="background:#ff5252"></span>maikling jumper → <b>pula (+) rail</b></td></tr>
+        <tr><td class="mono">R50 (OLED VCC)</td><td><span class="sw" style="background:#ff5252"></span>maikling jumper → <b>pula (+) rail</b></td></tr>
+        <tr><td class="mono">R51 (OLED GND)</td><td><span class="sw" style="background:#111"></span>maikling jumper → <b>asul (−) rail</b></td></tr>
+        <tr><td class="mono">R52 (OLED SCL)</td><td><span class="sw" style="background:#7a7ae0"></span>M-M wire → <span class="mono">D22</span></td></tr>
+        <tr><td class="mono">R53 (OLED SDA)</td><td><span class="sw" style="background:#00b3b3"></span>M-M wire → <span class="mono">D21</span></td></tr>
+        <tr><td class="mono">Pula (+) rail (ibaba)</td><td><span class="sw" style="background:#ff5252"></span>M-M wire ← <span class="mono">ESP32 3V3</span></td></tr>
+        <tr><td class="mono">Asul (−) rail (ibaba)</td><td><span class="sw" style="background:#111"></span>M-M wire ← <span class="mono">ESP32 GND</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <ol>
+      <li><b>RC522:</b> isaksak ang 8-pin header <b>through</b> sa butas ng RC522 pababa sa breadboard, <b>column E, rows 40–47</b> (sunud-sunod mula taas: SDA, SCK, MOSI, MISO, IRQ, GND, RST, 3.3V). Ang clips sa ilalim ang hahawak — kaya mas stable ito kaysa nakalawit na wires.</li>
+      <li><b>OLED:</b> 4 pins sa <b>column E, rows 50–53</b> (VCC, GND, SCL, SDA — sundin ang silkscreen ng module mo).</li>
+      <li><b>Power rails (IBABA LANG — ilalim ng putol):</b> isang M-M wire mula <b>ESP32 3V3 → pula rail</b>, isang M-M wire mula <b>ESP32 GND → asul rail</b>. Tapos maikling jumpers: R45/R51 → asul rail, R47/R50 → pula rail.</li>
+      <li><b>Signals:</b> M-M wires mula sa mga rows (R40, R41, R42, R43, R46, R52, R53) papuntang ESP32 pins (D5, D18, D23, D19, D27, D22, D21) base sa table.</li>
+      <li><b>Iwanang blangko:</b> R44 (IRQ) at ang kanang kalahati (F–J) ng breadboard.</li>
+      <li>Walang binago sa firmware — parehong GPIO numbers pa rin. Pag naka-wire na, USB pa rin muna ang power; saka mo ililipat sa charger pag tapos ang flash.</li>
+    </ol>
+    <div class="hint">
+      <b>Kung ayaw pa rin gumana pagkatapos:</b> (1) baliktarin ang tingin sa center gap — siguraduhing nasa COLUMN E (kaliwang kalahati, hindi lampas sa guhit) lahat ng module pins; (2) ang maikling jumpers ay dapat nasa parehong row number (hal. R45 at blue rail jumper ay parehong row 45); (3) kung maluwag ang isang butas, ilipat ng katabing column sa parehong row (hal. A45 sa halip na C45) — magkadugtong pa rin sila.
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,2 @@
+# Exported firmware binaries (arduino-cli compile -e) - rebuild anytime.
+build/
