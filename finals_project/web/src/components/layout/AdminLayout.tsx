@@ -3,16 +3,16 @@
 import { useState, ReactNode } from "react";
 import { Sidebar, MobileSidebarTrigger, MobileSidebarOverlay } from "./Sidebar";
 import { Header } from "./Header";
+import { ChatAssistant } from "@/components/ui";
 
 interface AdminLayoutProps {
  children: ReactNode;
  title: string;
  subtitle?: string;
  headerActions?: ReactNode;
- onSearch?: (value: string) => void;
 }
 
-export function AdminLayout({ children, title, subtitle, headerActions, onSearch }: AdminLayoutProps) {
+export function AdminLayout({ children, title, subtitle, headerActions }: AdminLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Canvas stays light in both modes; dark mode floats dark panels on it.
@@ -39,15 +39,17 @@ export function AdminLayout({ children, title, subtitle, headerActions, onSearch
        title={title}
        subtitle={subtitle}
        actions={headerActions}
-       onSearch={onSearch}
       />
 
        {/* Page Content */}
        <div className="p-4">
         {children}
        </div>
-     </div>
-    </main>
-  </div>
- );
-}
+      </div>
+     </main>
+
+     {/* Floating AI assistant (Cloudflare Worker proxy) */}
+     <ChatAssistant />
+    </div>
+   );
+ }

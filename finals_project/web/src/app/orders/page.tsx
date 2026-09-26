@@ -257,7 +257,6 @@ export default function OrdersPage() {
    <AdminLayout
     title="Orders"
     subtitle="Monitor customer orders and priorities"
-    onSearch={setSearchValue}
    >
     {feedError && (
      <FeedErrorBanner

@@ -177,7 +177,7 @@ export default function InventoryPage() {
   };
 
    return (
-   <AdminLayout title="Inventory" subtitle="Track materials and stock levels" onSearch={setSearch}>
+    <AdminLayout title="Inventory" subtitle="Track materials and stock levels">
     {feedError && (
      <FeedErrorBanner
       message={feedError}

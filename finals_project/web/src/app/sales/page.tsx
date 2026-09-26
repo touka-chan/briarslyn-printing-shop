@@ -600,7 +600,6 @@ export default function SalesPage() {
     <AdminLayout
      title="Sales"
      subtitle="Revenue and transaction overview from cashier activity"
-     onSearch={setSearch}
     >
     {/* Print-only report header (hidden on screen; see globals.css). */}
     <div className="print-only mb-6">

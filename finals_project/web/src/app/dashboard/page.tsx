@@ -369,7 +369,6 @@ export default function DashboardPage() {
   <AdminLayout
     title="Brialyns Art Sign Dashboard"
     subtitle="Overview of orders, production and inventory"
-    onSearch={setSearchValue}
    >
     {feedError && (
      <FeedErrorBanner

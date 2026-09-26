@@ -272,7 +272,6 @@ export default function ProductionPage() {
    <AdminLayout
     title="Production"
     subtitle="Production queue by priority"
-    onSearch={setSearch}
    >
     {feedError && (
      <FeedErrorBanner

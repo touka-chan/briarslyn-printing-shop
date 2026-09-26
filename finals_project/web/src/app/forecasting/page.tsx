@@ -237,7 +237,7 @@ export default function ForecastingPage() {
   };
 
    return (
-    <AdminLayout title="Forecasting" subtitle="Inventory forecasts and reorder planning" headerActions={<Button variant="secondary" onClick={handleExport} disabled={searched.length === 0}><Download className="w-4 h-4" />Export</Button>} onSearch={setSearch}>
+    <AdminLayout title="Forecasting" subtitle="Inventory forecasts and reorder planning" headerActions={<Button variant="secondary" onClick={handleExport} disabled={searched.length === 0}><Download className="w-4 h-4" />Export</Button>}>
     {feedError && (
      <FeedErrorBanner
       message={feedError}

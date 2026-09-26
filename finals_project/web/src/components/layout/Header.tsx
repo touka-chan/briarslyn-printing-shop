@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import {
   Bell,
-  Search,
   User,
   LogOut,
   Moon,
@@ -51,8 +50,6 @@ interface HeaderProps {
  title: string;
  subtitle?: string;
  actions?: ReactNode;
- onSearch?: (value: string) => void;
- searchPlaceholder?: string;
 }
 
 type Theme = "light" | "dark";
@@ -126,12 +123,9 @@ export function Header({
  title,
  subtitle,
  actions,
- onSearch,
- searchPlaceholder = "Search orders, inventory...",
 }: HeaderProps) {
  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
- const [searchValue, setSearchValue] = useState("");
  const [theme, setTheme] = useState<Theme>("light");
  const [mounted, setMounted] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -168,6 +162,8 @@ export function Header({
   });
   const usersRef = useRef<UserType[]>([]);
   const desktopRef = useRef<string>("unsupported");
+  // Auto-prompt must fire only once per mount (StrictMode double-mounts).
+  const autoPrompted = useRef(false);
   const [activity, setActivity] = useState<LiveEvent[]>(() => getActivityFeed());
   const [desktopAlerts, setDesktopAlerts] = useState<string>("unsupported");
 
@@ -177,6 +173,22 @@ export function Header({
    if (typeof window !== "undefined" && "Notification" in window) {
     desktopRef.current = Notification.permission;
     setDesktopAlerts(Notification.permission);
+    // Default-on behavior: prompt automatically on first load instead of
+    // waiting for the user to find the "Desktop alerts" button. Browsers
+    // still require one explicit Allow click per browser — after that the
+    // choice persists and this never asks again. The button stays as
+    // fallback (and a hint shows when the user previously blocked it).
+    if (Notification.permission === "default" && !autoPrompted.current) {
+     autoPrompted.current = true;
+     Notification.requestPermission()
+      .then((p) => {
+       desktopRef.current = p;
+       setDesktopAlerts(p);
+      })
+      .catch(() => {
+       // Prompt dismissed/blocked - the button + hint cover it.
+      });
+    }
    }
   }, []);
 
@@ -397,12 +409,7 @@ export function Header({
   applyTheme(next);
  };
 
- const handleSearchChange = (value: string) => {
-  setSearchValue(value);
-  onSearch?.(value);
- };
-
-  const requestSignOut = () => {
+ const requestSignOut = () => {
    setSignOutOpen(true);
   };
 
@@ -644,24 +651,6 @@ export function Header({
      )}
     </div>
 
-     {/* Center: Search (hidden on mobile). Only rendered when the page
-         wires a handler - an unwired box would silently filter nothing. */}
-     {onSearch && (
-      <div className="hidden md:flex flex-1 max-w-xl mx-8">
-       <div className="relative w-full">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-printflow-on-surface-variant w-5 h-5 pointer-events-none" />
-        <input
-         type="text"
-         placeholder={searchPlaceholder}
-         value={searchValue}
-         onChange={(e) => handleSearchChange(e.target.value)}
-         className="w-full px-4 py-2 pl-10 text-sm bg-printflow-surface-container rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent transition-all"
-         aria-label="Global search"
-        />
-       </div>
-      </div>
-     )}
-
     {/* Right: Actions */}
     <div className="flex items-center gap-3">
      {actions}
@@ -721,6 +710,14 @@ export function Header({
              >
               Desktop alerts
              </button>
+            )}
+            {desktopAlerts === "denied" && (
+             <span
+              className="text-xs text-printflow-on-surface-variant"
+              title="Notifications are blocked for this site. Click the lock/tune icon in the address bar > Site settings > Notifications > Allow."
+             >
+              Alerts blocked
+             </span>
             )}
             {feed.length > 0 && (
              <button

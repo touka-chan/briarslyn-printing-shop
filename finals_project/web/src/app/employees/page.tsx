@@ -1127,7 +1127,6 @@ export default function EmployeesPage() {
     <AdminLayout
       title="Employees"
       subtitle="Employee HR records - profiles, contact info, roles, and addresses"
-      onSearch={setSearch}
     >
       {feedError && (
         <FeedErrorBanner

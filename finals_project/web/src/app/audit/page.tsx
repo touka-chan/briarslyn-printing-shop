@@ -258,7 +258,6 @@ export default function AuditPage() {
     <AdminLayout
       title="Audit Log"
       subtitle="Immutable system activity trail (append-only)"
-      onSearch={setSearch}
       headerActions={
         <Button variant="secondary" onClick={handleExport}>
           <Download className="w-4 h-4" />

@@ -317,7 +317,7 @@ export default function UsersPage() {
   };
 
  return (
-   <AdminLayout title="Users" subtitle="Team sign-in accounts" onSearch={setSearch}>
+    <AdminLayout title="Users" subtitle="Team sign-in accounts">
     {feedError && (
      <FeedErrorBanner
       message={feedError}
