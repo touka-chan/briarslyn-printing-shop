@@ -36,9 +36,10 @@ import {
   Mail,
   KeyRound,
 } from "lucide-react";
-import { Modal, Button } from "@/components/ui";
+import { Modal, Button, Turnstile } from "@/components/ui";
 import { findUserForPasswordReset } from "@/lib/services/users";
 import { requestPasswordReset } from "@/lib/services/password-reset";
+import { WORKER_BASE_URL } from "@/lib/worker";
 import { useAuth } from "@/lib/auth";
 
 
@@ -53,6 +54,11 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
+  // Cloudflare Turnstile ("verify you are human") state. Tokens are
+  // single-use: bump captchaNonce to remount the widget for a fresh one.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaNonce, setCaptchaNonce] = useState(0);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   // Forgot-password modal state.
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
@@ -75,12 +81,40 @@ export default function LoginPage() {
    setEmailTouched(true);
    setPasswordTouched(true);
    if (!email || !password) return;
+   // Human check first: no token, no sign-in attempt.
+   if (!captchaToken) {
+    setVerifyError("Please verify you are human first.");
+    return;
+   }
    setSubmitting(true);
+   setVerifyError(null);
    try {
+    // Verify the Turnstile token server-side via our Worker (the secret
+    // never touches the browser). Tokens are single-use.
+    let human = false;
+    try {
+     const res = await fetch(`${WORKER_BASE_URL}/verify-turnstile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: captchaToken }),
+     });
+     human = (await res.json())?.ok === true;
+    } catch {
+     human = false;
+    }
+    if (!human) {
+     setVerifyError("Human verification failed — please try again.");
+     setCaptchaToken(null);
+     setCaptchaNonce((n) => n + 1);
+     return;
+    }
     await signIn(email, password, keepSignedIn);
     router.push("/dashboard");
    } catch {
     // `useAuth().error` already carries the humanized message.
+    // Token is spent either way — force a fresh challenge.
+    setCaptchaToken(null);
+    setCaptchaNonce((n) => n + 1);
    } finally {
     setSubmitting(false);
    }
@@ -135,7 +169,7 @@ export default function LoginPage() {
   };
 
   return (
-   <div className="min-h-screen flex flex-col items-center justify-center bg-printflow-bg px-4 py-10 sm:px-6 relative overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-printflow-bg px-4 py-6 sm:px-6 relative overflow-hidden">
     {/* Backdrop wash - neutral gray to match the admin canvas. */}
     <div
      aria-hidden
@@ -271,21 +305,21 @@ export default function LoginPage() {
      </aside>
 
      {/* ----------------- RIGHT: FORM ----------------- */}
-     <main className="flex items-center justify-center px-6 py-10 sm:px-12">
-      <div className="w-full max-w-md">
-       <header className="mb-7">
-        <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
-         Welcome back
-        </h1>
-        <p className="type-body text-printflow-on-surface-variant mt-2">
-         Sign in to monitor orders, inventory, and production.
-        </p>
-       </header>
+      <main className="flex items-center justify-center px-6 py-6 sm:px-12">
+       <div className="w-full max-w-md">
+        <header className="mb-4">
+         <h1 className={`type-headline font-bold text-printflow-on-surface ${poppins.className}`}>
+          Welcome back
+         </h1>
+         <p className="type-body text-printflow-on-surface-variant mt-1">
+          Sign in to monitor orders, inventory, and production.
+         </p>
+        </header>
 
-       <form
-        onSubmit={handleSubmit}
-        noValidate
-        className="space-y-5"
+        <form
+         onSubmit={handleSubmit}
+         noValidate
+         className="space-y-3"
         aria-describedby={error ? "login-error" : undefined}
        >
         {/* Email */}
@@ -321,9 +355,9 @@ export default function LoginPage() {
             : "border-printflow-outline-variant",
           ].join(" ")}
          />
-          {/* Reserved slot: errors appear without pushing layout. */}
-          <div className="min-h-[22px]">
-           {emailIsInvalid && (
+           {/* Reserved slot: errors appear without pushing layout. */}
+           <div className="min-h-[18px]">
+            {emailIsInvalid && (
             <p
              id={`${emailId}-error`}
              className="text-xs text-printflow-error mt-1.5"
@@ -392,9 +426,9 @@ export default function LoginPage() {
             )}
           </button>
          </div>
-          {/* Reserved slot: errors appear without pushing layout. */}
-          <div className="min-h-[22px]">
-           {passwordEmpty ? (
+           {/* Reserved slot: errors appear without pushing layout. */}
+           <div className="min-h-[18px]">
+            {passwordEmpty ? (
             <p
              id={`${passwordId}-error`}
              className="text-xs text-printflow-error mt-1.5"
@@ -468,6 +502,27 @@ export default function LoginPage() {
 
 
 
+        {/* Human verification (Cloudflare Turnstile) */}
+        <div>
+          <Turnstile
+            key={captchaNonce}
+            onVerify={(t) => {
+              setCaptchaToken(t);
+              setVerifyError(null);
+            }}
+            onExpire={() => setCaptchaToken(null)}
+          />
+          {verifyError ? (
+            <p role="alert" className="text-xs text-printflow-error mt-1.5">
+              {verifyError}
+            </p>
+          ) : !captchaToken ? (
+            <p className="text-xs text-printflow-on-surface-variant mt-1.5">
+              Verify you are human to enable Sign in.
+            </p>
+          ) : null}
+        </div>
+
         {/* Misconfig banner */}
         {!configured && (
          <div
@@ -489,9 +544,9 @@ export default function LoginPage() {
         <div className="relative">
          <button
           type="submit"
-          disabled={submitting || !configured}
-          className={`mt-1 inline-flex items-center justify-center gap-2 w-full
-                     px-6 py-3 text-base font-bold rounded-lg text-white
+          disabled={submitting || !configured || !captchaToken}
+          className={`inline-flex items-center justify-center gap-2 w-full
+                     px-6 py-2.5 text-base font-bold rounded-lg text-white
                      bg-[#17171c] hover:bg-black
                      focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black
                      disabled:opacity-50 disabled:cursor-not-allowed
@@ -530,8 +585,8 @@ export default function LoginPage() {
        {/* "First time here" - disabled by design: this is an internal
            admin tool, not a self-serve product. Owner creates accounts
            via the Users page (or directly in Firebase Auth). */}
-       <p className="text-sm text-printflow-on-surface-variant text-center mt-6">
-        First time here?{" "}
+        <p className="text-sm text-printflow-on-surface-variant text-center mt-4">
+         First time here?{" "}
         <span
          className="text-printflow-on-surface-variant/70 cursor-help
                     border-b border-dotted border-printflow-outline-variant"
@@ -542,9 +597,9 @@ export default function LoginPage() {
         .
        </p>
 
-        <p className="text-xs text-printflow-on-surface-variant/70 text-center mt-4">
-         Brialyns Art Sign, Sta. Cruz, Laguna
-        </p>
+         <p className="text-xs text-printflow-on-surface-variant/70 text-center mt-2">
+          Brialyns Art Sign, Sta. Cruz, Laguna
+         </p>
        </div>
       </main>
      </div>

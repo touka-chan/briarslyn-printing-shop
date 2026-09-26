@@ -16,5 +16,6 @@ export { PaymentBadge, toPaymentStatus } from "./PaymentBadge";
 export { ToastProvider, useToast } from "./Toast";
 export { FeedErrorBanner } from "./FeedErrorBanner";
 export { CountUp } from "./CountUp";
+export { Turnstile } from "./Turnstile";
 export { ChatAssistant } from "./ChatAssistant";
 export { LayoutPreview } from "./LayoutPreview";

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { MessageCircle, X, Send, Bot, User } from "lucide-react";
+import { WORKER_BASE_URL } from "@/lib/worker";
 
 /** Inline pieces: **bold**, *italic*, `code`. Built as nodes, never HTML. */
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
@@ -142,9 +143,7 @@ import type { Order, InventoryItem, User as UserType, AuditLogEntry } from "@/ty
  * Endpoint resolution: NEXT_PUBLIC_AI_CHAT_URL when set, otherwise the
  * deployed Worker URL.
  */
-const WORKER_URL =
-  process.env.NEXT_PUBLIC_AI_CHAT_URL ??
-  "https://brialyns-ai-chat.lancebradly00.workers.dev";
+const WORKER_URL = WORKER_BASE_URL;
 
 interface ChatMessage {
   role: "user" | "assistant";
